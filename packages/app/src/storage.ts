@@ -11,7 +11,10 @@ export interface StoredAsset {
 }
 
 export interface ProjectLayout {
-  pages: Record<string, { x: number; y: number; width: number; height: number }>;
+  pages: Record<
+    string,
+    { x: number; y: number; width: number; height: number }
+  >;
 }
 
 export interface BackendInfo {

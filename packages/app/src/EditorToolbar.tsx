@@ -24,7 +24,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -33,7 +37,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 interface EditorToolbarProps {
@@ -98,7 +106,7 @@ function ToolbarButton({
               active &&
                 (variant === "document"
                   ? "bg-slate-900 text-white hover:bg-slate-900"
-                  : "border-sky-200 bg-sky-50 text-sky-700 shadow-sm")
+                  : "border-sky-200 bg-sky-50 text-sky-700 shadow-sm"),
             )}
           >
             {icon}
@@ -170,7 +178,9 @@ export function EditorToolbar({
   };
 
   const openLinkDialog = () => {
-    const existing = editor.getAttributes("link").dataMarkdownSrc as string | null;
+    const existing = editor.getAttributes("link").dataMarkdownSrc as
+      | string
+      | null;
     setLinkValue(existing || "https://");
     setLinkDialogOpen(true);
   };
@@ -208,26 +218,32 @@ export function EditorToolbar({
     "min-h-11",
     isDocumentToolbar
       ? "flex flex-wrap items-center gap-1"
-      : "mb-4 flex flex-wrap items-center gap-2 border-b border-slate-200/80 pb-4"
+      : "mb-4 flex flex-wrap items-center gap-2 border-b border-slate-200/80 pb-4",
   );
   const selectTriggerClass = cn(
     "h-8 text-sm font-medium text-slate-700",
     isDocumentToolbar
       ? "min-w-32 rounded-lg border border-transparent bg-transparent px-2.5 hover:bg-slate-100 focus-visible:border-slate-300 focus-visible:ring-slate-300/50"
-      : "min-w-40 rounded-xl border-transparent bg-transparent px-3 hover:border-slate-300 hover:bg-white focus-visible:border-sky-400 focus-visible:ring-sky-300/50"
+      : "min-w-40 rounded-xl border-transparent bg-transparent px-3 hover:border-slate-300 hover:bg-white focus-visible:border-sky-400 focus-visible:ring-sky-300/50",
   );
   const overflowActionClass =
     "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100";
 
   return (
     <>
-      <div className={toolbarClass} onPointerDown={(event) => event.stopPropagation()}>
+      <div
+        className={toolbarClass}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <div className={sectionClass}>
           <Select
             value={blockType}
             onValueChange={(value) => handleBlockChange(value as BlockType)}
           >
-            <SelectTrigger aria-label="Block type" className={selectTriggerClass}>
+            <SelectTrigger
+              aria-label="Block type"
+              className={selectTriggerClass}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent align="start" className="rounded-2xl">
@@ -441,8 +457,8 @@ export function EditorToolbar({
             <DialogHeader>
               <DialogTitle>Edit link</DialogTitle>
               <DialogDescription>
-                Enter a URL to apply to the current selection, or clear the field to remove the
-                link.
+                Enter a URL to apply to the current selection, or clear the
+                field to remove the link.
               </DialogDescription>
             </DialogHeader>
             <Input

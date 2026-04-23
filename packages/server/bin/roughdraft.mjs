@@ -25,7 +25,9 @@ function resolveTargetPath(inputPath) {
     if (stat.isFile()) {
       return {
         projectDir: path.dirname(resolvedPath),
-        openPath: looksLikeMarkdownFile ? resolvedPath : path.dirname(resolvedPath),
+        openPath: looksLikeMarkdownFile
+          ? resolvedPath
+          : path.dirname(resolvedPath),
       };
     }
   } catch {
@@ -42,7 +44,10 @@ function resolveTargetPath(inputPath) {
 
 function hasChromeAppMode() {
   if (process.platform !== "darwin") return false;
-  return spawnSync("open", ["-Ra", "Google Chrome"], { stdio: "ignore" }).status === 0;
+  return (
+    spawnSync("open", ["-Ra", "Google Chrome"], { stdio: "ignore" }).status ===
+    0
+  );
 }
 
 function openDetached(command, args) {
@@ -84,7 +89,9 @@ function openRoughdraftUrl(url) {
 function buildTargetUrl(port, openPath) {
   const url = new URL(`http://localhost:${port}`);
   const normalizedPath = openPath.replace(/\\/g, "/");
-  url.pathname = normalizedPath.startsWith("/") ? normalizedPath : `/${normalizedPath}`;
+  url.pathname = normalizedPath.startsWith("/")
+    ? normalizedPath
+    : `/${normalizedPath}`;
   return url.toString();
 }
 
@@ -120,9 +127,13 @@ const runningPort = await findRunningRoughdraftPort(preferredPort);
 const port = runningPort ?? (await findAvailablePort(preferredPort));
 
 if (runningPort) {
-  console.log(`Reusing Roughdraft already running at http://localhost:${runningPort}`);
+  console.log(
+    `Reusing Roughdraft already running at http://localhost:${runningPort}`,
+  );
 } else if (port !== preferredPort) {
-  console.log(`Preferred port ${preferredPort} is busy, using ${port} instead.`);
+  console.log(
+    `Preferred port ${preferredPort} is busy, using ${port} instead.`,
+  );
   createServer(port, projectDir);
   await waitForServer(port);
 } else {

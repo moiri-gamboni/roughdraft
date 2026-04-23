@@ -55,11 +55,13 @@ export function PageCard({
   const editorRef = useRef<Editor | null>(null);
   const lastFocusRequestKeyRef = useRef<string | null>(null);
   const scale = useCanvasScale();
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "error">("idle");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "error">(
+    "idle",
+  );
 
   const resolveFileUrl = useCallback(
     (path: string) => backend.resolveFileUrl(path),
-    [backend]
+    [backend],
   );
 
   const htmlContent = useMemo(
@@ -67,7 +69,7 @@ export function PageCard({
       toHtml(page.content, {
         resolveFileUrl,
       }),
-    [page.content, resolveFileUrl]
+    [page.content, resolveFileUrl],
   );
 
   const insertFiles = useCallback(
@@ -75,7 +77,9 @@ export function PageCard({
       const currentEditor = editorRef.current;
       if (!currentEditor || files.length === 0) return;
 
-      const assets = await Promise.all(files.map((file) => backend.saveAsset(file)));
+      const assets = await Promise.all(
+        files.map((file) => backend.saveAsset(file)),
+      );
       const markdown = assets
         .map((asset, index) => {
           const file = files[index];
@@ -92,11 +96,11 @@ export function PageCard({
         .insertContent(
           toHtml(markdown, {
             resolveFileUrl,
-          })
+          }),
         )
         .run();
     },
-    [backend, resolveFileUrl]
+    [backend, resolveFileUrl],
   );
 
   const editor = useEditor(
@@ -147,7 +151,7 @@ export function PageCard({
         }, 500);
       },
     },
-    [page.id]
+    [page.id],
   );
 
   editorRef.current = editor;
@@ -197,7 +201,7 @@ export function PageCard({
       (event.target as HTMLElement).setPointerCapture(event.pointerId);
       onSelect(page.id);
     },
-    [mode, onSelect, page.id, x, y]
+    [mode, onSelect, page.id, x, y],
   );
 
   const handleDragPointerMove = useCallback(
@@ -207,7 +211,7 @@ export function PageCard({
       const dy = (event.clientY - dragStart.current.pageY) / scale;
       onReposition(page.id, dragStart.current.x + dx, dragStart.current.y + dy);
     },
-    [mode, onReposition, page.id, scale]
+    [mode, onReposition, page.id, scale],
   );
 
   const handleDragPointerUp = useCallback(() => {
@@ -219,11 +223,13 @@ export function PageCard({
       event.stopPropagation();
       onSelect?.(page.id);
     },
-    [onSelect, page.id]
+    [onSelect, page.id],
   );
 
   const isCanvasMode = mode === "canvas";
-  const chromeTitle = isCanvasMode ? getCanvasFilenameLabel(page.id) : page.title;
+  const chromeTitle = isCanvasMode
+    ? getCanvasFilenameLabel(page.id)
+    : page.title;
   const toolbar = (
     <EditorToolbar
       editor={editor}
@@ -252,7 +258,9 @@ export function PageCard({
           onPointerMove={handleDragPointerMove}
           onPointerUp={handleDragPointerUp}
         >
-          <span className="flex-1 truncate text-sm text-slate-500">{chromeTitle}</span>
+          <span className="flex-1 truncate text-sm text-slate-500">
+            {chromeTitle}
+          </span>
           {saveState === "saving" ? (
             <span className="text-[11px] font-medium tracking-[0.08em] text-slate-400 uppercase">
               Saving…
@@ -265,6 +273,7 @@ export function PageCard({
           ) : null}
           {canDelete ? (
             <button
+              type="button"
               className="inline-flex size-7 items-center justify-center rounded-full border border-transparent text-lg leading-none text-slate-400 transition hover:border-rose-100 hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
@@ -284,7 +293,9 @@ export function PageCard({
         }`}
         onPointerDown={handleBodyPointerDown}
       >
-        {isCanvasMode || !documentToolbarHost ? toolbar : createPortal(toolbar, documentToolbarHost)}
+        {isCanvasMode || !documentToolbarHost
+          ? toolbar
+          : createPortal(toolbar, documentToolbarHost)}
         <div className={isCanvasMode ? undefined : "pb-24"}>
           <EditorContextMenu editor={editor} backend={backend}>
             <EditorContent editor={editor} />

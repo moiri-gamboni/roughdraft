@@ -40,7 +40,9 @@ function spawnPnpm(args, extraEnv = {}) {
   });
 }
 
-const apiPort = await findAvailablePort(parseInt(process.env.API_PORT || "3001", 10));
+const apiPort = await findAvailablePort(
+  parseInt(process.env.API_PORT || "3001", 10),
+);
 
 console.log(`Using API port ${apiPort}.`);
 

@@ -68,7 +68,7 @@ function sanitizeFilename(filename: string): string {
 
 function nextAssetPath(
   assets: Record<string, LocalAssetRecord>,
-  filename: string
+  filename: string,
 ): string {
   const safeName = sanitizeFilename(filename);
   const dotIndex = safeName.lastIndexOf(".");
@@ -88,7 +88,8 @@ function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("Failed to read file"));
     reader.readAsDataURL(file);
   });
 }
@@ -157,7 +158,8 @@ export class LocalStorageBackend implements StorageBackend {
     // Also add to project layout
     const project = readProject();
     const existing = Object.values(project.pages);
-    const maxX = existing.length > 0 ? Math.max(...existing.map((p) => p.x + p.width)) : 0;
+    const maxX =
+      existing.length > 0 ? Math.max(...existing.map((p) => p.x + p.width)) : 0;
     project.pages[id] = { x: maxX + 20, y: 0, width: 400, height: 500 };
     writeProject(project);
 

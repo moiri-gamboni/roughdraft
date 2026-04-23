@@ -1,4 +1,7 @@
-import { FileTree as FileTreeModel, preparePresortedFileTreeInput } from "@pierre/trees";
+import {
+  FileTree as FileTreeModel,
+  preparePresortedFileTreeInput,
+} from "@pierre/trees";
 import { FileTree as FileTreeView } from "@pierre/trees/react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
@@ -33,14 +36,18 @@ function isMarkdownPath(path: string): boolean {
   return path.toLowerCase().endsWith(".md");
 }
 
-function toCanonicalRelativePath(projectPath: string, currentPath: string | null): string | null {
+function toCanonicalRelativePath(
+  projectPath: string,
+  currentPath: string | null,
+): string | null {
   if (!currentPath) return null;
 
   const normalizedProjectPath = toSlashPath(projectPath).replace(/\/+$/, "");
   const normalizedCurrentPath = toSlashPath(currentPath).replace(/\/+$/, "");
 
   if (normalizedCurrentPath === normalizedProjectPath) return null;
-  if (!normalizedCurrentPath.startsWith(`${normalizedProjectPath}/`)) return null;
+  if (!normalizedCurrentPath.startsWith(`${normalizedProjectPath}/`))
+    return null;
 
   return normalizedCurrentPath.slice(normalizedProjectPath.length + 1);
 }
@@ -54,14 +61,19 @@ function joinProjectPath(projectPath: string, relativePath: string): string {
   return relativePath
     .split("/")
     .filter(Boolean)
-    .reduce((result, segment) => `${result}${separator}${segment}`, normalizedProjectPath);
+    .reduce(
+      (result, segment) => `${result}${separator}${segment}`,
+      normalizedProjectPath,
+    );
 }
 
 function getInitialExpandedPaths(activePath: string | null): string[] {
   if (!activePath) return [];
 
   const segments = activePath.replace(/\/$/, "").split("/").filter(Boolean);
-  const directorySegments = activePath.endsWith("/") ? segments : segments.slice(0, -1);
+  const directorySegments = activePath.endsWith("/")
+    ? segments
+    : segments.slice(0, -1);
   const expandedPaths: string[] = [];
 
   for (let index = 0; index < directorySegments.length; index += 1) {
@@ -75,7 +87,7 @@ function openSelectedPath(
   projectPath: string,
   relativePath: string,
   buildLocationForPath: ProjectTreeSidebarProps["buildLocationForPath"],
-  onOpenMarkdownPage?: ProjectTreeSidebarProps["onOpenMarkdownPage"]
+  onOpenMarkdownPage?: ProjectTreeSidebarProps["onOpenMarkdownPage"],
 ): void {
   if (relativePath.endsWith("/")) return;
 
@@ -85,13 +97,15 @@ function openSelectedPath(
       return;
     }
 
-    window.location.assign(buildLocationForPath(joinProjectPath(projectPath, relativePath)));
+    window.location.assign(
+      buildLocationForPath(joinProjectPath(projectPath, relativePath)),
+    );
     return;
   }
 }
 
 function useStableFileTreeModel(
-  options: ConstructorParameters<typeof FileTreeModel>[0]
+  options: ConstructorParameters<typeof FileTreeModel>[0],
 ): FileTreeModel {
   const modelRef = useRef<FileTreeModel | null>(null);
   const cleanupTimerRef = useRef<number | null>(null);
@@ -130,8 +144,12 @@ function ProjectTreePanel({
   onOpenMarkdownPage,
 }: ProjectTreePanelProps) {
   const activePath = toCanonicalRelativePath(projectPath, currentPath);
-  const [preparedInput] = useState(() => preparePresortedFileTreeInput(listing.paths));
-  const [initialExpandedPaths] = useState(() => getInitialExpandedPaths(activePath));
+  const [preparedInput] = useState(() =>
+    preparePresortedFileTreeInput(listing.paths),
+  );
+  const [initialExpandedPaths] = useState(() =>
+    getInitialExpandedPaths(activePath),
+  );
   const treeWrapperRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -169,11 +187,14 @@ function ProjectTreePanel({
         .composedPath()
         .find(
           (entry): entry is HTMLElement =>
-            entry instanceof HTMLElement && entry.dataset.type === "item" && !!entry.dataset.itemPath
+            entry instanceof HTMLElement &&
+            entry.dataset.type === "item" &&
+            !!entry.dataset.itemPath,
         );
 
       const nextPath = rowElement?.dataset.itemPath;
-      if (!nextPath || nextPath.endsWith("/") || isMarkdownPath(nextPath)) return;
+      if (!nextPath || nextPath.endsWith("/") || isMarkdownPath(nextPath))
+        return;
 
       event.preventDefault();
       event.stopPropagation();
@@ -195,18 +216,23 @@ function ProjectTreePanel({
 
     return () => {
       observer.disconnect();
-      hostElement.removeEventListener("mousedown", handleBlockedInteraction, true);
+      hostElement.removeEventListener(
+        "mousedown",
+        handleBlockedInteraction,
+        true,
+      );
       hostElement.removeEventListener("click", handleBlockedInteraction, true);
     };
-  }, [listing.paths]);
+  }, []);
 
   const handleTreeClick = (event: React.MouseEvent<HTMLElement>) => {
-    const rowElement = event
-      .nativeEvent
+    const rowElement = event.nativeEvent
       .composedPath()
       .find(
         (entry): entry is HTMLElement =>
-          entry instanceof HTMLElement && entry.dataset.type === "item" && !!entry.dataset.itemPath
+          entry instanceof HTMLElement &&
+          entry.dataset.type === "item" &&
+          !!entry.dataset.itemPath,
       );
 
     const nextPath = rowElement?.dataset.itemPath;
@@ -216,7 +242,7 @@ function ProjectTreePanel({
       projectPath,
       nextPath,
       buildLocationForPath,
-      onOpenMarkdownPage
+      onOpenMarkdownPage,
     );
   };
 
@@ -235,7 +261,7 @@ function ProjectTreePanel({
         projectPath,
         nextPath,
         buildLocationForPath,
-        onOpenMarkdownPage
+        onOpenMarkdownPage,
       );
     },
   });
@@ -259,19 +285,26 @@ function ProjectTreePanel({
             width: "100%",
             "--trees-bg-override": "transparent",
             "--trees-bg-muted-override":
-              layout === "embedded" ? "rgba(241, 245, 249, 1)" : "rgba(241, 245, 249, 0.78)",
+              layout === "embedded"
+                ? "rgba(241, 245, 249, 1)"
+                : "rgba(241, 245, 249, 0.78)",
             "--trees-border-color-override":
-              layout === "embedded" ? "rgba(226, 232, 240, 1)" : "rgba(226, 232, 240, 0.78)",
+              layout === "embedded"
+                ? "rgba(226, 232, 240, 1)"
+                : "rgba(226, 232, 240, 0.78)",
             "--trees-fg-override": "rgb(15 23 42)",
             "--trees-fg-muted-override": "rgb(100 116 139)",
             "--trees-selected-bg-override": "rgba(15, 23, 42, 0.08)",
             "--trees-selected-fg-override": "rgb(15 23 42)",
-            "--trees-selected-focused-border-color-override": "rgba(15, 23, 42, 0.14)",
+            "--trees-selected-focused-border-color-override":
+              "rgba(15, 23, 42, 0.14)",
             "--trees-font-family-override":
               '"SF Pro Text", "SF Pro Display", "Segoe UI", sans-serif',
             "--trees-font-size-override": "13px",
-            "--trees-border-radius-override": layout === "embedded" ? "0px" : "14px",
-            "--trees-padding-inline-override": layout === "embedded" ? "8px" : "10px",
+            "--trees-border-radius-override":
+              layout === "embedded" ? "0px" : "14px",
+            "--trees-padding-inline-override":
+              layout === "embedded" ? "8px" : "10px",
           } as React.CSSProperties
         }
       />
@@ -292,6 +325,7 @@ export function ProjectTreeSidebar({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is an intentional rerun trigger from the parent.
   useEffect(() => {
     if (!backend.canManageProjects || !projectPath) {
       setListing(null);
@@ -339,8 +373,8 @@ export function ProjectTreeSidebar({
     layout === "embedded"
       ? "flex h-full min-h-0 flex-col overflow-hidden bg-transparent"
       : layout === "docked"
-      ? "flex h-full w-full flex-col rounded-[28px] border border-slate-200/80 bg-white/80 p-3 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl"
-      : "fixed top-[98px] left-[40px] z-[105] flex h-[min(68vh,640px)] w-[min(360px,calc(100vw-40px))] max-w-[calc(100vw-40px)] flex-col rounded-[28px] border border-slate-200/80 bg-white/92 p-3 shadow-[0_18px_48px_rgba(15,23,42,0.14)] backdrop-blur-xl";
+        ? "flex h-full w-full flex-col rounded-[28px] border border-slate-200/80 bg-white/80 p-3 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl"
+        : "fixed top-[98px] left-[40px] z-[105] flex h-[min(68vh,640px)] w-[min(360px,calc(100vw-40px))] max-w-[calc(100vw-40px)] flex-col rounded-[28px] border border-slate-200/80 bg-white/92 p-3 shadow-[0_18px_48px_rgba(15,23,42,0.14)] backdrop-blur-xl";
 
   return (
     <aside className={asideClassName}>

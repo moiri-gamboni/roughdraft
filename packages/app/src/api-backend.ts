@@ -47,7 +47,9 @@ export class ApiBackend implements StorageBackend {
   }
 
   async getPage(id: string): Promise<Page> {
-    const res = await fetch(this.buildUrl(`/api/pages/${encodeURIComponent(id)}`));
+    const res = await fetch(
+      this.buildUrl(`/api/pages/${encodeURIComponent(id)}`),
+    );
     if (!res.ok) throw new Error(`Failed to get page ${id}: ${res.status}`);
     return res.json();
   }
@@ -56,31 +58,41 @@ export class ApiBackend implements StorageBackend {
     const res = await fetch(
       this.buildUrl("/api/markdown-file", {
         path: relativePath,
-      })
+      }),
     );
     if (!res.ok) {
-      throw new Error(`Failed to get markdown file ${relativePath}: ${res.status}`);
+      throw new Error(
+        `Failed to get markdown file ${relativePath}: ${res.status}`,
+      );
     }
     return res.json();
   }
 
   async savePage(id: string, content: string): Promise<void> {
-    const res = await fetch(this.buildUrl(`/api/pages/${encodeURIComponent(id)}`), {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, projectPath: this.info.projectPath }),
-    });
+    const res = await fetch(
+      this.buildUrl(`/api/pages/${encodeURIComponent(id)}`),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, projectPath: this.info.projectPath }),
+      },
+    );
     if (!res.ok) throw new Error(`Failed to save page ${id}: ${res.status}`);
   }
 
   async saveMarkdownFile(relativePath: string, content: string): Promise<void> {
-    const res = await fetch(this.buildUrl("/api/markdown-file", { path: relativePath }), {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, projectPath: this.info.projectPath }),
-    });
+    const res = await fetch(
+      this.buildUrl("/api/markdown-file", { path: relativePath }),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, projectPath: this.info.projectPath }),
+      },
+    );
     if (!res.ok) {
-      throw new Error(`Failed to save markdown file ${relativePath}: ${res.status}`);
+      throw new Error(
+        `Failed to save markdown file ${relativePath}: ${res.status}`,
+      );
     }
   }
 
@@ -88,16 +100,23 @@ export class ApiBackend implements StorageBackend {
     const res = await fetch(this.buildUrl("/api/pages"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, content, projectPath: this.info.projectPath }),
+      body: JSON.stringify({
+        title,
+        content,
+        projectPath: this.info.projectPath,
+      }),
     });
     if (!res.ok) throw new Error(`Failed to create page: ${res.status}`);
     return res.json();
   }
 
   async deletePage(id: string): Promise<void> {
-    const res = await fetch(this.buildUrl(`/api/pages/${encodeURIComponent(id)}`), {
-      method: "DELETE",
-    });
+    const res = await fetch(
+      this.buildUrl(`/api/pages/${encodeURIComponent(id)}`),
+      {
+        method: "DELETE",
+      },
+    );
     if (!res.ok) throw new Error(`Failed to delete page ${id}: ${res.status}`);
   }
 

@@ -77,6 +77,16 @@ The two scripts coordinate through a lock file, so it's safe to start `./scripts
 
 If you prefer package scripts, the same commands are available as `pnpm setup` and `pnpm start`.
 
+Quality checks:
+
+```bash
+pnpm lint
+pnpm test
+pnpm check
+```
+
+`pnpm check` is the same command the pull request workflow runs before merge.
+
 ## What's in the folder
 
 ```

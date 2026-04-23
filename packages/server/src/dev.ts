@@ -14,7 +14,9 @@ const preferredPort = parseInt(process.env.API_PORT || "3001", 10);
 const port = await findAvailablePort(preferredPort);
 
 if (port !== preferredPort) {
-  console.log(`Preferred API port ${preferredPort} is busy, using ${port} instead.`);
+  console.log(
+    `Preferred API port ${preferredPort} is busy, using ${port} instead.`,
+  );
 }
 
 createServer(port, projectDir);

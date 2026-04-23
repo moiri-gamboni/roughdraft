@@ -27,7 +27,10 @@ function normalizeMarkdownPath(path: string): string {
   return `./${path.replace(/^\/+/, "")}`;
 }
 
-function resolveRenderedUrl(path: string, resolveFileUrl?: MarkdownOptions["resolveFileUrl"]) {
+function resolveRenderedUrl(
+  path: string,
+  resolveFileUrl?: MarkdownOptions["resolveFileUrl"],
+) {
   if (isExternalUrl(path) || isInPageAnchor(path)) return path;
   return resolveFileUrl?.(path) ?? path;
 }
@@ -100,7 +103,9 @@ function createTurndownService(): TurndownService {
     replacement(content, node) {
       const element = node as HTMLAnchorElement;
       const href =
-        element.getAttribute("data-markdown-src") || element.getAttribute("href") || "";
+        element.getAttribute("data-markdown-src") ||
+        element.getAttribute("href") ||
+        "";
       const normalizedHref =
         isExternalUrl(href) || isInPageAnchor(href)
           ? href
@@ -114,8 +119,12 @@ function createTurndownService(): TurndownService {
     replacement(_content, node) {
       const element = node as HTMLImageElement;
       const src =
-        element.getAttribute("data-markdown-src") || element.getAttribute("src") || "";
-      const normalizedSrc = isExternalUrl(src) ? src : normalizeMarkdownPath(src);
+        element.getAttribute("data-markdown-src") ||
+        element.getAttribute("src") ||
+        "";
+      const normalizedSrc = isExternalUrl(src)
+        ? src
+        : normalizeMarkdownPath(src);
       const alt = element.getAttribute("alt") || "";
       return `![${alt}](${normalizedSrc})`;
     },

@@ -1,5 +1,11 @@
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
-import { ChevronDown, ChevronRight, ExternalLink, FileText, Folder } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  FileText,
+  Folder,
+} from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -60,7 +66,10 @@ function MenuPanel({ eyebrow, title, children }: MenuPanelProps) {
         <div className="truncate text-[0.68rem] font-semibold tracking-[0.14em] text-slate-500 uppercase">
           {eyebrow}
         </div>
-        <div className="mt-1 truncate text-sm font-medium text-slate-950" title={title}>
+        <div
+          className="mt-1 truncate text-sm font-medium text-slate-950"
+          title={title}
+        >
           {title}
         </div>
       </header>
@@ -80,7 +89,9 @@ function MenuStatusRow({
     <div
       className={cn(
         "rounded-md px-2.5 py-2 text-sm",
-        tone === "error" ? "border border-rose-200 bg-rose-50 text-rose-700" : "text-slate-500"
+        tone === "error"
+          ? "border border-rose-200 bg-rose-50 text-rose-700"
+          : "text-slate-500",
       )}
     >
       {children}
@@ -105,7 +116,9 @@ function DirectorySubmenu({
   const error = errorByPath[directory.path] ?? null;
 
   return (
-    <MenuPrimitive.SubmenuRoot onOpenChange={(open) => open && onLoadDirectory(directory.path)}>
+    <MenuPrimitive.SubmenuRoot
+      onOpenChange={(open) => open && onLoadDirectory(directory.path)}
+    >
       <MenuPrimitive.SubmenuTrigger
         openOnHover
         onMouseEnter={() => onLoadDirectory(directory.path)}
@@ -137,7 +150,9 @@ function DirectorySubmenu({
           alignOffset={-6}
           className="isolate z-50"
         >
-          <MenuPrimitive.Popup className={cn(menuPopupClass, "max-h-[min(72vh,560px)] p-1")}>
+          <MenuPrimitive.Popup
+            className={cn(menuPopupClass, "max-h-[min(72vh,560px)] p-1")}
+          >
             {loading ? (
               <MenuStatusRow>Loading…</MenuStatusRow>
             ) : error ? (
@@ -175,7 +190,8 @@ function ListingEntries({
   onOpenDirectory,
   onOpenFile,
 }: ListingEntriesProps) {
-  const hasEntries = !!listing && (listing.directories.length > 0 || listing.files.length > 0);
+  const hasEntries =
+    !!listing && (listing.directories.length > 0 || listing.files.length > 0);
 
   if (!listing) {
     return <MenuStatusRow>No folder loaded.</MenuStatusRow>;
@@ -210,14 +226,25 @@ function ListingEntries({
             key={file.path}
             closeOnClick={false}
             onClick={() => onOpenFile(file.path)}
-            className={cn(menuItemClass, isCurrent && "bg-slate-900 text-white data-[highlighted]:bg-slate-800 data-[highlighted]:text-white")}
+            className={cn(
+              menuItemClass,
+              isCurrent &&
+                "bg-slate-900 text-white data-[highlighted]:bg-slate-800 data-[highlighted]:text-white",
+            )}
           >
-            <FileText className={cn("size-4 shrink-0", isCurrent ? "text-white/80" : "text-slate-500")} />
+            <FileText
+              className={cn(
+                "size-4 shrink-0",
+                isCurrent ? "text-white/80" : "text-slate-500",
+              )}
+            />
             <span className="min-w-0 flex-1 truncate" title={file.name}>
               {file.name}
             </span>
             {isCurrent ? (
-              <span className="shrink-0 text-[0.65rem] font-medium text-white/75">Current</span>
+              <span className="shrink-0 text-[0.65rem] font-medium text-white/75">
+                Current
+              </span>
             ) : (
               <ExternalLink className="size-4 shrink-0 text-slate-400" />
             )}
@@ -239,9 +266,13 @@ export function PathSwitcher({
 }: PathSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [rootPath, setRootPath] = useState<string | null>(null);
-  const [listingsByPath, setListingsByPath] = useState<Record<string, FileSystemListing>>({});
+  const [listingsByPath, setListingsByPath] = useState<
+    Record<string, FileSystemListing>
+  >({});
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
-  const [errorByPath, setErrorByPath] = useState<Record<string, string | null>>({});
+  const [errorByPath, setErrorByPath] = useState<Record<string, string | null>>(
+    {},
+  );
 
   const setPathLoading = useCallback((pathKey: string, loading: boolean) => {
     setLoadingPaths((prev) => {
@@ -288,7 +319,7 @@ export function PathSwitcher({
         setPathLoading(pathKey, false);
       }
     },
-    [backend, listingsByPath, loadingPaths, rootPath, setPathLoading]
+    [backend, listingsByPath, loadingPaths, rootPath, setPathLoading],
   );
 
   useEffect(() => {
@@ -307,7 +338,7 @@ export function PathSwitcher({
       setOpen(false);
       window.location.assign(buildLocationForPath(path));
     },
-    [buildLocationForPath]
+    [buildLocationForPath],
   );
 
   const openDirectory = useCallback(
@@ -321,10 +352,10 @@ export function PathSwitcher({
         setErrorByPath((prev) => ({ ...prev, [path]: message }));
       }
     },
-    [backend, buildLocationForPath]
+    [backend, buildLocationForPath],
   );
 
-  const rootListing = rootPath ? listingsByPath[rootPath] ?? null : null;
+  const rootListing = rootPath ? (listingsByPath[rootPath] ?? null) : null;
   const rootLoading = loadingPaths.has(ROOT_LISTING_KEY);
   const rootError = errorByPath[ROOT_LISTING_KEY] ?? null;
   const canBrowseProjects = backend.canManageProjects;
@@ -336,35 +367,58 @@ export function PathSwitcher({
           aria-label="Open another file or folder"
           className={cn(
             buttonVariants({ variant: "outline" }),
-            "h-auto w-full min-w-0 justify-between gap-3 rounded-md px-3 py-2 text-left shadow-none"
+            "h-auto w-full min-w-0 justify-between gap-3 rounded-md px-3 py-2 text-left shadow-none",
           )}
         >
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium" title={currentLabel}>
+            <span
+              className="block truncate text-sm font-medium"
+              title={currentLabel}
+            >
               {currentLabel}
             </span>
             <span
               className="mt-0.5 block truncate text-xs text-muted-foreground"
               title={description ?? projectPath ?? currentPath ?? currentLabel}
             >
-              {description ?? projectPath ?? currentPath ?? "Browse files and folders"}
+              {description ??
+                projectPath ??
+                currentPath ??
+                "Browse files and folders"}
             </span>
           </span>
           <ChevronDown
-            className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+            className={cn(
+              "size-4 shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-180",
+            )}
           />
         </MenuPrimitive.Trigger>
       </div>
 
       <MenuPrimitive.Portal>
-        <MenuPrimitive.Positioner align="start" sideOffset={8} className="isolate z-50">
-          <MenuPrimitive.Popup className={cn(menuPopupClass, "max-h-[min(72vh,560px)]")}>
+        <MenuPrimitive.Positioner
+          align="start"
+          sideOffset={8}
+          className="isolate z-50"
+        >
+          <MenuPrimitive.Popup
+            className={cn(menuPopupClass, "max-h-[min(72vh,560px)]")}
+          >
             {!canBrowseProjects ? (
-              <MenuPanel eyebrow="Filesystem" title="Project browsing unavailable">
-                <MenuStatusRow>Project browsing is unavailable in browser storage mode.</MenuStatusRow>
+              <MenuPanel
+                eyebrow="Filesystem"
+                title="Project browsing unavailable"
+              >
+                <MenuStatusRow>
+                  Project browsing is unavailable in browser storage mode.
+                </MenuStatusRow>
               </MenuPanel>
             ) : (
-              <MenuPanel eyebrow="Filesystem" title={rootListing?.displayPath ?? "Loading..."}>
+              <MenuPanel
+                eyebrow="Filesystem"
+                title={rootListing?.displayPath ?? "Loading..."}
+              >
                 {rootLoading && !rootListing ? (
                   <MenuStatusRow>Loading…</MenuStatusRow>
                 ) : rootError ? (

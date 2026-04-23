@@ -91,7 +91,7 @@ function getRulerTicks(length: number, offset: number, zoom: number) {
   if (length <= 0 || zoom <= 0) return [];
 
   const { majorStep, minorStep } = getRulerScale(zoom);
-  const worldStart = (-offset) / zoom;
+  const worldStart = -offset / zoom;
   const worldEnd = (length - offset) / zoom;
   const startIndex = Math.floor(worldStart / minorStep) - 1;
   const endIndex = Math.ceil(worldEnd / minorStep) + 1;
@@ -129,7 +129,7 @@ function getGridOffset(offset: number, spacing: number) {
 function getHorizontalRulerLabelStyle(
   screen: number,
   label: string,
-  viewportWidth: number
+  viewportWidth: number,
 ) {
   const estimatedWidth =
     label.length * RULER_LABEL_CHAR_WIDTH_PX + RULER_LABEL_PADDING_PX * 2;
@@ -137,8 +137,8 @@ function getHorizontalRulerLabelStyle(
     RULER_LABEL_PADDING_PX,
     Math.min(
       screen + RULER_LABEL_PADDING_PX,
-      viewportWidth - estimatedWidth - RULER_LABEL_PADDING_PX
-    )
+      viewportWidth - estimatedWidth - RULER_LABEL_PADDING_PX,
+    ),
   );
 
   return {
@@ -190,10 +190,13 @@ export function Canvas({
     setCameraState(next);
   }, []);
 
-  const updateCamera = useCallback((updater: (prev: Camera) => Camera) => {
-    const next = updater(cameraRef.current);
-    setCamera(next);
-  }, [setCamera]);
+  const updateCamera = useCallback(
+    (updater: (prev: Camera) => Camera) => {
+      const next = updater(cameraRef.current);
+      setCamera(next);
+    },
+    [setCamera],
+  );
 
   const zoomAtScreenPoint = useCallback(
     (nextZoom: number, screenX: number, screenY: number) => {
@@ -213,7 +216,7 @@ export function Canvas({
 
       return true;
     },
-    [setCamera]
+    [setCamera],
   );
 
   const stopZoomMomentum = useCallback(() => {
@@ -241,7 +244,7 @@ export function Canvas({
       const momentum = zoomMomentumRef.current;
       momentum.velocity = Math.max(
         -MAX_ZOOM_INERTIA_VELOCITY,
-        Math.min(MAX_ZOOM_INERTIA_VELOCITY, velocity)
+        Math.min(MAX_ZOOM_INERTIA_VELOCITY, velocity),
       );
       momentum.anchor = { x: anchorX, y: anchorY };
       momentum.lastFrameTime = 0;
@@ -269,7 +272,7 @@ export function Canvas({
         const didZoom = zoomAtScreenPoint(
           nextZoom,
           state.anchor.x,
-          state.anchor.y
+          state.anchor.y,
         );
 
         if (!didZoom || cameraRef.current.z === currentZoom) {
@@ -282,7 +285,7 @@ export function Canvas({
 
       momentum.frame = requestAnimationFrame(step);
     },
-    [stopZoomMomentum, zoomAtScreenPoint]
+    [stopZoomMomentum, zoomAtScreenPoint],
   );
 
   const resetZoomGesture = useCallback(() => {
@@ -306,7 +309,7 @@ export function Canvas({
       gesture.source = source;
       gesture.anchor = { x: anchorX, y: anchorY };
     },
-    [clearWheelZoomEndTimer, stopZoomMomentum]
+    [clearWheelZoomEndTimer, stopZoomMomentum],
   );
 
   const sampleZoomGesture = useCallback(
@@ -315,7 +318,7 @@ export function Canvas({
       nextZoom: number,
       anchorX: number,
       anchorY: number,
-      timestamp: number
+      timestamp: number,
     ) => {
       if (previousZoom === nextZoom) return;
 
@@ -329,16 +332,18 @@ export function Canvas({
         const dt = Math.max(1, timestamp - gesture.lastSampleTime);
         const velocity = Math.max(
           -MAX_ZOOM_INERTIA_VELOCITY,
-          Math.min(MAX_ZOOM_INERTIA_VELOCITY, deltaLog / dt)
+          Math.min(MAX_ZOOM_INERTIA_VELOCITY, deltaLog / dt),
         );
 
         gesture.velocity =
-          gesture.velocity === 0 ? velocity : gesture.velocity * 0.35 + velocity * 0.65;
+          gesture.velocity === 0
+            ? velocity
+            : gesture.velocity * 0.35 + velocity * 0.65;
       }
 
       gesture.lastSampleTime = timestamp;
     },
-    []
+    [],
   );
 
   const finishZoomGesture = useCallback(
@@ -357,7 +362,7 @@ export function Canvas({
         startZoomMomentum(velocity, x, y);
       }
     },
-    [clearWheelZoomEndTimer, startZoomMomentum]
+    [clearWheelZoomEndTimer, startZoomMomentum],
   );
 
   const scheduleWheelZoomEnd = useCallback(() => {
@@ -397,14 +402,21 @@ export function Canvas({
     lastInitialWorldCenterKeyRef.current = centerKey;
 
     const visibleCenterX = RULER_SIZE_PX + (viewport.width - RULER_SIZE_PX) / 2;
-    const visibleCenterY = RULER_SIZE_PX + (viewport.height - RULER_SIZE_PX) / 2;
+    const visibleCenterY =
+      RULER_SIZE_PX + (viewport.height - RULER_SIZE_PX) / 2;
 
     setCamera({
       x: visibleCenterX - initialWorldCenter.x,
       y: visibleCenterY - initialWorldCenter.y,
       z: 1,
     });
-  }, [initialWorldCenter, initialWorldCenterKey, setCamera, viewport.height, viewport.width]);
+  }, [
+    initialWorldCenter,
+    initialWorldCenterKey,
+    setCamera,
+    viewport.height,
+    viewport.width,
+  ]);
 
   useEffect(() => {
     if (!focusedWorldFrame || !focusedWorldFrameKey) return;
@@ -419,8 +431,8 @@ export function Canvas({
       Math.min(
         1.1,
         availableWidth / (focusedWorldFrame.width + framePadding * 2),
-        availableHeight / (focusedWorldFrame.height + framePadding * 2)
-      )
+        availableHeight / (focusedWorldFrame.height + framePadding * 2),
+      ),
     );
     const visibleCenterX = RULER_SIZE_PX + availableWidth / 2;
     const visibleCenterY = RULER_SIZE_PX + availableHeight / 2;
@@ -432,7 +444,13 @@ export function Canvas({
       y: visibleCenterY - frameCenterY * targetZoom,
       z: targetZoom,
     });
-  }, [focusedWorldFrame, focusedWorldFrameKey, setCamera, viewport.height, viewport.width]);
+  }, [
+    focusedWorldFrame,
+    focusedWorldFrameKey,
+    setCamera,
+    viewport.height,
+    viewport.width,
+  ]);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -441,21 +459,17 @@ export function Canvas({
     const doc = canvasEl.ownerDocument;
 
     const normalizeWheel = (event: WheelEvent) => {
-      let deltaX = event.deltaX;
+      const deltaX = event.deltaX;
       let deltaY = event.deltaY;
       let deltaZ = 0;
 
       if (event.ctrlKey || event.metaKey) {
-        const clamped = Math.min(
-          MAX_WHEEL_ZOOM_STEP,
-          Math.abs(deltaY)
-        ) * Math.sign(deltaY);
+        const clamped =
+          Math.min(MAX_WHEEL_ZOOM_STEP, Math.abs(deltaY)) * Math.sign(deltaY);
         deltaZ = -clamped / 100;
       } else if (event.shiftKey) {
-        const clamped = Math.min(
-          MAX_WHEEL_ZOOM_STEP,
-          Math.abs(deltaY)
-        ) * Math.sign(deltaY);
+        const clamped =
+          Math.min(MAX_WHEEL_ZOOM_STEP, Math.abs(deltaY)) * Math.sign(deltaY);
         deltaZ = -clamped / 100;
         deltaY = 0;
       }
@@ -478,7 +492,7 @@ export function Canvas({
         center,
         distance: Math.hypot(
           second.clientX - first.clientX,
-          second.clientY - first.clientY
+          second.clientY - first.clientY,
         ),
       };
     };
@@ -505,7 +519,7 @@ export function Canvas({
         const didZoom = zoomAtScreenPoint(
           previousZoom * (1 + delta.z),
           screenX,
-          screenY
+          screenY,
         );
         if (didZoom) {
           sampleZoomGesture(
@@ -513,7 +527,7 @@ export function Canvas({
             cameraRef.current.z,
             screenX,
             screenY,
-            e.timeStamp
+            e.timeStamp,
           );
         }
         scheduleWheelZoomEnd();
@@ -563,7 +577,7 @@ export function Canvas({
       const touchDistance = Math.abs(distance - pinch.initialDistance);
       const originDistance = Math.hypot(
         center.x - pinch.initialCenter.x,
-        center.y - pinch.initialCenter.y
+        center.y - pinch.initialCenter.y,
       );
 
       if (pinch.state === "not-sure") {
@@ -588,7 +602,7 @@ export function Canvas({
           y: previous.y + dy,
         };
         const zoom = clampZoom(
-          pinch.initialCamera.z * (distance / pinch.initialDistance)
+          pinch.initialCamera.z * (distance / pinch.initialDistance),
         );
         const pageX = (center.x - panned.x) / panned.z;
         const pageY = (center.y - panned.y) / panned.z;
@@ -641,7 +655,7 @@ export function Canvas({
       beginZoomGesture(
         "gesture",
         ge.clientX - rect.left,
-        ge.clientY - rect.top
+        ge.clientY - rect.top,
       );
     }
 
@@ -662,7 +676,7 @@ export function Canvas({
       const didZoom = zoomAtScreenPoint(
         safariGestureStartZoom * ge.scale,
         screenX,
-        screenY
+        screenY,
       );
 
       if (didZoom) {
@@ -671,7 +685,7 @@ export function Canvas({
           cameraRef.current.z,
           screenX,
           screenY,
-          e.timeStamp
+          e.timeStamp,
         );
       }
     }
@@ -683,7 +697,9 @@ export function Canvas({
       finishZoomGesture();
     }
 
-    canvasEl.addEventListener("touchstart", handleTouchStart, { passive: false });
+    canvasEl.addEventListener("touchstart", handleTouchStart, {
+      passive: false,
+    });
     canvasEl.addEventListener("touchmove", handleTouchMove, { passive: false });
     canvasEl.addEventListener("touchend", handleTouchEnd);
     canvasEl.addEventListener("touchcancel", handleTouchEnd);
@@ -743,7 +759,7 @@ export function Canvas({
         onPointerDownOnCanvas?.();
       }
     },
-    [onPointerDownOnCanvas, resetZoomGesture, stopZoomMomentum]
+    [onPointerDownOnCanvas, resetZoomGesture, stopZoomMomentum],
   );
 
   const handlePointerMove = useCallback(
@@ -758,7 +774,7 @@ export function Canvas({
         y: prev.y + dy,
       }));
     },
-    [isPanning, updateCamera]
+    [isPanning, updateCamera],
   );
 
   const handlePointerUp = useCallback(() => {
@@ -767,12 +783,12 @@ export function Canvas({
 
   const horizontalTicks = useMemo(
     () => getRulerTicks(viewport.width, camera.x, camera.z),
-    [camera.x, camera.z, viewport.width]
+    [camera.x, camera.z, viewport.width],
   );
 
   const verticalTicks = useMemo(
     () => getRulerTicks(viewport.height, camera.y, camera.z),
-    [camera.y, camera.z, viewport.height]
+    [camera.y, camera.z, viewport.height],
   );
 
   const gridScale = useMemo(() => getRulerScale(camera.z), [camera.z]);
@@ -784,7 +800,7 @@ export function Canvas({
       backgroundSize: `100% ${gridScale.minorScreenSpacing}px, ${gridScale.minorScreenSpacing}px 100%, 100% ${gridScale.majorScreenSpacing}px, ${gridScale.majorScreenSpacing}px 100%`,
       backgroundPosition: `0 ${getGridOffset(camera.y, gridScale.minorScreenSpacing)}px, ${getGridOffset(camera.x, gridScale.minorScreenSpacing)}px 0, 0 ${getGridOffset(camera.y, gridScale.majorScreenSpacing)}px, ${getGridOffset(camera.x, gridScale.majorScreenSpacing)}px 0`,
     }),
-    [camera.x, camera.y, gridScale]
+    [camera.x, camera.y, gridScale],
   );
 
   return (
@@ -834,7 +850,7 @@ export function Canvas({
                         style={getHorizontalRulerLabelStyle(
                           tick.screen,
                           label,
-                          viewport.width
+                          viewport.width,
                         )}
                       >
                         {label}
@@ -858,7 +874,9 @@ export function Canvas({
             >
               <span
                 className={`ml-auto block ${
-                  tick.isMajor ? "h-px w-3 bg-slate-400/80" : "h-px w-1.5 bg-slate-300/70"
+                  tick.isMajor
+                    ? "h-px w-3 bg-slate-400/80"
+                    : "h-px w-1.5 bg-slate-300/70"
                 }`}
               />
               {tick.isMajor ? (

@@ -1,6 +1,8 @@
 import net from "node:net";
 
-export async function findAvailablePort(preferredPort: number): Promise<number> {
+export async function findAvailablePort(
+  preferredPort: number,
+): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
 
@@ -17,7 +19,8 @@ export async function findAvailablePort(preferredPort: number): Promise<number> 
 
     server.listen(preferredPort, () => {
       const address = server.address();
-      const port = typeof address === "object" && address ? address.port : preferredPort;
+      const port =
+        typeof address === "object" && address ? address.port : preferredPort;
 
       server.close((closeError) => {
         if (closeError) {

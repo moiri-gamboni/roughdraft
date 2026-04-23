@@ -11,6 +11,11 @@
     "setup": "./scripts/setup.sh",
     "start": "./scripts/run.sh",
     "dev": "node scripts/dev.mjs",
+    "lint": "biome check . --assist-enabled=false",
+    "lint:fix": "biome check --write . --assist-enabled=false",
+    "format": "biome format --write .",
+    "test": "pnpm --filter @roughdraft/app test && pnpm --filter @roughdraft/server test",
+    "check": "pnpm lint && pnpm test && pnpm build",
     "build": "pnpm --filter @roughdraft/app build && pnpm --filter @roughdraft/server build",
     "preview": "node packages/server/bin/roughdraft.mjs"
   },
@@ -23,6 +28,7 @@
     "express": "^5.1.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.12",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3"
   },
