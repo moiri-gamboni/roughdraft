@@ -199,7 +199,7 @@ export function EditorToolbar({
       .chain()
       .focus()
       .extendMarkRange("link")
-      .setLink({ href: next, dataMarkdownSrc: next } as any)
+      .setMark("link", { href: next, dataMarkdownSrc: next })
       .run();
     setLinkDialogOpen(false);
   };

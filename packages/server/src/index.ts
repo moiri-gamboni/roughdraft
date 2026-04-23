@@ -374,11 +374,12 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       typeof req.query.path === "string" ? req.query.path : "";
     const absolutePath = ensureProjectPath(projectDir, relativePath);
 
-    if (
-      !absolutePath ||
-      !absolutePath.toLowerCase().endsWith(".md") ||
-      !fs.existsSync(absolutePath)
-    ) {
+    if (!absolutePath?.toLowerCase().endsWith(".md")) {
+      res.status(404).json({ error: "Markdown file not found" });
+      return;
+    }
+
+    if (!fs.existsSync(absolutePath)) {
       res.status(404).json({ error: "Markdown file not found" });
       return;
     }
@@ -415,11 +416,12 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       typeof req.query.path === "string" ? req.query.path : "";
     const absolutePath = ensureProjectPath(projectDir, relativePath);
 
-    if (
-      !absolutePath ||
-      !absolutePath.toLowerCase().endsWith(".md") ||
-      !fs.existsSync(absolutePath)
-    ) {
+    if (!absolutePath?.toLowerCase().endsWith(".md")) {
+      res.status(404).json({ error: "Markdown file not found" });
+      return;
+    }
+
+    if (!fs.existsSync(absolutePath)) {
       res.status(404).json({ error: "Markdown file not found" });
       return;
     }

@@ -2,7 +2,7 @@ import { tables, taskListItems } from "@joplin/turndown-plugin-gfm";
 import { marked } from "marked";
 import TurndownService from "turndown";
 
-interface MarkdownOptions {
+export interface MarkdownOptions {
   resolveFileUrl?: (path: string) => string | null;
 }
 
@@ -35,7 +35,7 @@ function resolveRenderedUrl(
   return resolveFileUrl?.(path) ?? path;
 }
 
-function createMarkedRenderer(options?: MarkdownOptions) {
+export function createMarkedRenderer(options?: MarkdownOptions) {
   const renderer = new marked.Renderer();
   const baseRenderer = new marked.Renderer();
   const resolveFileUrl = options?.resolveFileUrl;
@@ -86,7 +86,7 @@ function createMarkedRenderer(options?: MarkdownOptions) {
   return renderer;
 }
 
-function createTurndownService(): TurndownService {
+export function createTurndownService(): TurndownService {
   const service = new TurndownService({
     headingStyle: "atx",
     codeBlockStyle: "fenced",
@@ -136,7 +136,7 @@ function createTurndownService(): TurndownService {
 const turndown = createTurndownService();
 
 export function toMarkdown(html: string): string {
-  return turndown.turndown(html).trimEnd() + "\n";
+  return `${turndown.turndown(html).trimEnd()}\n`;
 }
 
 export function toHtml(markdown: string, options?: MarkdownOptions): string {
