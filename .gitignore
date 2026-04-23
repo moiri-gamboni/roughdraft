@@ -8,3 +8,5 @@ sandbox
 .claude/
 .agents/
 .mcp.json
+.roughdraft-state
+/roughdraft.json

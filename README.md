@@ -1,8 +1,8 @@
 # Roughdraft
 
-An infinite canvas for writing.
+A local-first markdown editor and viewer for working with AI.
 
-Fork your prose. Explore every direction. Keep every version.
+Open any markdown file on your machine. Review it, comment on it, suggest edits, and explore variations on a canvas when you need to.
 
 ```
 npx roughdraft
@@ -12,18 +12,19 @@ https://github.com/user-attachments/assets/placeholder.mp4
 
 ## What is this?
 
-Roughdraft gives you a spatial canvas where each page is a markdown document. Drag pages around, fork them into variations, and diff any two versions side by side.
+Roughdraft is a local-first markdown editor and viewer that runs on your computer.
 
-It's version control for prose — designed for writers who think by exploring.
+Its job is to make markdown files easy to open, read, edit, review, and discuss with your AI agent without moving them into a proprietary format or a hosted app.
+
+The canvas is part of the product, but it is not the whole product. You can open a single markdown file directly, review it with CriticMarkup comments and suggested changes, or open a folder and use the canvas to explore different versions of an idea.
 
 ## How it works
 
-- **Infinite canvas** — Arrange your pages spatially, like a whiteboard
-- **Fork any page** — Right-click to create a variation. Try a different angle without losing what you had
-- **Drag to diff** — Drag one page onto another to see exactly what changed
-- **Markdown files on disk** — Everything is just `.md` files in a folder. Use any editor alongside Roughdraft
-- **Works with your AI agent** — Installs a skill so Claude Code (or any local agent) can read, edit, fork, and annotate your pages
-- **Comments & suggestions** — Inline annotations using CriticMarkup syntax
+- **Local-first markdown editor** — Open normal `.md` files from your machine and edit them directly
+- **Works with your AI agent** — Tell your local agent to open a file in Roughdraft on your computer, then keep collaborating from there
+- **Comments & suggested changes** — Use CriticMarkup for inline feedback, revisions, and review conversations
+- **Canvas for exploration** — Open a folder of docs and arrange pages spatially when you want to compare, branch, or explore versions
+- **Markdown files on disk** — Everything stays as regular markdown files you can also edit in VS Code, Vim, Cursor, or anywhere else
 - **No cloud, no account, no telemetry** — Runs entirely on your machine
 
 ## Quick start
@@ -32,7 +33,9 @@ It's version control for prose — designed for writers who think by exploring.
 npx roughdraft
 ```
 
-This opens Roughdraft in your browser and creates a project in the current directory.
+This starts Roughdraft locally and opens it automatically.
+
+On macOS, if Google Chrome is installed, Roughdraft prefers opening in a separate Chrome app window instead of a normal browser tab.
 
 ```bash
 npx roughdraft ~/writing/my-essay
@@ -40,26 +43,62 @@ npx roughdraft ~/writing/my-essay
 
 Open a specific project folder.
 
+```bash
+npx roughdraft ~/writing/my-essay/draft.md
+```
+
+Open a specific markdown file directly.
+
+If the local server is already running, you can also open a folder or file directly by URL:
+
+```text
+http://localhost:3000/absolute/path/to/my-essay
+http://localhost:3000/absolute/path/to/my-essay/draft.md
+```
+
+That makes an agent-friendly workflow possible:
+
+1. Your AI writes or updates markdown files on disk.
+2. You tell it to open a file or folder in Roughdraft.
+3. Roughdraft opens locally on your machine.
+4. You read, edit, leave comments, and suggest changes.
+5. You tell the AI you are done, and it can respond to your comments or revise the document.
+
+## Local development
+
+```bash
+./scripts/setup.sh
+./scripts/run.sh
+```
+
+`./scripts/setup.sh` installs workspace dependencies and builds the app and server. `./scripts/run.sh` serves the built app at `http://localhost:3000`.
+
+The two scripts coordinate through a lock file, so it's safe to start `./scripts/run.sh` while `./scripts/setup.sh` is still in progress. `run` will wait for setup to finish, or trigger setup itself if nothing has been built yet.
+
+If you prefer package scripts, the same commands are available as `pnpm setup` and `pnpm start`.
+
 ## What's in the folder
 
 ```
 my-essay/
   roughdraft.json       # Canvas layout and metadata
-  draft-1.md            # Your writing — plain markdown
-  draft-1-alt.md        # A fork you made
-  draft-2.md            # Another page on the canvas
+  draft-1.md            # A normal markdown file on disk
+  draft-1-alt.md        # A variation you are exploring
+  draft-2.md            # Another page you can open directly or on the canvas
 ```
 
-Every page is a regular markdown file. Edit them in VS Code, Vim, or anything else — Roughdraft picks up changes automatically.
+Every page is a regular markdown file. Roughdraft reads and writes those files directly.
 
 ## Agent skill
 
 Roughdraft includes a skill for Claude Code that lets your agent:
 
+- Open a local markdown file or folder in Roughdraft
 - Read and edit pages on your canvas
-- Fork a page and rewrite it with a different approach
 - Add inline comments and suggested changes
-- Rearrange the canvas layout
+- Respond to user review feedback in the document
+- Fork a page and rewrite it with a different approach
+- Rearrange the canvas layout when exploring multiple versions
 
 ```bash
 # The skill is installed automatically when you run roughdraft
@@ -68,7 +107,7 @@ claude code --skill roughdraft
 
 ## CriticMarkup
 
-Roughdraft uses [CriticMarkup](https://criticmarkup.com) for inline annotations:
+Roughdraft uses [CriticMarkup](https://criticmarkup.com) for inline annotations and revision workflows:
 
 ```markdown
 This is {--deleted--} text.
@@ -77,6 +116,14 @@ This is {~~old~>new~~} substituted text.
 This is {>>a comment<<} in the margin.
 This is {==highlighted==} text.
 ```
+
+This matters because the main workflow is often:
+
+- The AI writes a doc
+- The user opens it in Roughdraft
+- The user leaves comments and suggested changes
+- The AI reads those comments and responds in the same markdown file
+- The user and AI use the canvas when they want to branch or compare alternatives
 
 ## Try the demo
 

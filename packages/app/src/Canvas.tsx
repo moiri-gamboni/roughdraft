@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -11,6 +12,18 @@ import type { ReactNode } from "react";
 interface CanvasProps {
   children: ReactNode;
   onPointerDownOnCanvas?: () => void;
+  initialWorldCenter?: {
+    x: number;
+    y: number;
+  } | null;
+  initialWorldCenterKey?: string;
+  focusedWorldFrame?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null;
+  focusedWorldFrameKey?: string | null;
 }
 
 interface Camera {
@@ -32,6 +45,10 @@ const WHEEL_ZOOM_END_DELAY_MS = 48;
 const ZOOM_INERTIA_DECAY = 0.012;
 const MIN_ZOOM_INERTIA_VELOCITY = 0.00004;
 const MAX_ZOOM_INERTIA_VELOCITY = 0.01;
+const RULER_TARGET_MAJOR_SPACING = 120;
+const RULER_SIZE_PX = 28;
+const RULER_LABEL_PADDING_PX = 4;
+const RULER_LABEL_CHAR_WIDTH_PX = 5.5;
 
 const CanvasScaleContext = createContext(1);
 
@@ -43,12 +60,109 @@ function clampZoom(zoom: number) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
 }
 
-export function Canvas({ children, onPointerDownOnCanvas }: CanvasProps) {
+function getNiceStep(minStep: number) {
+  if (!Number.isFinite(minStep) || minStep <= 0) return 100;
+
+  const magnitude = 10 ** Math.floor(Math.log10(minStep));
+  const normalized = minStep / magnitude;
+
+  if (normalized <= 1) return magnitude;
+  if (normalized <= 2) return 2 * magnitude;
+  if (normalized <= 5) return 5 * magnitude;
+  return 10 * magnitude;
+}
+
+function getRulerScale(zoom: number) {
+  const majorStep = getNiceStep(RULER_TARGET_MAJOR_SPACING / zoom);
+  const majorScreenSpacing = majorStep * zoom;
+  const minorDivisions =
+    majorScreenSpacing >= 240 ? 10 : majorScreenSpacing >= 120 ? 5 : 2;
+  const minorStep = majorStep / minorDivisions;
+
+  return {
+    majorStep,
+    majorScreenSpacing,
+    minorStep,
+    minorScreenSpacing: minorStep * zoom,
+  };
+}
+
+function getRulerTicks(length: number, offset: number, zoom: number) {
+  if (length <= 0 || zoom <= 0) return [];
+
+  const { majorStep, minorStep } = getRulerScale(zoom);
+  const worldStart = (-offset) / zoom;
+  const worldEnd = (length - offset) / zoom;
+  const startIndex = Math.floor(worldStart / minorStep) - 1;
+  const endIndex = Math.ceil(worldEnd / minorStep) + 1;
+  const ticks: Array<{ screen: number; value: number; isMajor: boolean }> = [];
+
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    const value = index * minorStep;
+    const screen = offset + value * zoom;
+
+    if (screen < -1 || screen > length + 1) continue;
+
+    const majorIndex = value / majorStep;
+    const isMajor = Math.abs(majorIndex - Math.round(majorIndex)) < 0.000001;
+
+    ticks.push({
+      screen,
+      value: Math.round(value),
+      isMajor,
+    });
+  }
+
+  return ticks;
+}
+
+function formatRulerValue(value: number) {
+  return Math.round(value).toLocaleString("en-US");
+}
+
+function getGridOffset(offset: number, spacing: number) {
+  if (!Number.isFinite(spacing) || spacing <= 0) return 0;
+
+  return ((offset % spacing) + spacing) % spacing;
+}
+
+function getHorizontalRulerLabelStyle(
+  screen: number,
+  label: string,
+  viewportWidth: number
+) {
+  const estimatedWidth =
+    label.length * RULER_LABEL_CHAR_WIDTH_PX + RULER_LABEL_PADDING_PX * 2;
+  const left = Math.max(
+    RULER_LABEL_PADDING_PX,
+    Math.min(
+      screen + RULER_LABEL_PADDING_PX,
+      viewportWidth - estimatedWidth - RULER_LABEL_PADDING_PX
+    )
+  );
+
+  return {
+    left: `${left - screen}px`,
+    top: "0px",
+  };
+}
+
+export function Canvas({
+  children,
+  onPointerDownOnCanvas,
+  initialWorldCenter,
+  initialWorldCenterKey,
+  focusedWorldFrame,
+  focusedWorldFrameKey,
+}: CanvasProps) {
   const cameraRef = useRef<Camera>({ x: 0, y: 0, z: 1 });
   const [camera, setCameraState] = useState<Camera>(cameraRef.current);
   const [isPanning, setIsPanning] = useState(false);
+  const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const lastPointer = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const lastInitialWorldCenterKeyRef = useRef<string | null>(null);
+  const lastFocusedWorldFrameKeyRef = useRef<string | null>(null);
   const isPinchingRef = useRef(false);
   const touchPinchRef = useRef({
     state: "not-sure" as PinchState,
@@ -252,6 +366,73 @@ export function Canvas({ children, onPointerDownOnCanvas }: CanvasProps) {
       finishZoomGesture(0.9);
     }, WHEEL_ZOOM_END_DELAY_MS);
   }, [clearWheelZoomEndTimer, finishZoomGesture]);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const updateViewport = () => {
+      setViewport({
+        width: element.clientWidth,
+        height: element.clientHeight,
+      });
+    };
+
+    updateViewport();
+
+    const observer = new ResizeObserver(updateViewport);
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!initialWorldCenter) return;
+    if (viewport.width <= 0 || viewport.height <= 0) return;
+
+    const centerKey = initialWorldCenterKey ?? "__default__";
+    if (lastInitialWorldCenterKeyRef.current === centerKey) return;
+    lastInitialWorldCenterKeyRef.current = centerKey;
+
+    const visibleCenterX = RULER_SIZE_PX + (viewport.width - RULER_SIZE_PX) / 2;
+    const visibleCenterY = RULER_SIZE_PX + (viewport.height - RULER_SIZE_PX) / 2;
+
+    setCamera({
+      x: visibleCenterX - initialWorldCenter.x,
+      y: visibleCenterY - initialWorldCenter.y,
+      z: 1,
+    });
+  }, [initialWorldCenter, initialWorldCenterKey, setCamera, viewport.height, viewport.width]);
+
+  useEffect(() => {
+    if (!focusedWorldFrame || !focusedWorldFrameKey) return;
+    if (viewport.width <= 0 || viewport.height <= 0) return;
+    if (lastFocusedWorldFrameKeyRef.current === focusedWorldFrameKey) return;
+    lastFocusedWorldFrameKeyRef.current = focusedWorldFrameKey;
+
+    const availableWidth = Math.max(1, viewport.width - RULER_SIZE_PX);
+    const availableHeight = Math.max(1, viewport.height - RULER_SIZE_PX);
+    const framePadding = 120;
+    const targetZoom = clampZoom(
+      Math.min(
+        1.1,
+        availableWidth / (focusedWorldFrame.width + framePadding * 2),
+        availableHeight / (focusedWorldFrame.height + framePadding * 2)
+      )
+    );
+    const visibleCenterX = RULER_SIZE_PX + availableWidth / 2;
+    const visibleCenterY = RULER_SIZE_PX + availableHeight / 2;
+    const frameCenterX = focusedWorldFrame.x + focusedWorldFrame.width / 2;
+    const frameCenterY = focusedWorldFrame.y + focusedWorldFrame.height / 2;
+
+    setCamera({
+      x: visibleCenterX - frameCenterX * targetZoom,
+      y: visibleCenterY - frameCenterY * targetZoom,
+      z: targetZoom,
+    });
+  }, [focusedWorldFrame, focusedWorldFrameKey, setCamera, viewport.height, viewport.width]);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -552,10 +733,7 @@ export function Canvas({ children, onPointerDownOnCanvas }: CanvasProps) {
 
       // Only start panning if clicking directly on the canvas container or inner div
       const target = e.target as HTMLElement;
-      if (
-        target.classList.contains("canvas-container") ||
-        target.classList.contains("canvas-inner")
-      ) {
+      if (target.dataset.canvasSurface === "true") {
         e.preventDefault();
         resetZoomGesture();
         stopZoomMomentum();
@@ -587,24 +765,127 @@ export function Canvas({ children, onPointerDownOnCanvas }: CanvasProps) {
     setIsPanning(false);
   }, []);
 
+  const horizontalTicks = useMemo(
+    () => getRulerTicks(viewport.width, camera.x, camera.z),
+    [camera.x, camera.z, viewport.width]
+  );
+
+  const verticalTicks = useMemo(
+    () => getRulerTicks(viewport.height, camera.y, camera.z),
+    [camera.y, camera.z, viewport.height]
+  );
+
+  const gridScale = useMemo(() => getRulerScale(camera.z), [camera.z]);
+  const gridStyle = useMemo(
+    () => ({
+      backgroundImage:
+        "linear-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px), linear-gradient(rgba(100, 116, 139, 0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(100, 116, 139, 0.18) 1px, transparent 1px)",
+      backgroundRepeat: "repeat",
+      backgroundSize: `100% ${gridScale.minorScreenSpacing}px, ${gridScale.minorScreenSpacing}px 100%, 100% ${gridScale.majorScreenSpacing}px, ${gridScale.majorScreenSpacing}px 100%`,
+      backgroundPosition: `0 ${getGridOffset(camera.y, gridScale.minorScreenSpacing)}px, ${getGridOffset(camera.x, gridScale.minorScreenSpacing)}px 0, 0 ${getGridOffset(camera.y, gridScale.majorScreenSpacing)}px, ${getGridOffset(camera.x, gridScale.majorScreenSpacing)}px 0`,
+    }),
+    [camera.x, camera.y, gridScale]
+  );
+
   return (
     <CanvasScaleContext.Provider value={camera.z}>
       <div
         ref={containerRef}
-        className={`canvas-container ${isPanning ? "canvas-grabbing" : "canvas-grab"}`}
+        data-canvas-surface="true"
+        className={`relative size-full overflow-hidden overscroll-none touch-none ${
+          isPanning ? "cursor-grabbing" : "cursor-grab"
+        }`}
+        style={{
+          background: "#ffffff",
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       >
         <div
-          className="canvas-inner"
+          className="pointer-events-none absolute inset-0"
+          aria-hidden="true"
+          style={gridStyle}
+        />
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 z-20 overflow-hidden border-b border-slate-300/70 bg-white/88 text-[9px] font-semibold tracking-[0.02em] text-slate-500 backdrop-blur-xl shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)]"
+          aria-hidden="true"
+          style={{ height: `${RULER_SIZE_PX}px` }}
+        >
+          {horizontalTicks.map((tick) => (
+            <div
+              key={`x-${tick.value}`}
+              className="absolute bottom-0"
+              style={{ left: `${tick.screen}px` }}
+            >
+              <span
+                className={`mt-auto block w-px ${
+                  tick.isMajor ? "h-3 bg-slate-400/80" : "h-1.5 bg-slate-300/70"
+                }`}
+              />
+              {tick.isMajor
+                ? (() => {
+                    const label = formatRulerValue(tick.value);
+
+                    return (
+                      <span
+                        className="absolute leading-none text-slate-500"
+                        style={getHorizontalRulerLabelStyle(
+                          tick.screen,
+                          label,
+                          viewport.width
+                        )}
+                      >
+                        {label}
+                      </span>
+                    );
+                  })()
+                : null}
+            </div>
+          ))}
+        </div>
+        <div
+          className="pointer-events-none absolute inset-y-0 left-0 z-20 overflow-hidden border-r border-slate-300/70 bg-white/88 text-[9px] font-semibold tracking-[0.02em] text-slate-500 backdrop-blur-xl shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)]"
+          aria-hidden="true"
+          style={{ width: `${RULER_SIZE_PX}px` }}
+        >
+          {verticalTicks.map((tick) => (
+            <div
+              key={`y-${tick.value}`}
+              className="absolute right-0 -translate-y-[0.5px]"
+              style={{ top: `${tick.screen}px` }}
+            >
+              <span
+                className={`ml-auto block ${
+                  tick.isMajor ? "h-px w-3 bg-slate-400/80" : "h-px w-1.5 bg-slate-300/70"
+                }`}
+              />
+              {tick.isMajor ? (
+                <span className="absolute top-[4px] right-[14px] origin-top-right -rotate-90 whitespace-nowrap text-slate-500">
+                  {formatRulerValue(tick.value)}
+                </span>
+              ) : null}
+            </div>
+          ))}
+        </div>
+        <div
+          className="pointer-events-none absolute top-0 left-0 z-[21] border-r border-b border-slate-300/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)]"
+          aria-hidden="true"
+          style={{
+            background: "rgba(255, 255, 255, 0.88)",
+            width: `${RULER_SIZE_PX}px`,
+            height: `${RULER_SIZE_PX}px`,
+          }}
+        />
+        <div
+          data-canvas-surface="true"
+          className="absolute top-0 left-0 will-change-transform"
           style={{
             transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.z})`,
             transformOrigin: "0 0",
           }}
         >
-          <div className="canvas-grid" aria-hidden="true" />
           {children}
         </div>
       </div>

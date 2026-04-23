@@ -4,7 +4,7 @@
 
 Roughdraft pages are markdown documents first.
 
-The editor exists to make markdown writing feel fast, direct, and reliable without turning the document into a proprietary format. A page should remain a normal markdown file on disk that can be edited in Roughdraft, in a text editor, or by local agents without loss of meaning.
+The editor exists to make markdown writing and review feel fast, direct, and reliable without turning the document into a proprietary format. A page should remain a normal markdown file on disk that can be edited in Roughdraft, in a text editor, or by local agents without loss of meaning.
 
 ## Core principles
 
@@ -14,6 +14,16 @@ The editor exists to make markdown writing feel fast, direct, and reliable witho
 - A page should be editable with mouse, keyboard, paste, and drag-and-drop alone
 - The editor is single-player and local-first
 - The editor should never require network connectivity to author or format a page
+- Roughdraft should work well when the document is being passed back and forth between a user and a local AI agent
+
+## Primary workflow
+
+- A local AI agent creates or edits markdown files on disk
+- The user opens a specific file or a folder in Roughdraft running locally
+- The user reads the document in Roughdraft and leaves comments or suggested changes directly in markdown
+- The user tells the AI they are done reviewing
+- The AI reads the same markdown file, responds to comments, and revises the draft
+- When the work branches into multiple alternatives, the user and AI can use the canvas to explore versions
 
 ## Editing model
 
@@ -24,6 +34,7 @@ The editor exists to make markdown writing feel fast, direct, and reliable witho
 - If a page changes on disk outside Roughdraft, the editor reloads it without corrupting user content
 - The editor should avoid clobbering in-progress local edits when a file change is detected
 - Empty pages show a lightweight placeholder until the user starts typing
+- Opening a single markdown file directly should focus the experience on that file without requiring the rest of a canvas workflow
 
 ## Markdown fidelity
 
@@ -33,6 +44,7 @@ The editor exists to make markdown writing feel fast, direct, and reliable witho
 - Links, emphasis, inline code, fenced code blocks, headings, lists, block quotes, rules, and tables should remain valid markdown after editing
 - Mixed plain-text and rich editing workflows should be safe: editing a page in Roughdraft and then in a text editor must not degrade the document
 - The editor should preserve intentional escaping such as literal brackets, underscores, asterisks, and backticks
+- CriticMarkup syntax should remain stable and readable on disk so agents and humans can both operate on it safely
 
 ## Supported block content
 
@@ -54,6 +66,17 @@ The editor exists to make markdown writing feel fast, direct, and reliable witho
 - Links
 - Images
 - Page links
+- CriticMarkup comments
+- CriticMarkup insertions, deletions, substitutions, and highlights
+
+## Review and CriticMarkup
+
+- Comments and suggested changes are first-class parts of the editing workflow
+- Roughdraft should preserve CriticMarkup on disk exactly enough that a human or agent can continue the review loop outside Roughdraft
+- Users should be able to read and write comments like `{>>comment<<}` and suggestions like `{~~old~>new~~}` without the editor corrupting them
+- The editor should make review-oriented markdown feel practical, not like an edge case
+- AI-written comments and human-written comments should coexist cleanly in the same file
+- A user should be able to finish a review pass in Roughdraft and hand the same file back to an agent without any export step
 
 ## Headings
 
@@ -141,12 +164,14 @@ The editor exists to make markdown writing feel fast, direct, and reliable witho
 - Save timing should make typing feel uninterrupted
 - Roughdraft should expose when a save fails and should not silently discard edits
 - The saved markdown file should be human-readable and suitable for version control diffs
+- Saving should preserve the review state of the document so comments and suggestions remain actionable for later agent passes
 
 ## Local-first constraints
 
 - All core editing behavior works offline
 - The editor does not depend on realtime collaboration, remote cursors, or multi-user presence
 - Any future annotations or review features must degrade cleanly to plain markdown or preserved local markup on disk
+- Opening a file in Roughdraft should not require copying it into a special project format first
 
 ## Non-goals
 

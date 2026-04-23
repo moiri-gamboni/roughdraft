@@ -1,5 +1,7 @@
 # Canvas & Page Behavior (v1)
 
+The canvas is an exploration mode, not the entire product. Roughdraft should still feel complete when a user opens a single markdown file directly for reading, editing, and review.
+
 ## Canvas
 
 ### Scrolling
@@ -41,16 +43,23 @@
 - Selected/active card has a slightly more prominent border or shadow
 - Cards render at the zoom level of the canvas (text scales with zoom)
 
+### Relationship to file-first mode
+- The same page editor should work both when viewing a whole folder on the canvas and when opening a single markdown file directly
+- Canvas behavior should not force users into a multi-page workflow when they just want to review one document
+- Review features like CriticMarkup comments and suggested changes are as important as page positioning
+
 ## Page Management
 
 ### Creating
 - "+" button (floating, bottom-right or similar) to create a new page
 - New page appears near the current viewport center
 - New page is immediately selected for editing
+- In single-file mode, page creation may be hidden or disabled because the user is intentionally scoped to one document
 
 ### Deleting
 - Keyboard shortcut to delete (e.g. when card is selected but not editing)
 - Or a small "x" / trash icon on the card's drag handle area
+- In single-file mode, deletion may be hidden or disabled for the same reason
 
 ## Implementation
 

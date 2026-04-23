@@ -1,4 +1,5 @@
-import express from "express";
+import express, { type Request, type Response } from "express";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -34,6 +35,24 @@ interface DirectoryListing {
   directories: DirectoryEntry[];
 }
 
+interface FileSystemEntry {
+  name: string;
+  path: string;
+  kind: "directory" | "file";
+}
+
+interface FileSystemListing {
+  path: string;
+  displayPath: string;
+  parentPath: string | null;
+  directories: FileSystemEntry[];
+  files: FileSystemEntry[];
+}
+
+interface ProjectTreeListing {
+  paths: string[];
+}
+
 function readProjectFile(projectDir: string): ProjectData {
   const filePath = path.join(projectDir, "roughdraft.json");
   try {
@@ -66,6 +85,10 @@ function listMdFiles(projectDir: string): string[] {
 function titleFromContent(content: string, fallback: string): string {
   const firstLine = content.split("\n")[0] || "";
   return firstLine.replace(/^#*\s*/, "").trim() || fallback;
+}
+
+function pageIdFromRelativePath(relativePath: string): string {
+  return relativePath.replace(/\.md$/i, "").split(path.sep).join("/");
 }
 
 function nextUntitledId(projectDir: string): string {
@@ -145,28 +168,159 @@ function listDirectories(dir: string): DirectoryListing {
   };
 }
 
+function formatDisplayPath(targetPath: string, homeDir: string): string {
+  const normalizedHome = path.resolve(homeDir);
+  const normalizedTarget = path.resolve(targetPath);
+
+  if (normalizedTarget === normalizedHome) {
+    return "~";
+  }
+
+  const relativeToHome = path.relative(normalizedHome, normalizedTarget);
+  if (!relativeToHome.startsWith("..") && !path.isAbsolute(relativeToHome)) {
+    return `~/${relativeToHome.split(path.sep).join("/")}`;
+  }
+
+  return normalizedTarget;
+}
+
+function listFileSystem(dir: string, homeDir: string): FileSystemListing {
+  const normalizedDir = path.resolve(dir);
+  const normalizedHome = path.resolve(homeDir);
+
+  let rawEntries: fs.Dirent[];
+  try {
+    rawEntries = fs.readdirSync(normalizedDir, { withFileTypes: true });
+  } catch (error) {
+    const errorCode = (error as NodeJS.ErrnoException).code;
+    if (errorCode === "EACCES" || errorCode === "EPERM") {
+      throw new Error("Directory is not readable.");
+    }
+    throw error;
+  }
+
+  const directories = rawEntries
+    .filter((entry) => entry.isDirectory())
+    .map<FileSystemEntry>((entry) => ({
+      name: entry.name,
+      path: path.join(normalizedDir, entry.name),
+      kind: "directory",
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+  const files = rawEntries
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".md"))
+    .map<FileSystemEntry>((entry) => ({
+      name: entry.name,
+      path: path.join(normalizedDir, entry.name),
+      kind: "file",
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+  return {
+    path: normalizedDir,
+    displayPath: formatDisplayPath(normalizedDir, normalizedHome),
+    parentPath: normalizedDir === normalizedHome ? null : path.dirname(normalizedDir),
+    directories,
+    files,
+  };
+}
+
+function toCanonicalRelativePath(projectDir: string, absolutePath: string, isDirectory: boolean): string {
+  const relativePath = path.relative(projectDir, absolutePath);
+  const canonicalPath = relativePath.split(path.sep).join("/");
+  return isDirectory ? `${canonicalPath}/` : canonicalPath;
+}
+
+function listProjectTree(projectDir: string): ProjectTreeListing {
+  const paths: string[] = [];
+
+  const visitDirectory = (dir: string) => {
+    const entries = fs
+      .readdirSync(dir, { withFileTypes: true })
+      .slice()
+      .sort((left, right) => {
+        if (left.isDirectory() !== right.isDirectory()) {
+          return left.isDirectory() ? -1 : 1;
+        }
+        return left.name.localeCompare(right.name, undefined, { numeric: true });
+      });
+
+    for (const entry of entries) {
+      const absolutePath = path.join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        paths.push(toCanonicalRelativePath(projectDir, absolutePath, true));
+        visitDirectory(absolutePath);
+        continue;
+      }
+
+      if (entry.isFile()) {
+        paths.push(toCanonicalRelativePath(projectDir, absolutePath, false));
+      }
+    }
+  };
+
+  visitDirectory(projectDir);
+
+  return { paths };
+}
+
 export function createServer(port = 3000, projectDir?: string): void {
-  let currentProjectDir = path.resolve(projectDir || process.cwd());
+  const defaultProjectDir = path.resolve(projectDir || process.cwd());
+  const homeDir = os.homedir();
   const app = express();
 
-  ensureDirectoryExists(currentProjectDir);
+  ensureDirectoryExists(defaultProjectDir);
 
   app.use(express.json({ limit: "50mb" }));
 
+  function requestedProjectPath(req: Request): string | null {
+    const queryPath =
+      typeof req.query.projectPath === "string" ? req.query.projectPath.trim() : "";
+    const bodyPath =
+      typeof req.body?.projectPath === "string" ? req.body.projectPath.trim() : "";
+    const nextPath = queryPath || bodyPath;
+    return nextPath.length > 0 ? nextPath : null;
+  }
+
+  function projectDirFromRequest(
+    req: Request,
+    res: Response,
+    options?: { mustExist?: boolean }
+  ): string | null {
+    const nextProjectPath = requestedProjectPath(req);
+    const resolvedProjectDir = path.resolve(nextProjectPath || defaultProjectDir);
+    const mustExist = options?.mustExist ?? true;
+
+    if (mustExist && !isExistingDirectory(resolvedProjectDir)) {
+      res.status(404).json({ error: "Project directory not found" });
+      return null;
+    }
+
+    return resolvedProjectDir;
+  }
+
   // --- API routes ---
 
-  app.get("/api/pages", (_req, res) => {
-    const ids = listMdFiles(currentProjectDir);
+  app.get("/api/pages", (req, res) => {
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return;
+
+    const ids = listMdFiles(projectDir);
     const pages = ids.map((id) => {
-      const content = fs.readFileSync(path.join(currentProjectDir, `${id}.md`), "utf-8");
+      const content = fs.readFileSync(path.join(projectDir, `${id}.md`), "utf-8");
       return { id, title: titleFromContent(content, id), content };
     });
     res.json(pages);
   });
 
   app.get("/api/pages/:id", (req, res) => {
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return;
+
     const id = req.params.id;
-    const filePath = path.join(currentProjectDir, `${id}.md`);
+    const filePath = path.join(projectDir, `${id}.md`);
     if (!fs.existsSync(filePath)) {
       res.status(404).json({ error: "Page not found" });
       return;
@@ -175,9 +329,33 @@ export function createServer(port = 3000, projectDir?: string): void {
     res.json({ id, title: titleFromContent(content, id), content });
   });
 
+  app.get("/api/markdown-file", (req, res) => {
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return;
+
+    const relativePath = typeof req.query.path === "string" ? req.query.path : "";
+    const absolutePath = ensureProjectPath(projectDir, relativePath);
+
+    if (!absolutePath || !absolutePath.toLowerCase().endsWith(".md") || !fs.existsSync(absolutePath)) {
+      res.status(404).json({ error: "Markdown file not found" });
+      return;
+    }
+
+    const content = fs.readFileSync(absolutePath, "utf-8");
+    const fallbackTitle = path.basename(relativePath, ".md");
+    res.json({
+      id: pageIdFromRelativePath(relativePath),
+      title: titleFromContent(content, fallbackTitle),
+      content,
+    });
+  });
+
   app.put("/api/pages/:id", (req, res) => {
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return;
+
     const id = req.params.id;
-    const filePath = path.join(currentProjectDir, `${id}.md`);
+    const filePath = path.join(projectDir, `${id}.md`);
     if (!fs.existsSync(filePath)) {
       res.status(404).json({ error: "Page not found" });
       return;
@@ -187,32 +365,59 @@ export function createServer(port = 3000, projectDir?: string): void {
     res.json({ id, title: titleFromContent(content, id), content });
   });
 
+  app.put("/api/markdown-file", (req, res) => {
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return;
+
+    const relativePath = typeof req.query.path === "string" ? req.query.path : "";
+    const absolutePath = ensureProjectPath(projectDir, relativePath);
+
+    if (!absolutePath || !absolutePath.toLowerCase().endsWith(".md") || !fs.existsSync(absolutePath)) {
+      res.status(404).json({ error: "Markdown file not found" });
+      return;
+    }
+
+    const { content } = req.body as { content: string };
+    fs.writeFileSync(absolutePath, content);
+    res.json({
+      id: pageIdFromRelativePath(relativePath),
+      title: titleFromContent(content, path.basename(relativePath, ".md")),
+      content,
+    });
+  });
+
   app.post("/api/pages", (req, res) => {
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return;
+
     const { title, content: bodyContent } = req.body as {
       title?: string;
       content?: string;
     };
-    const id = nextUntitledId(currentProjectDir);
+    const id = nextUntitledId(projectDir);
     const content = bodyContent || `# ${title || "Untitled"}\n`;
-    const filePath = path.join(currentProjectDir, `${id}.md`);
+    const filePath = path.join(projectDir, `${id}.md`);
     fs.writeFileSync(filePath, content);
 
     // Add to roughdraft.json
-    const project = readProjectFile(currentProjectDir);
+    const project = readProjectFile(projectDir);
     const existing = Object.values(project.pages);
     const maxX =
       existing.length > 0
         ? Math.max(...existing.map((p) => p.x + p.width))
         : 0;
     project.pages[id] = { x: maxX + 20, y: 0, width: 400, height: 500 };
-    writeProjectFile(currentProjectDir, project);
+    writeProjectFile(projectDir, project);
 
     res.status(201).json({ id, title: titleFromContent(content, id), content });
   });
 
   app.delete("/api/pages/:id", (req, res) => {
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return;
+
     const id = req.params.id;
-    const filePath = path.join(currentProjectDir, `${id}.md`);
+    const filePath = path.join(projectDir, `${id}.md`);
     if (!fs.existsSync(filePath)) {
       res.status(404).json({ error: "Page not found" });
       return;
@@ -220,22 +425,25 @@ export function createServer(port = 3000, projectDir?: string): void {
     fs.unlinkSync(filePath);
 
     // Remove from roughdraft.json
-    const project = readProjectFile(currentProjectDir);
+    const project = readProjectFile(projectDir);
     delete project.pages[id];
-    writeProjectFile(currentProjectDir, project);
+    writeProjectFile(projectDir, project);
 
     res.json({ ok: true });
   });
 
-  app.get("/api/project", (_req, res) => {
-    const project = readProjectFile(currentProjectDir);
+  app.get("/api/project", (req, res) => {
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return;
+
+    const project = readProjectFile(projectDir);
     res.json(project);
   });
 
   app.get("/api/status", (_req, res) => {
     res.json({
       backend: "local-files",
-      projectDir: currentProjectDir,
+      projectDir: defaultProjectDir,
       port,
     });
   });
@@ -244,7 +452,7 @@ export function createServer(port = 3000, projectDir?: string): void {
     const requestedPath =
       typeof req.query.path === "string" && req.query.path.trim().length > 0
         ? path.resolve(req.query.path)
-        : currentProjectDir;
+        : defaultProjectDir;
 
     if (!isExistingDirectory(requestedPath)) {
       res.status(404).json({ error: "Directory not found" });
@@ -252,6 +460,38 @@ export function createServer(port = 3000, projectDir?: string): void {
     }
 
     res.json(listDirectories(requestedPath));
+  });
+
+  app.get("/api/fs/list", (req, res) => {
+    const requestedPath =
+      typeof req.query.path === "string" && req.query.path.trim().length > 0
+        ? path.resolve(req.query.path)
+        : homeDir;
+
+    if (!fs.existsSync(requestedPath)) {
+      res.status(404).json({ error: "Directory not found" });
+      return;
+    }
+
+    if (!isExistingDirectory(requestedPath)) {
+      res.status(400).json({ error: "Path is not a directory" });
+      return;
+    }
+
+    try {
+      res.json(listFileSystem(requestedPath, homeDir));
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to read directory listing";
+      res.status(500).json({ error: message });
+    }
+  });
+
+  app.get("/api/file-tree", (req, res) => {
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return;
+
+    res.json(listProjectTree(projectDir));
   });
 
   app.post("/api/project/open", (req, res) => {
@@ -267,13 +507,11 @@ export function createServer(port = 3000, projectDir?: string): void {
       return;
     }
 
-    currentProjectDir = absolutePath;
-    ensureDirectoryExists(currentProjectDir);
-    readProjectFile(currentProjectDir);
+    readProjectFile(absolutePath);
 
     res.json({
       backend: "local-files",
-      projectDir: currentProjectDir,
+      projectDir: absolutePath,
       port,
     });
   });
@@ -287,25 +525,35 @@ export function createServer(port = 3000, projectDir?: string): void {
 
     const absolutePath = path.resolve(requestedPath);
     ensureDirectoryExists(absolutePath);
-    currentProjectDir = absolutePath;
-    readProjectFile(currentProjectDir);
+    readProjectFile(absolutePath);
 
     res.status(201).json({
       backend: "local-files",
-      projectDir: currentProjectDir,
+      projectDir: absolutePath,
       port,
     });
   });
 
   app.put("/api/project", (req, res) => {
-    const project = req.body as ProjectData;
-    writeProjectFile(currentProjectDir, project);
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return;
+
+    const project = (req.body as { project?: ProjectData }).project;
+    if (!project) {
+      res.status(400).json({ error: "project is required" });
+      return;
+    }
+
+    writeProjectFile(projectDir, project);
     res.json(project);
   });
 
   app.get("/api/files", (req, res) => {
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return;
+
     const relativePath = typeof req.query.path === "string" ? req.query.path : "";
-    const absolutePath = ensureProjectPath(currentProjectDir, relativePath);
+    const absolutePath = ensureProjectPath(projectDir, relativePath);
 
     if (!absolutePath || !fs.existsSync(absolutePath)) {
       res.status(404).json({ error: "File not found" });
@@ -316,14 +564,17 @@ export function createServer(port = 3000, projectDir?: string): void {
   });
 
   app.post("/api/assets", (req, res) => {
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return;
+
     const payload = req.body as AssetPayload;
     if (!payload.filename || !payload.dataBase64) {
       res.status(400).json({ error: "filename and dataBase64 are required" });
       return;
     }
 
-    const relativePath = nextAssetPath(currentProjectDir, payload.filename);
-    const absolutePath = ensureProjectPath(currentProjectDir, relativePath);
+    const relativePath = nextAssetPath(projectDir, payload.filename);
+    const absolutePath = ensureProjectPath(projectDir, relativePath);
     if (!absolutePath) {
       res.status(400).json({ error: "Invalid asset path" });
       return;
@@ -335,7 +586,7 @@ export function createServer(port = 3000, projectDir?: string): void {
 
     res.status(201).json({
       markdownPath: `./${relativePath}`,
-      previewUrl: `/api/files?path=${encodeURIComponent(relativePath)}`,
+      previewUrl: `/api/files?projectPath=${encodeURIComponent(projectDir)}&path=${encodeURIComponent(relativePath)}`,
       mimeType: payload.mimeType || "application/octet-stream",
     });
   });
@@ -350,6 +601,6 @@ export function createServer(port = 3000, projectDir?: string): void {
 
   app.listen(port, () => {
     console.log(`\n  Roughdraft running at http://localhost:${port}`);
-    console.log(`  Project directory: ${currentProjectDir}\n`);
+    console.log(`  Default project directory: ${defaultProjectDir}\n`);
   });
 }

@@ -85,7 +85,7 @@ export function EditorContextMenu({
 
   return (
     <div
-      className="editor-context-wrapper"
+      className="relative"
       onContextMenu={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -96,15 +96,19 @@ export function EditorContextMenu({
       {position ? (
         <div
           ref={menuRef}
-          className="editor-context-menu"
+          className="fixed z-[200] min-w-44 rounded-2xl border border-slate-200/90 bg-white/95 p-1.5 shadow-[0_18px_48px_rgba(15,23,42,0.16)] backdrop-blur-xl"
           style={{ left: position.x, top: position.y }}
         >
-          <button type="button" className="editor-context-menu-item" onClick={() => void handlePasteText()}>
+          <button
+            type="button"
+            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+            onClick={() => void handlePasteText()}
+          >
             Paste
           </button>
           <button
             type="button"
-            className="editor-context-menu-item"
+            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50"
             onClick={() => void handlePasteMarkdown()}
           >
             Paste Markdown

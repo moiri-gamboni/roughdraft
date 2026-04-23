@@ -8,6 +8,8 @@
     "roughdraft": "./packages/server/bin/roughdraft.mjs"
   },
   "scripts": {
+    "setup": "./scripts/setup.sh",
+    "start": "./scripts/run.sh",
     "dev": "node scripts/dev.mjs",
     "build": "pnpm --filter @roughdraft/app build && pnpm --filter @roughdraft/server build",
     "preview": "node packages/server/bin/roughdraft.mjs"

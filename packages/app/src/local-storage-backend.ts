@@ -1,8 +1,10 @@
 import type {
   BackendInfo,
   DirectoryListing,
+  FileSystemListing,
   Page,
   ProjectLayout,
+  ProjectTreeListing,
   StorageBackend,
   StoredAsset,
 } from "./storage";
@@ -121,6 +123,11 @@ export class LocalStorageBackend implements StorageBackend {
     return page;
   }
 
+  async getMarkdownFile(relativePath: string): Promise<Page> {
+    const id = relativePath.replace(/\.md$/i, "");
+    return this.getPage(id);
+  }
+
   async savePage(id: string, content: string): Promise<void> {
     const pages = readPages();
     if (!pages[id]) throw new Error(`Page not found: ${id}`);
@@ -129,6 +136,11 @@ export class LocalStorageBackend implements StorageBackend {
     const firstLine = content.split("\n")[0] || "";
     pages[id].title = firstLine.replace(/^#*\s*/, "") || id;
     writePages(pages);
+  }
+
+  async saveMarkdownFile(relativePath: string, content: string): Promise<void> {
+    const id = relativePath.replace(/\.md$/i, "");
+    return this.savePage(id, content);
   }
 
   async createPage(title?: string, content?: string): Promise<Page> {
@@ -196,6 +208,14 @@ export class LocalStorageBackend implements StorageBackend {
   }
 
   async listDirectories(_path?: string): Promise<DirectoryListing> {
+    throw new Error("Project folders are unavailable in browser storage mode.");
+  }
+
+  async listFileSystem(_path?: string): Promise<FileSystemListing> {
+    throw new Error("Project folders are unavailable in browser storage mode.");
+  }
+
+  async listProjectTree(): Promise<ProjectTreeListing> {
     throw new Error("Project folders are unavailable in browser storage mode.");
   }
 
