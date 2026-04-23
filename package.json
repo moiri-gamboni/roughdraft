@@ -11,6 +11,7 @@
     "setup": "./scripts/setup.sh",
     "start": "./scripts/run.sh",
     "dev": "node scripts/dev.mjs",
+    "dev:web": "VITE_PREVIEW_WEB=1 pnpm --filter @roughdraft/app dev",
     "lint": "biome check . --assist-enabled=false",
     "lint:fix": "biome check --write . --assist-enabled=false",
     "format": "biome format --write .",

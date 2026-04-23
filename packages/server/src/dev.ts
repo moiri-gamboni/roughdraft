@@ -19,4 +19,4 @@ if (port !== preferredPort) {
   );
 }
 
-createServer(port, projectDir);
+await createServer(port, projectDir);

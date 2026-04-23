@@ -1,9 +1,13 @@
 import express, { type Express, type Request, type Response } from "express";
-import type { Server } from "node:http";
 import os from "node:os";
+import { createServer as createHttpServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
+import {
+  ROUGHDRAFT_LOOPBACK_HOSTS,
+  ROUGHDRAFT_PUBLIC_HOST,
+} from "./network.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const staticDir = path.resolve(__dirname, "../../app/dist");
@@ -654,12 +658,45 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
   return { app, defaultProjectDir, port };
 }
 
-export function createServer(port = 3000, projectDir?: string): Server {
+export async function createServer(
+  port = 3000,
+  projectDir?: string,
+): Promise<void> {
   const { app, defaultProjectDir } = createApp({ port, projectDir });
-  const server = app.listen(port, () => {
-    console.log(`\n  Roughdraft running at http://localhost:${port}`);
-    console.log(`  Default project directory: ${defaultProjectDir}\n`);
-  });
+  const listeningHosts: string[] = [];
 
-  return server;
+  await Promise.all(
+    ROUGHDRAFT_LOOPBACK_HOSTS.map(
+      (host) =>
+        new Promise<void>((resolve, reject) => {
+          const server = createHttpServer(app);
+
+          server.once("error", (error: NodeJS.ErrnoException) => {
+            if (
+              error.code === "EAFNOSUPPORT" ||
+              error.code === "EADDRNOTAVAIL"
+            ) {
+              resolve();
+              return;
+            }
+
+            reject(error);
+          });
+
+          server.listen(port, host, () => {
+            listeningHosts.push(host);
+            resolve();
+          });
+        }),
+    ),
+  );
+
+  if (listeningHosts.length === 0) {
+    throw new Error("Roughdraft could not bind to any loopback interface.");
+  }
+
+  console.log(
+    `\n  Roughdraft running at http://${ROUGHDRAFT_PUBLIC_HOST}:${port}`,
+  );
+  console.log(`  Default project directory: ${defaultProjectDir}\n`);
 }

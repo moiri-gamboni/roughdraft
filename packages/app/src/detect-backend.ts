@@ -3,6 +3,10 @@ import { ApiBackend } from "./api-backend";
 import { LocalStorageBackend } from "./local-storage-backend";
 
 export async function detectBackend(): Promise<StorageBackend> {
+  if (import.meta.env.VITE_PREVIEW_WEB === "1") {
+    return new LocalStorageBackend();
+  }
+
   try {
     const res = await fetch("/api/status");
     if (res.ok) {

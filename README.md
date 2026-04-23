@@ -35,6 +35,14 @@ npx roughdraft
 
 This starts Roughdraft locally and opens it automatically.
 
+If you want a persistent `roughdraft` command and the user-level agent guidance block, run:
+
+```bash
+npx --yes roughdraft install
+```
+
+That installs `roughdraft` globally and updates `~/CLAUDE.md` plus `~/AGENTS.md` with Roughdraft instructions.
+
 On macOS, if Google Chrome is installed, Roughdraft prefers opening in a separate Chrome app window instead of a normal browser tab.
 
 ```bash
@@ -52,8 +60,8 @@ Open a specific markdown file directly.
 If the local server is already running, you can also open a folder or file directly by URL:
 
 ```text
-http://localhost:3000/absolute/path/to/my-essay
-http://localhost:3000/absolute/path/to/my-essay/draft.md
+http://roughdraft.localhost:3000/absolute/path/to/my-essay
+http://roughdraft.localhost:3000/absolute/path/to/my-essay/draft.md
 ```
 
 That makes an agent-friendly workflow possible:
@@ -71,7 +79,7 @@ That makes an agent-friendly workflow possible:
 ./scripts/run.sh
 ```
 
-`./scripts/setup.sh` installs workspace dependencies and builds the app and server. `./scripts/run.sh` serves the built app at `http://localhost:3000`.
+`./scripts/setup.sh` installs workspace dependencies and builds the app and server. `./scripts/run.sh` serves the built app at `http://roughdraft.localhost:3000`.
 
 The two scripts coordinate through a lock file, so it's safe to start `./scripts/run.sh` while `./scripts/setup.sh` is still in progress. `run` will wait for setup to finish, or trigger setup itself if nothing has been built yet.
 
@@ -111,7 +119,7 @@ Roughdraft includes a skill for Claude Code that lets your agent:
 - Rearrange the canvas layout when exploring multiple versions
 
 ```bash
-# The skill is installed automatically when you run roughdraft
+# The guidance block is installed when you run `npx --yes roughdraft install`
 claude code --skill roughdraft
 ```
 

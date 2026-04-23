@@ -15,6 +15,6 @@ if ! setup_ready; then
 fi
 
 port="${PORT:-3000}"
-log "Starting Roughdraft on http://localhost:${port}"
+log "Starting Roughdraft on http://roughdraft.localhost:${port}"
 
 exec env ROUGHDRAFT_NO_OPEN=1 node "$repo_root/packages/server/bin/roughdraft.mjs"

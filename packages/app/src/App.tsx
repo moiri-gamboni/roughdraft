@@ -6,6 +6,14 @@ import { PageCard } from "./PageCard";
 import { PathSwitcher } from "./PathSwitcher";
 import { ProjectTreeSidebar } from "./ProjectTreeSidebar";
 import { Button } from "./components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./components/ui/dialog";
 
 interface RequestedPathState {
   rawPath: string | null;
@@ -215,6 +223,308 @@ function buildLocationForPath(path?: string | null) {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
+function getInstallCommand() {
+  return "npx --yes roughdraft install";
+}
+
+function buildAgentInstallPrompt() {
+  return [
+    "Install Roughdraft on this machine and set it up for future markdown review workflows.",
+    "",
+    `1. Run \`${getInstallCommand()}\`.`,
+    "2. Let the command update or create user-level `~/CLAUDE.md` and `~/AGENTS.md` with Roughdraft guidance.",
+    "3. Confirm that the `roughdraft` command is available when you are done.",
+    "4. Do not modify any project files as part of setup.",
+  ].join("\n");
+}
+
+function Homepage({ onOpenDemo }: { onOpenDemo: () => void }) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "prompt" | "command">(
+    "idle",
+  );
+  const installCommand = getInstallCommand();
+  const agentPrompt = buildAgentInstallPrompt();
+
+  const copyText = useCallback(
+    async (text: string, nextState: "prompt" | "command") => {
+      try {
+        await navigator.clipboard.writeText(text);
+        setCopyState(nextState);
+        window.setTimeout(() => {
+          setCopyState((current) => (current === nextState ? "idle" : current));
+        }, 1800);
+      } catch (error) {
+        console.error("Failed to copy text:", error);
+        setCopyState("idle");
+      }
+    },
+    [],
+  );
+
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(235,94,40,0.18),_transparent_28%),radial-gradient(circle_at_80%_20%,_rgba(15,23,42,0.12),_transparent_24%),linear-gradient(180deg,_#fcfaf6_0%,_#f3eee3_100%)] text-slate-950">
+      <div className="pointer-events-none absolute inset-0 opacity-70">
+        <div className="absolute top-[-8rem] right-[-6rem] h-[24rem] w-[24rem] rounded-full bg-[radial-gradient(circle,_rgba(190,24,93,0.14),_transparent_62%)]" />
+        <div className="absolute bottom-[-10rem] left-[-5rem] h-[28rem] w-[28rem] rounded-full bg-[radial-gradient(circle,_rgba(2,132,199,0.12),_transparent_60%)]" />
+      </div>
+
+      <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-8 sm:px-10 lg:px-14">
+        <header className="flex items-center justify-between gap-4">
+          <div className="inline-flex items-center gap-3 rounded-full border border-slate-900/10 bg-white/70 px-4 py-2 shadow-[0_12px_40px_rgba(15,23,42,0.08)] backdrop-blur">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-950 text-[0.72rem] font-semibold tracking-[0.18em] text-white uppercase">
+              Rd
+            </div>
+            <div>
+              <div className="text-[0.76rem] font-semibold tracking-[0.24em] text-slate-500 uppercase">
+                Roughdraft
+              </div>
+              <div className="text-sm font-medium text-slate-950">
+                Markdown review for AI workflows
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="rounded-full border border-slate-900/10 bg-white/70 px-4 py-2 text-sm font-medium text-slate-700 shadow-[0_12px_40px_rgba(15,23,42,0.08)] backdrop-blur transition hover:border-slate-900/20 hover:text-slate-950"
+            onClick={onOpenDemo}
+          >
+            Try the demo
+          </button>
+        </header>
+
+        <main className="flex flex-1 items-center py-12 lg:py-16">
+          <div className="grid w-full gap-10 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] lg:items-center">
+            <section className="max-w-3xl">
+              <div className="inline-flex items-center gap-2 rounded-full border border-amber-300/60 bg-amber-100/80 px-3 py-1 text-[0.77rem] font-semibold tracking-[0.16em] text-amber-900 uppercase shadow-[0_10px_30px_rgba(217,119,6,0.12)]">
+                Install through your agent
+              </div>
+              <h1 className="mt-6 max-w-4xl text-5xl font-semibold tracking-[-0.06em] text-slate-950 sm:text-6xl lg:text-7xl">
+                Paste one prompt.
+                <br />
+                Let your agent wire up the rest.
+              </h1>
+              <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-700 sm:text-xl">
+                Roughdraft turns markdown review into a local workflow your
+                agent can actually use. Install it, teach your agent to open
+                `.md` files in Roughdraft, and keep comments, revisions, and
+                final edits in normal markdown on disk.
+              </p>
+
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                <Button
+                  type="button"
+                  size="lg"
+                  className="h-12 rounded-full bg-slate-950 px-6 text-sm font-semibold text-white hover:bg-slate-800"
+                  onClick={() => setDialogOpen(true)}
+                >
+                  Install Now
+                </Button>
+                <Button
+                  type="button"
+                  size="lg"
+                  variant="outline"
+                  className="h-12 rounded-full border-slate-300 bg-white/70 px-6 text-sm font-semibold text-slate-700 hover:bg-white"
+                  onClick={onOpenDemo}
+                >
+                  Open browser demo
+                </Button>
+              </div>
+
+              <div className="mt-10 grid gap-4 sm:grid-cols-3">
+                <div className="rounded-[28px] border border-white/70 bg-white/72 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
+                  <div className="text-[0.72rem] font-semibold tracking-[0.18em] text-slate-500 uppercase">
+                    01
+                  </div>
+                  <p className="mt-3 text-base font-medium tracking-[-0.02em] text-slate-950">
+                    Run one `npx` install command.
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    It installs the CLI and appends a marked Roughdraft block to
+                    your user-level agent docs.
+                  </p>
+                </div>
+                <div className="rounded-[28px] border border-white/70 bg-white/72 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
+                  <div className="text-[0.72rem] font-semibold tracking-[0.18em] text-slate-500 uppercase">
+                    02
+                  </div>
+                  <p className="mt-3 text-base font-medium tracking-[-0.02em] text-slate-950">
+                    Ask your agent to open the doc.
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    The guidance tells it to prefer `roughdraft` whenever you
+                    want to review or comment on markdown.
+                  </p>
+                </div>
+                <div className="rounded-[28px] border border-white/70 bg-white/72 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
+                  <div className="text-[0.72rem] font-semibold tracking-[0.18em] text-slate-500 uppercase">
+                    03
+                  </div>
+                  <p className="mt-3 text-base font-medium tracking-[-0.02em] text-slate-950">
+                    Leave comments in normal markdown.
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Roughdraft keeps everything local and agent-friendly, so the
+                    next pass can happen on the same files.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <section className="relative">
+              <div className="absolute inset-x-8 top-8 h-full rounded-[34px] bg-slate-950/8 blur-3xl" />
+              <div className="relative overflow-hidden rounded-[34px] border border-slate-900/10 bg-[#171717] p-5 text-slate-100 shadow-[0_24px_90px_rgba(15,23,42,0.25)]">
+                <div className="flex items-center gap-2">
+                  <span className="h-3 w-3 rounded-full bg-rose-400" />
+                  <span className="h-3 w-3 rounded-full bg-amber-300" />
+                  <span className="h-3 w-3 rounded-full bg-emerald-400" />
+                  <div className="ml-3 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[0.72rem] tracking-[0.18em] text-slate-400 uppercase">
+                    Agent setup preview
+                  </div>
+                </div>
+
+                <div className="mt-5 rounded-[24px] border border-white/8 bg-black/25 p-4">
+                  <div className="text-[0.72rem] font-semibold tracking-[0.16em] text-slate-500 uppercase">
+                    Prompt
+                  </div>
+                  <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-sm leading-7 text-slate-100">
+                    {agentPrompt}
+                  </pre>
+                </div>
+
+                <div className="mt-4 rounded-[24px] border border-white/8 bg-white/5 p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-[0.72rem] font-semibold tracking-[0.16em] text-slate-500 uppercase">
+                        Install command
+                      </div>
+                      <code className="mt-2 block text-sm leading-6 text-slate-100">
+                        {installCommand}
+                      </code>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-[20px] border border-white/8 bg-white/5 p-4">
+                    <div className="text-sm font-medium text-white">
+                      Updates user guidance
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">
+                      Appends a managed Roughdraft block to `~/CLAUDE.md` and
+                      `~/AGENTS.md` if it is not already there.
+                    </p>
+                  </div>
+                  <div className="rounded-[20px] border border-white/8 bg-white/5 p-4">
+                    <div className="text-sm font-medium text-white">
+                      Keeps the workflow local
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">
+                      Your agent opens files with `roughdraft`, and the markdown
+                      stays on your machine.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-3xl rounded-[28px] border border-slate-200 bg-[#faf7f1] p-0 text-slate-950 shadow-[0_32px_120px_rgba(15,23,42,0.28)]">
+          <div className="border-b border-slate-200 px-6 py-5 sm:px-8">
+            <DialogHeader className="gap-2">
+              <DialogTitle className="text-2xl font-semibold tracking-[-0.04em] text-slate-950">
+                Copy this prompt into Claude Code or another local agent
+              </DialogTitle>
+              <DialogDescription className="max-w-2xl text-sm leading-6 text-slate-600">
+                The prompt tells the agent to run `npx --yes roughdraft
+                install`, verify the `roughdraft` CLI, and update `~/CLAUDE.md`
+                plus `~/AGENTS.md` with Roughdraft guidance.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+
+          <div className="space-y-5 px-6 py-6 sm:px-8">
+            <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
+              <div className="mb-3 flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-[0.72rem] font-semibold tracking-[0.18em] text-slate-500 uppercase">
+                    Agent prompt
+                  </div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    Paste this as-is into the agent.
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  size="lg"
+                  className="h-10 rounded-full bg-slate-950 px-5 text-sm font-semibold text-white hover:bg-slate-800"
+                  onClick={() => void copyText(agentPrompt, "prompt")}
+                >
+                  {copyState === "prompt" ? "Copied prompt" : "Copy prompt"}
+                </Button>
+              </div>
+              <textarea
+                readOnly
+                value={agentPrompt}
+                className="min-h-[220px] w-full resize-none rounded-[18px] border border-slate-200 bg-[#fcfbf8] p-4 text-sm leading-6 text-slate-800 outline-none"
+              />
+            </div>
+
+            <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
+              <div className="mb-3 flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-[0.72rem] font-semibold tracking-[0.18em] text-slate-500 uppercase">
+                    Direct install command
+                  </div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    For users who want to run it manually.
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  className="h-10 rounded-full border-slate-300 px-5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => void copyText(installCommand, "command")}
+                >
+                  {copyState === "command" ? "Copied command" : "Copy command"}
+                </Button>
+              </div>
+              <code className="block overflow-x-auto rounded-[18px] bg-slate-950 px-4 py-4 text-sm leading-6 text-slate-100">
+                {installCommand}
+              </code>
+            </div>
+          </div>
+
+          <DialogFooter className="border-t border-slate-200 px-6 py-4 sm:px-8">
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              className="h-10 rounded-full border-slate-300 px-5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              onClick={onOpenDemo}
+            >
+              Open browser demo
+            </Button>
+            <Button
+              type="button"
+              size="lg"
+              className="h-10 rounded-full bg-slate-950 px-5 text-sm font-semibold text-white hover:bg-slate-800"
+              onClick={() => setDialogOpen(false)}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function syncProjectPathInUrl(projectPath?: string) {
   const nextLocation = buildLocationForPath(getWorkspacePath(projectPath));
   const currentLocation = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -256,6 +566,7 @@ export function App() {
     useState<HTMLDivElement | null>(null);
   const [projectTreeVersion, setProjectTreeVersion] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [demoModeEnabled, setDemoModeEnabled] = useState(false);
   const backendRef = useRef<StorageBackend | null>(null);
   const layoutRef = useRef<ProjectLayout>({ pages: {} });
   const saveLayoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -633,6 +944,15 @@ export function App() {
         <p>Loading canvas...</p>
       </div>
     );
+  }
+
+  const shouldShowHomepage =
+    backend?.info.kind === "local-storage" &&
+    !requestedPathState.rawPath &&
+    !demoModeEnabled;
+
+  if (shouldShowHomepage) {
+    return <Homepage onOpenDemo={() => setDemoModeEnabled(true)} />;
   }
 
   const documentAbsolutePath =
