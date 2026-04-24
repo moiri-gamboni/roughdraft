@@ -37,5 +37,8 @@ pnpm install --frozen-lockfile
 log "Building workspace packages..."
 pnpm build
 
+log "Installing worktree dev CLI wrapper..."
+pnpm dev:install-cli
+
 touch "$setup_stamp"
 log "Setup complete."

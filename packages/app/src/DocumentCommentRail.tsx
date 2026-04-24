@@ -19,9 +19,12 @@ interface DocumentCommentRailProps {
   className?: string;
   onDeleteComment: (commentId: string) => void;
   onUpdateComment: (commentId: string, nextContent: string) => void;
+  onReplyComment: (commentId: string) => void;
   onSelectComment: (commentId: string) => void;
   onFocusComment: (commentId: string) => void;
   onHoverComment: (commentId: string | null) => void;
+  pendingFocusCommentId?: string | null;
+  onAutoFocusComment?: (commentId: string) => void;
 }
 
 export function DocumentCommentRail({
@@ -33,9 +36,12 @@ export function DocumentCommentRail({
   className,
   onDeleteComment,
   onUpdateComment,
+  onReplyComment,
   onSelectComment,
   onFocusComment,
   onHoverComment,
+  pendingFocusCommentId = null,
+  onAutoFocusComment,
 }: DocumentCommentRailProps) {
   const groupRefs = useRef(new Map<string, HTMLDivElement>());
   const scale = useCanvasScale();
@@ -159,6 +165,7 @@ export function DocumentCommentRail({
             layout.commentIds.includes(selectedCommentId);
           const isHovered =
             !!hoveredCommentId && layout.commentIds.includes(hoveredCommentId);
+          const isExpanded = isSelected;
           const primaryCommentId =
             getPreferredCommentId(layout.commentIds, selectedCommentId) ??
             layout.visibleComments[0]?.id;
@@ -167,13 +174,15 @@ export function DocumentCommentRail({
             <div
               key={layout.key}
               ref={(node) => setGroupRef(layout.key, node)}
+              data-comment-thread-container="true"
               className={cn(
-                "absolute left-0 right-0 cursor-default rounded-2xl border bg-white/95 shadow-[0_10px_30px_rgba(15,23,42,0.08)] transition-[border-color,box-shadow,background-color]",
+                "absolute left-0 right-0 rounded-2xl border bg-white/95 transition-all duration-200 ease-out will-change-transform",
                 isSelected
-                  ? "border-amber-300 bg-amber-50/80 shadow-[0_16px_36px_rgba(217,119,6,0.14)]"
+                  ? "-translate-x-2 border-slate-300 shadow-[0_22px_48px_rgba(15,23,42,0.18)]"
                   : isHovered
-                    ? "border-amber-200 bg-amber-50/50 shadow-[0_12px_32px_rgba(217,119,6,0.10)]"
+                    ? "border-slate-300/80"
                     : "border-slate-200/90",
+                isExpanded ? "cursor-default" : "cursor-pointer",
               )}
               style={{ top: layout.railTop }}
               onMouseEnter={() => {
@@ -182,17 +191,26 @@ export function DocumentCommentRail({
                 }
               }}
               onMouseLeave={() => onHoverComment(null)}
+              onClick={() => {
+                if (isExpanded || !primaryCommentId) return;
+                onFocusComment(primaryCommentId);
+              }}
             >
               <CommentEditorList
                 comments={layout.visibleComments}
                 variant="rail"
+                className={cn(!isExpanded && "pointer-events-none")}
+                interactive={isExpanded}
                 selectedCommentId={selectedCommentId}
                 hoveredCommentId={hoveredCommentId}
                 onDeleteComment={onDeleteComment}
                 onUpdateComment={onUpdateComment}
+                onReplyComment={onReplyComment}
                 onSelectComment={onSelectComment}
                 onFocusComment={onFocusComment}
                 onHoverComment={onHoverComment}
+                pendingFocusCommentId={pendingFocusCommentId}
+                onAutoFocusComment={onAutoFocusComment}
               />
             </div>
           );

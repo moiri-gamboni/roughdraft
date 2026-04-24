@@ -298,8 +298,7 @@ function ProjectTreePanel({
             "--trees-selected-fg-override": "rgb(15 23 42)",
             "--trees-selected-focused-border-color-override":
               "rgba(15, 23, 42, 0.14)",
-            "--trees-font-family-override":
-              '"SF Pro Text", "SF Pro Display", "Segoe UI", sans-serif',
+            "--trees-font-family-override": '"Inter Variable", sans-serif',
             "--trees-font-size-override": "13px",
             "--trees-border-radius-override":
               layout === "embedded" ? "0px" : "14px",

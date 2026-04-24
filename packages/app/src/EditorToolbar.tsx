@@ -1,4 +1,5 @@
 import type { Editor } from "@tiptap/react";
+import { useEditorState } from "@tiptap/react";
 import {
   Bold,
   CheckSquare,
@@ -20,7 +21,7 @@ import {
   Undo2,
   Upload,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -147,26 +148,53 @@ export function EditorToolbar({
   variant = "canvas",
 }: EditorToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [blockType, setBlockType] = useState<BlockType>("paragraph");
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkValue, setLinkValue] = useState("https://");
 
-  useEffect(() => {
-    if (!editor) return;
-
-    const updateBlockType = () => {
-      setBlockType(getBlockType(editor));
-    };
-
-    updateBlockType();
-    editor.on("selectionUpdate", updateBlockType);
-    editor.on("update", updateBlockType);
-
-    return () => {
-      editor.off("selectionUpdate", updateBlockType);
-      editor.off("update", updateBlockType);
-    };
-  }, [editor]);
+  const toolbarState = useEditorState({
+    editor,
+    selector: ({ editor: currentEditor }) => ({
+      blockType: currentEditor ? getBlockType(currentEditor) : "paragraph",
+      isBoldActive: currentEditor?.isActive("bold") ?? false,
+      isItalicActive: currentEditor?.isActive("italic") ?? false,
+      isCodeActive: currentEditor?.isActive("code") ?? false,
+      isBulletListActive: currentEditor?.isActive("bulletList") ?? false,
+      isTaskListActive: currentEditor?.isActive("taskList") ?? false,
+      isOrderedListActive: currentEditor?.isActive("orderedList") ?? false,
+      isLinkActive: currentEditor?.isActive("link") ?? false,
+      canToggleBold:
+        currentEditor?.can().chain().focus().toggleBold().run() ?? false,
+      canToggleItalic:
+        currentEditor?.can().chain().focus().toggleItalic().run() ?? false,
+      canToggleCode:
+        currentEditor?.can().chain().focus().toggleCode().run() ?? false,
+      canToggleBulletList:
+        currentEditor?.can().chain().focus().toggleBulletList().run() ?? false,
+      canToggleTaskList:
+        currentEditor?.can().chain().focus().toggleTaskList().run() ?? false,
+      canToggleOrderedList:
+        currentEditor?.can().chain().focus().toggleOrderedList().run() ?? false,
+      canUndo: currentEditor?.can().chain().focus().undo().run() ?? false,
+      canRedo: currentEditor?.can().chain().focus().redo().run() ?? false,
+    }),
+  }) ?? {
+    blockType: "paragraph" as BlockType,
+    isBoldActive: false,
+    isItalicActive: false,
+    isCodeActive: false,
+    isBulletListActive: false,
+    isTaskListActive: false,
+    isOrderedListActive: false,
+    isLinkActive: false,
+    canToggleBold: false,
+    canToggleItalic: false,
+    canToggleCode: false,
+    canToggleBulletList: false,
+    canToggleTaskList: false,
+    canToggleOrderedList: false,
+    canUndo: false,
+    canRedo: false,
+  };
 
   if (!editor) {
     return null;
@@ -246,7 +274,7 @@ export function EditorToolbar({
   );
   const overflowActionClass =
     "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100";
-  const activeBlockTypeOption = getBlockTypeOption(blockType);
+  const activeBlockTypeOption = getBlockTypeOption(toolbarState.blockType);
   const ActiveBlockTypeIcon = activeBlockTypeOption.icon;
 
   return (
@@ -257,7 +285,7 @@ export function EditorToolbar({
       >
         <div className={sectionClass}>
           <Select
-            value={blockType}
+            value={toolbarState.blockType}
             onValueChange={(value) => handleBlockChange(value as BlockType)}
           >
             <SelectTrigger
@@ -294,16 +322,16 @@ export function EditorToolbar({
         ) : null}
         <div className={sectionClass} aria-label="Text formatting" role="group">
           <ToolbarButton
-            active={editor.isActive("bold")}
-            disabled={!editor.can().chain().focus().toggleBold().run()}
+            active={toolbarState.isBoldActive}
+            disabled={!toolbarState.canToggleBold}
             label="Bold"
             onClick={() => editor.chain().focus().toggleBold().run()}
             icon={<Bold size={16} />}
             variant={variant}
           />
           <ToolbarButton
-            active={editor.isActive("italic")}
-            disabled={!editor.can().chain().focus().toggleItalic().run()}
+            active={toolbarState.isItalicActive}
+            disabled={!toolbarState.canToggleItalic}
             label="Italic"
             onClick={() => editor.chain().focus().toggleItalic().run()}
             icon={<Italic size={16} />}
@@ -311,8 +339,8 @@ export function EditorToolbar({
           />
           {!isDocumentToolbar ? (
             <ToolbarButton
-              active={editor.isActive("code")}
-              disabled={!editor.can().chain().focus().toggleCode().run()}
+              active={toolbarState.isCodeActive}
+              disabled={!toolbarState.canToggleCode}
               label="Inline code"
               onClick={() => editor.chain().focus().toggleCode().run()}
               icon={<Code2 size={16} />}
@@ -329,8 +357,8 @@ export function EditorToolbar({
         ) : null}
         <div className={sectionClass} aria-label="Lists" role="group">
           <ToolbarButton
-            active={editor.isActive("bulletList")}
-            disabled={!editor.can().chain().focus().toggleBulletList().run()}
+            active={toolbarState.isBulletListActive}
+            disabled={!toolbarState.canToggleBulletList}
             label="Bulleted list"
             onClick={() => editor.chain().focus().toggleBulletList().run()}
             icon={<List size={16} />}
@@ -338,8 +366,8 @@ export function EditorToolbar({
           />
           {!isDocumentToolbar ? (
             <ToolbarButton
-              active={editor.isActive("taskList")}
-              disabled={!editor.can().chain().focus().toggleTaskList().run()}
+              active={toolbarState.isTaskListActive}
+              disabled={!toolbarState.canToggleTaskList}
               label="Task list"
               onClick={() => editor.chain().focus().toggleTaskList().run()}
               icon={<CheckSquare size={16} />}
@@ -348,8 +376,8 @@ export function EditorToolbar({
           ) : null}
           {!isDocumentToolbar ? (
             <ToolbarButton
-              active={editor.isActive("orderedList")}
-              disabled={!editor.can().chain().focus().toggleOrderedList().run()}
+              active={toolbarState.isOrderedListActive}
+              disabled={!toolbarState.canToggleOrderedList}
               label="Numbered list"
               onClick={() => editor.chain().focus().toggleOrderedList().run()}
               icon={<ListOrdered size={16} />}
@@ -366,7 +394,7 @@ export function EditorToolbar({
         ) : null}
         <div className={sectionClass} aria-label="Insert" role="group">
           <ToolbarButton
-            active={editor.isActive("link")}
+            active={toolbarState.isLinkActive}
             label="Link"
             onClick={openLinkDialog}
             icon={<Link2 size={16} />}
@@ -406,14 +434,14 @@ export function EditorToolbar({
           <div className={sectionClass} aria-label="History" role="group">
             <ToolbarButton
               label="Undo"
-              disabled={!editor.can().chain().focus().undo().run()}
+              disabled={!toolbarState.canUndo}
               onClick={() => editor.chain().focus().undo().run()}
               icon={<Undo2 size={16} />}
               variant={variant}
             />
             <ToolbarButton
               label="Redo"
-              disabled={!editor.can().chain().focus().redo().run()}
+              disabled={!toolbarState.canRedo}
               onClick={() => editor.chain().focus().redo().run()}
               icon={<Redo2 size={16} />}
               variant={variant}

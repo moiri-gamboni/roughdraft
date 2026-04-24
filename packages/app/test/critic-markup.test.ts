@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  createNextCommentId,
   criticMarkdownToEditorState,
   editorStateToCriticMarkdown,
+  getCommentDescendantIds,
 } from "../src/critic-markup";
 
 describe("CriticMarkup comments", () => {
@@ -62,5 +64,80 @@ describe("CriticMarkup comments", () => {
       "{==Second item==}{>>Needs review<<}{@id:cmt4;by:AI;at:2024-01-15T10:33:00.000Z@}",
     );
     expect(output).toContain("*   First item");
+  });
+
+  it("round-trips an anchored reply thread", () => {
+    const input =
+      "Please revisit {==this sentence==}{>>Needs a source<<}{@id:c1;by:user;at:2024-01-15T10:30:00.000Z@}{>>I can add one from the intro.<<}{@id:c2;by:AI;at:2024-01-15T10:31:00.000Z;re:c1@}.\n";
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+
+    expect(comments.get("c2")).toMatchObject({
+      id: "c2",
+      parentCommentId: "c1",
+      authorType: "ai",
+    });
+    expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it("round-trips nested replies in preorder", () => {
+    const input =
+      "Please revisit {==this sentence==}{>>Needs a source<<}{@id:c1;by:user;at:2024-01-15T10:30:00.000Z@}{>>I can add one from the intro.<<}{@id:c2;by:AI;at:2024-01-15T10:31:00.000Z;re:c1@}{>>Use the market report too.<<}{@id:c3;by:user;at:2024-01-15T10:32:00.000Z;re:c2@}.\n";
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+
+    expect(comments.get("c3")).toMatchObject({
+      id: "c3",
+      parentCommentId: "c2",
+    });
+    expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it("allocates simple document-local ids", () => {
+    expect(
+      createNextCommentId([{ id: "c2" }, { id: "note-1" }, { id: "c7" }]),
+    ).toBe("c8");
+  });
+
+  it("collects descendants in nested reply order", () => {
+    const comments = new Map([
+      [
+        "c1",
+        {
+          id: "c1",
+          content: "Root",
+          createdAt: "2024-01-15T10:30:00.000Z",
+        },
+      ],
+      [
+        "c2",
+        {
+          id: "c2",
+          content: "Reply",
+          createdAt: "2024-01-15T10:31:00.000Z",
+          parentCommentId: "c1",
+        },
+      ],
+      [
+        "c3",
+        {
+          id: "c3",
+          content: "Nested reply",
+          createdAt: "2024-01-15T10:32:00.000Z",
+          parentCommentId: "c2",
+        },
+      ],
+      [
+        "c4",
+        {
+          id: "c4",
+          content: "Sibling reply",
+          createdAt: "2024-01-15T10:33:00.000Z",
+          parentCommentId: "c1",
+        },
+      ],
+    ]);
+
+    expect(getCommentDescendantIds("c1", comments)).toEqual(["c2", "c3", "c4"]);
   });
 });

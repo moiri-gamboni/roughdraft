@@ -100,6 +100,15 @@ The two scripts coordinate through a lock file, so it's safe to start `./scripts
 
 If you prefer package scripts, the same commands are available as `pnpm setup` and `pnpm start`.
 
+Running `pnpm setup` also installs a per-worktree dev CLI wrapper into `~/.local/bin` by default, using the current worktree directory name. For example, this checkout might install `roughdraft-dev-lyon-v2`, which points at this worktree's local code while leaving the published global `roughdraft` command untouched.
+
+You can refresh that wrapper manually with:
+
+```bash
+pnpm dev:install-cli
+pnpm dev:install-cli --name api-redesign
+```
+
 Quality checks:
 
 ```bash

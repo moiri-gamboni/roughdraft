@@ -1,4 +1,4 @@
-import { Mark, mergeAttributes } from "@tiptap/core";
+import { Extension, Mark, mergeAttributes } from "@tiptap/core";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -9,6 +9,12 @@ import { TableRow } from "@tiptap/extension-table-row";
 import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
 import StarterKit from "@tiptap/starter-kit";
+import type {
+  Mark as ProseMirrorMark,
+  Node as ProseMirrorNode,
+} from "@tiptap/pm/model";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
@@ -119,6 +125,122 @@ const CommentRef = Mark.create({
   },
 });
 
+interface CommentHighlightMeta {
+  selectedCommentId: string | null;
+  hoveredCommentId: string | null;
+}
+
+interface CommentHighlightPluginState extends CommentHighlightMeta {
+  decorations: DecorationSet;
+}
+
+export const commentHighlightPluginKey =
+  new PluginKey<CommentHighlightPluginState>("commentHighlight");
+
+function createCommentHighlightDecorations(
+  doc: ProseMirrorNode,
+  selectedCommentId: string | null,
+  hoveredCommentId: string | null,
+) {
+  const commentMarkType = doc.type.schema.marks.commentRef;
+  const decorations: Decoration[] = [];
+
+  if (!commentMarkType) {
+    return DecorationSet.create(doc, decorations);
+  }
+
+  doc.descendants((node: ProseMirrorNode, pos: number) => {
+    if (!node.isText) return;
+
+    const commentIds = [
+      ...new Set(
+        node.marks.flatMap((mark: ProseMirrorMark) =>
+          mark.type === commentMarkType && Array.isArray(mark.attrs.commentIds)
+            ? mark.attrs.commentIds
+            : [],
+        ),
+      ),
+    ];
+
+    if (commentIds.length === 0) return;
+
+    const isSelected =
+      !!selectedCommentId && commentIds.includes(selectedCommentId);
+    const isHovered =
+      !!hoveredCommentId && commentIds.includes(hoveredCommentId);
+    const classNames = ["comment-decoration"];
+
+    if (isSelected) {
+      classNames.push("comment-decoration-active");
+    } else if (isHovered) {
+      classNames.push("comment-decoration-hovered");
+    }
+
+    decorations.push(
+      Decoration.inline(pos, pos + node.nodeSize, {
+        class: classNames.join(" "),
+      }),
+    );
+  });
+
+  return DecorationSet.create(doc, decorations);
+}
+
+const CommentHighlight = Extension.create({
+  name: "commentHighlight",
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin<CommentHighlightPluginState>({
+        key: commentHighlightPluginKey,
+        state: {
+          init: (_, state) => ({
+            selectedCommentId: null,
+            hoveredCommentId: null,
+            decorations: createCommentHighlightDecorations(
+              state.doc,
+              null,
+              null,
+            ),
+          }),
+          apply: (tr, pluginState) => {
+            const meta = tr.getMeta(commentHighlightPluginKey) as
+              | CommentHighlightMeta
+              | undefined;
+
+            if (!meta && !tr.docChanged) {
+              return pluginState;
+            }
+
+            const selectedCommentId =
+              meta !== undefined
+                ? meta.selectedCommentId
+                : pluginState.selectedCommentId;
+            const hoveredCommentId =
+              meta !== undefined
+                ? meta.hoveredCommentId
+                : pluginState.hoveredCommentId;
+
+            return {
+              selectedCommentId,
+              hoveredCommentId,
+              decorations: createCommentHighlightDecorations(
+                tr.doc,
+                selectedCommentId,
+                hoveredCommentId,
+              ),
+            };
+          },
+        },
+        props: {
+          decorations: (state) =>
+            commentHighlightPluginKey.getState(state)?.decorations ?? null,
+        },
+      }),
+    ];
+  },
+});
+
 const MarkdownLink = Link.extend({
   addAttributes() {
     return {
@@ -178,6 +300,7 @@ export function createEditorExtensions(placeholder: string) {
       nested: true,
     }),
     CommentRef,
+    CommentHighlight,
     MarkdownImage.configure({
       allowBase64: true,
       inline: false,

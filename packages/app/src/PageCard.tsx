@@ -1,8 +1,8 @@
-import type { Editor } from "@tiptap/react";
-import { EditorContent, useEditor } from "@tiptap/react";
 import type { JSONContent } from "@tiptap/core";
+import type { Editor } from "@tiptap/react";
+import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { TextSelection } from "@tiptap/pm/state";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useCanvasScale } from "./Canvas";
@@ -12,11 +12,15 @@ import {
   createCriticComment,
   criticMarkdownToEditorState,
   editorStateToCriticMarkdown,
+  getCommentDescendantIds,
   type CriticComment,
 } from "./critic-markup";
 import { getPreferredCommentId, parseCommentIds } from "./document-comments";
 import { EditorContextMenu } from "./EditorContextMenu";
-import { createEditorExtensions } from "./editor-extensions";
+import {
+  commentHighlightPluginKey,
+  createEditorExtensions,
+} from "./editor-extensions";
 import { EditorToolbar } from "./EditorToolbar";
 import { toHtml } from "./markdown";
 import type { Page, StorageBackend } from "./storage";
@@ -26,8 +30,10 @@ const CANVAS_CONTENT_WIDTH = 680;
 const CANVAS_CONTENT_HORIZONTAL_PADDING = 20;
 const CANVAS_EDITOR_FRAME_WIDTH =
   CANVAS_CONTENT_WIDTH - CANVAS_CONTENT_HORIZONTAL_PADDING * 2;
-const CANVAS_RAIL_WIDTH = 296;
+const CANVAS_RAIL_WIDTH = 420;
 const CANVAS_RAIL_GAP = 24;
+
+type SaveState = "idle" | "saving" | "error";
 
 interface PageCardProps {
   page: Page;
@@ -41,14 +47,37 @@ interface PageCardProps {
   onSave: (id: string, content: string) => Promise<void>;
   onReposition?: (id: string, x: number, y: number) => void;
   onDelete?: (id: string) => void;
-  onSaveStateChange?: (state: "idle" | "saving" | "error") => void;
+  onSaveStateChange?: (state: SaveState) => void;
   documentToolbarHost?: HTMLElement | null;
   backend: StorageBackend;
+  onEditorReady?: (editor: Editor | null) => void;
+}
+
+interface PageCardEditorSurfaceProps {
+  page: Page;
+  selected: boolean;
+  focusRequestKey: string | null;
+  mode: "canvas" | "document";
+  onSelect?: (id: string) => void;
+  onSave: (id: string, content: string) => Promise<void>;
+  onSaveStateChange: (state: SaveState) => void;
+  documentToolbarHost: HTMLElement | null;
+  backend: StorageBackend;
+  onEditorReady?: (editor: Editor | null) => void;
 }
 
 function getCanvasFilenameLabel(pageId: string) {
   const leaf = pageId.split(/[\\/]/).filter(Boolean).at(-1) || pageId;
   return leaf.toLowerCase().endsWith(".md") ? leaf : `${leaf}.md`;
+}
+
+function areCommentIdListsEqual(
+  current: string[] | null | undefined,
+  next: string[] | null | undefined,
+) {
+  if (!current || !next) return current === next;
+  if (current.length !== next.length) return false;
+  return current.every((commentId, index) => commentId === next[index]);
 }
 
 function getSelectionCommentIds(editor: Editor | null): string[] {
@@ -148,39 +177,95 @@ function findCommentAnchorElement(editor: Editor | null, commentId: string) {
   );
 }
 
-export function PageCard({
+function getAnchorCommentIds(
+  editor: Editor | null,
+  commentId: string,
+): string[] {
+  const anchorElement = findCommentAnchorElement(editor, commentId);
+  if (!anchorElement) return [];
+  return parseCommentIds(anchorElement.dataset.commentIds);
+}
+
+function addCommentIdsToAnchor(
+  editor: Editor | null,
+  anchorCommentId: string,
+  commentIdsToAdd: string[],
+): string[] | null {
+  if (!editor) return null;
+
+  const commentMarkType = editor.state.schema.marks.commentRef;
+  const anchorCommentIds = getAnchorCommentIds(editor, anchorCommentId);
+  const nextCommentIds = [
+    ...new Set([...anchorCommentIds, ...commentIdsToAdd]),
+  ];
+  if (!commentMarkType || anchorCommentIds.length === 0) return null;
+
+  let found = false;
+  const tr = editor.state.tr;
+
+  editor.state.doc.descendants((node, pos) => {
+    if (!node.isText) return;
+
+    const mark = node.marks.find(
+      (candidate) =>
+        candidate.type === commentMarkType &&
+        Array.isArray(candidate.attrs.commentIds) &&
+        candidate.attrs.commentIds.includes(anchorCommentId),
+    );
+
+    if (!mark) return;
+
+    found = true;
+
+    const from = pos;
+    const to = pos + node.nodeSize;
+    tr.removeMark(from, to, commentMarkType);
+    tr.addMark(
+      from,
+      to,
+      commentMarkType.create({ commentIds: nextCommentIds }),
+    );
+  });
+
+  if (!found) return null;
+
+  editor.view.dispatch(tr);
+  return nextCommentIds;
+}
+
+export function shouldDismissCommentThread(target: EventTarget | null) {
+  if (!(target instanceof Element)) return true;
+
+  return !target.closest(
+    '[data-comment-thread-container="true"], .comment-anchor[data-comment-ids]',
+  );
+}
+
+const PageCardEditorSurface = memo(function PageCardEditorSurface({
   page,
-  x = 0,
-  y = 0,
-  selected = false,
-  focusRequestKey = null,
-  canDelete = true,
-  mode = "canvas",
+  selected,
+  focusRequestKey,
+  mode,
   onSelect,
   onSave,
-  onReposition,
-  onDelete,
   onSaveStateChange,
-  documentToolbarHost = null,
+  documentToolbarHost,
   backend,
-}: PageCardProps) {
+  onEditorReady,
+}: PageCardEditorSurfaceProps) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isDragging = useRef(false);
-  const dragStart = useRef({ x: 0, y: 0, pageX: 0, pageY: 0 });
   const recentMarkdownRef = useRef<Set<string>>(new Set());
   const editorRef = useRef<Editor | null>(null);
   const commentsRef = useRef<Map<string, CriticComment>>(new Map());
   const lastFocusRequestKeyRef = useRef<string | null>(null);
   const selectedCommentIdRef = useRef<string | null>(null);
-  const scale = useCanvasScale();
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "error">(
-    "idle",
-  );
-  const [activeCommentIds, setActiveCommentIds] = useState<string[]>([]);
   const [selectedCommentId, setSelectedCommentId] = useState<string | null>(
     null,
   );
   const [hoveredCommentId, setHoveredCommentId] = useState<string | null>(null);
+  const [pendingFocusCommentId, setPendingFocusCommentId] = useState<
+    string | null
+  >(null);
 
   const resolveFileUrl = useCallback(
     (path: string) => backend.resolveFileUrl(path),
@@ -221,18 +306,18 @@ export function PageCard({
       }
 
       if (saveTimer.current) clearTimeout(saveTimer.current);
-      setSaveState("saving");
+      onSaveStateChange("saving");
       saveTimer.current = setTimeout(async () => {
         try {
           await onSave(page.id, markdown);
-          setSaveState("idle");
+          onSaveStateChange("idle");
         } catch (error) {
           console.error("Failed to save page:", error);
-          setSaveState("error");
+          onSaveStateChange("error");
         }
       }, 500);
     },
-    [onSave, page.id],
+    [onSave, onSaveStateChange, page.id],
   );
 
   const insertFiles = useCallback(
@@ -271,6 +356,7 @@ export function PageCard({
       extensions: createEditorExtensions("Start writing..."),
       content: parsedContent.doc,
       immediatelyRender: false,
+      shouldRerenderOnTransaction: false,
       editorProps: {
         attributes: {
           class:
@@ -296,21 +382,37 @@ export function PageCard({
       onUpdate: ({ editor: currentEditor }) => {
         scheduleSave(currentEditor.getJSON());
       },
-      onSelectionUpdate: ({ editor: currentEditor }) => {
-        const nextActiveCommentIds = getSelectionCommentIds(currentEditor);
-        setActiveCommentIds(nextActiveCommentIds);
-        setSelectedCommentId((current) =>
-          getPreferredCommentId(nextActiveCommentIds, current),
-        );
-      },
     },
     [page.id],
   );
 
   editorRef.current = editor;
   selectedCommentIdRef.current = selectedCommentId;
+
+  const activeCommentIds =
+    useEditorState({
+      editor,
+      selector: ({ editor: currentEditor }) =>
+        getSelectionCommentIds(currentEditor),
+      equalityFn: areCommentIdListsEqual,
+    }) ?? [];
+
   const { commentGroups, contentHeight, measureLayout } =
-    useCommentAnchorLayout(editor, true);
+    useCommentAnchorLayout(editor, comments.size > 0);
+
+  useEffect(() => {
+    onEditorReady?.(editor);
+
+    return () => {
+      onEditorReady?.(null);
+    };
+  }, [editor, onEditorReady]);
+
+  useEffect(() => {
+    setSelectedCommentId((current) =>
+      getPreferredCommentId(activeCommentIds, current),
+    );
+  }, [activeCommentIds]);
 
   useEffect(() => {
     if (!editor) return;
@@ -322,9 +424,9 @@ export function PageCard({
 
     commentsRef.current = parsedContent.comments;
     setComments(parsedContent.comments);
-    setActiveCommentIds([]);
     setSelectedCommentId(null);
     setHoveredCommentId(null);
+    setPendingFocusCommentId(null);
 
     const nextDoc = parsedContent.doc;
     if (JSON.stringify(editor.getJSON()) !== JSON.stringify(nextDoc)) {
@@ -339,10 +441,6 @@ export function PageCard({
       }
     };
   }, []);
-
-  useEffect(() => {
-    onSaveStateChange?.(saveState);
-  }, [onSaveStateChange, saveState]);
 
   useEffect(() => {
     if (!editor || !selected || !focusRequestKey) return;
@@ -367,27 +465,16 @@ export function PageCard({
   useEffect(() => {
     if (!editor) return;
 
-    const anchorElements = editor.view.dom.querySelectorAll<HTMLElement>(
-      ".comment-anchor[data-comment-ids]",
+    const effectiveHoveredCommentId = selectedCommentId
+      ? hoveredCommentId
+      : null;
+
+    editor.view.dispatch(
+      editor.state.tr.setMeta(commentHighlightPluginKey, {
+        selectedCommentId,
+        hoveredCommentId: effectiveHoveredCommentId,
+      }),
     );
-
-    for (const anchor of anchorElements) {
-      const commentIds = parseCommentIds(anchor.dataset.commentIds);
-      const isSelected =
-        !!selectedCommentId && commentIds.includes(selectedCommentId);
-      const isHovered =
-        !!hoveredCommentId && commentIds.includes(hoveredCommentId);
-
-      anchor.dataset.selected = isSelected ? "true" : "false";
-      anchor.dataset.hovered = isHovered ? "true" : "false";
-    }
-
-    return () => {
-      for (const anchor of anchorElements) {
-        delete anchor.dataset.selected;
-        delete anchor.dataset.hovered;
-      }
-    };
   }, [editor, hoveredCommentId, selectedCommentId]);
 
   useEffect(() => {
@@ -445,13 +532,36 @@ export function PageCard({
     };
   }, [editor]);
 
+  useEffect(() => {
+    const handleDocumentPointerDown = (event: PointerEvent) => {
+      if (!selectedCommentIdRef.current) return;
+      if (!shouldDismissCommentThread(event.target)) return;
+
+      setSelectedCommentId(null);
+      setHoveredCommentId(null);
+      setPendingFocusCommentId(null);
+    };
+
+    document.addEventListener("pointerdown", handleDocumentPointerDown, true);
+
+    return () => {
+      document.removeEventListener(
+        "pointerdown",
+        handleDocumentPointerDown,
+        true,
+      );
+    };
+  }, []);
+
   const handleAddComment = useCallback(() => {
     const currentEditor = editorRef.current;
 
     if (!currentEditor || currentEditor.state.selection.empty) return;
 
     const existingIds = getSelectionCommentIds(currentEditor);
-    const comment = createCriticComment();
+    const comment = createCriticComment(undefined, {
+      existingComments: commentsRef.current.values(),
+    });
     const nextComments = new Map(commentsRef.current);
     nextComments.set(comment.id, comment);
     commentsRef.current = nextComments;
@@ -463,9 +573,8 @@ export function PageCard({
       .setCommentRef({ commentIds: [...existingIds, comment.id] })
       .run();
 
-    const nextActiveCommentIds = [...existingIds, comment.id];
-    setActiveCommentIds(nextActiveCommentIds);
     setSelectedCommentId(comment.id);
+    setPendingFocusCommentId(comment.id);
     scheduleSave(currentEditor.getJSON(), nextComments);
     requestAnimationFrame(() => {
       measureLayout();
@@ -487,25 +596,72 @@ export function PageCard({
     [scheduleSave],
   );
 
+  const replyToComment = useCallback(
+    (commentId: string) => {
+      const currentEditor = editorRef.current;
+      if (!currentEditor) return;
+
+      const comment = createCriticComment(
+        {
+          parentCommentId: commentId,
+        },
+        {
+          existingComments: commentsRef.current.values(),
+        },
+      );
+      const nextAnchorCommentIds = addCommentIdsToAnchor(
+        currentEditor,
+        commentId,
+        [comment.id],
+      );
+      if (!nextAnchorCommentIds) return;
+
+      const nextComments = new Map(commentsRef.current);
+      nextComments.set(comment.id, comment);
+      commentsRef.current = nextComments;
+      setComments(nextComments);
+      setSelectedCommentId(comment.id);
+      setHoveredCommentId(null);
+      setPendingFocusCommentId(comment.id);
+      scheduleSave(currentEditor.getJSON(), nextComments);
+      requestAnimationFrame(() => {
+        measureLayout();
+      });
+    },
+    [measureLayout, scheduleSave],
+  );
+
   const deleteComment = useCallback(
     (commentId: string) => {
       const currentEditor = editorRef.current;
       if (!currentEditor) return;
 
+      const descendantIds = getCommentDescendantIds(
+        commentId,
+        commentsRef.current,
+      );
+      const commentIdsToDelete = [commentId, ...descendantIds];
+      const deletedIds = new Set(commentIdsToDelete);
       const nextComments = new Map(commentsRef.current);
-      nextComments.delete(commentId);
+      for (const id of commentIdsToDelete) {
+        nextComments.delete(id);
+      }
       commentsRef.current = nextComments;
       setComments(nextComments);
 
-      currentEditor.chain().focus().removeCommentId(commentId).run();
-      setActiveCommentIds((current) =>
-        current.filter((id) => id !== commentId),
-      );
+      const chain = currentEditor.chain().focus();
+      for (const id of commentIdsToDelete) {
+        chain.removeCommentId(id);
+      }
+      chain.run();
       setSelectedCommentId((current) =>
-        current === commentId ? null : current,
+        current && deletedIds.has(current) ? null : current,
       );
       setHoveredCommentId((current) =>
-        current === commentId ? null : current,
+        current && deletedIds.has(current) ? null : current,
+      );
+      setPendingFocusCommentId((current) =>
+        current && deletedIds.has(current) ? null : current,
       );
       scheduleSave(currentEditor.getJSON(), nextComments);
       requestAnimationFrame(() => {
@@ -527,26 +683,201 @@ export function PageCard({
 
     const range = findCommentRange(currentEditor, commentId);
     if (range) {
-      currentEditor.commands.focus();
+      currentEditor.commands.focus(undefined, { scrollIntoView: false });
       currentEditor.view.dispatch(
-        currentEditor.state.tr
-          .setSelection(
-            TextSelection.create(currentEditor.state.doc, range.from, range.to),
-          )
-          .scrollIntoView(),
+        currentEditor.state.tr.setSelection(
+          TextSelection.create(currentEditor.state.doc, range.from, range.to),
+        ),
       );
       return;
     }
 
-    const anchorElement = findCommentAnchorElement(currentEditor, commentId);
-    if (anchorElement) {
-      anchorElement.scrollIntoView({
-        block: "center",
-        behavior: "smooth",
-      });
-      currentEditor.commands.focus();
-    }
+    if (!findCommentAnchorElement(currentEditor, commentId)) return;
+
+    currentEditor.commands.focus(undefined, { scrollIntoView: false });
   }, []);
+
+  const handleBodyPointerDown = useCallback(
+    (event: ReactPointerEvent) => {
+      event.stopPropagation();
+      onSelect?.(page.id);
+    },
+    [onSelect, page.id],
+  );
+
+  const handleSelectPageCapture = useCallback(() => {
+    onSelect?.(page.id);
+  }, [onSelect, page.id]);
+
+  const isCanvasMode = mode === "canvas";
+  const showCanvasRail = isCanvasMode && comments.size > 0;
+  const activeComments = activeCommentIds
+    .map((commentId) => comments.get(commentId))
+    .filter((comment): comment is CriticComment => Boolean(comment));
+  const toolbar = (
+    <EditorToolbar
+      editor={editor}
+      onPickFiles={insertFiles}
+      variant={isCanvasMode ? "canvas" : "document"}
+    />
+  );
+
+  if (isCanvasMode) {
+    return (
+      <div
+        className="cursor-text rounded-b-3xl bg-white px-5 pt-4 pb-6"
+        onPointerDown={handleBodyPointerDown}
+      >
+        {toolbar}
+        <div className="relative">
+          <EditorContextMenu
+            editor={editor}
+            backend={backend}
+            onAddComment={handleAddComment}
+          >
+            <EditorContent editor={editor} />
+          </EditorContextMenu>
+          {showCanvasRail ? (
+            <div
+              className="absolute top-0"
+              style={{
+                left: CANVAS_EDITOR_FRAME_WIDTH + CANVAS_RAIL_GAP,
+                width: CANVAS_RAIL_WIDTH,
+              }}
+              onPointerDownCapture={handleSelectPageCapture}
+              onPointerDown={handleBodyPointerDown}
+            >
+              <DocumentCommentRail
+                className="w-full"
+                commentGroups={commentGroups}
+                comments={comments}
+                selectedCommentId={selectedCommentId}
+                hoveredCommentId={hoveredCommentId}
+                contentHeight={contentHeight}
+                onDeleteComment={deleteComment}
+                onUpdateComment={(commentId, nextContent) => {
+                  updateComment(commentId, (current) => ({
+                    ...current,
+                    content: nextContent,
+                  }));
+                }}
+                onReplyComment={replyToComment}
+                onSelectComment={selectComment}
+                onFocusComment={focusComment}
+                onHoverComment={setHoveredCommentId}
+                pendingFocusCommentId={pendingFocusCommentId}
+                onAutoFocusComment={(commentId) => {
+                  setPendingFocusCommentId((current) =>
+                    current === commentId ? null : current,
+                  );
+                }}
+              />
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="cursor-text bg-transparent"
+      onPointerDown={handleBodyPointerDown}
+    >
+      {!documentToolbarHost
+        ? toolbar
+        : createPortal(toolbar, documentToolbarHost)}
+      <div className="document-page-shell">
+        <div className="document-page-main min-w-0">
+          {activeComments.length > 0 ? (
+            <CommentEditorList
+              comments={activeComments}
+              className="document-comment-fallback mb-4"
+              selectedCommentId={selectedCommentId}
+              hoveredCommentId={hoveredCommentId}
+              onDeleteComment={deleteComment}
+              onUpdateComment={(commentId, nextContent) => {
+                updateComment(commentId, (current) => ({
+                  ...current,
+                  content: nextContent,
+                }));
+              }}
+              onReplyComment={replyToComment}
+              onSelectComment={selectComment}
+              onHoverComment={setHoveredCommentId}
+              pendingFocusCommentId={pendingFocusCommentId}
+              onAutoFocusComment={(commentId) => {
+                setPendingFocusCommentId((current) =>
+                  current === commentId ? null : current,
+                );
+              }}
+            />
+          ) : null}
+          <div className="pb-24">
+            <EditorContextMenu
+              editor={editor}
+              backend={backend}
+              onAddComment={handleAddComment}
+            >
+              <EditorContent editor={editor} />
+            </EditorContextMenu>
+          </div>
+        </div>
+        <DocumentCommentRail
+          className="document-comment-rail"
+          commentGroups={commentGroups}
+          comments={comments}
+          selectedCommentId={selectedCommentId}
+          hoveredCommentId={hoveredCommentId}
+          contentHeight={contentHeight}
+          onDeleteComment={deleteComment}
+          onUpdateComment={(commentId, nextContent) => {
+            updateComment(commentId, (current) => ({
+              ...current,
+              content: nextContent,
+            }));
+          }}
+          onReplyComment={replyToComment}
+          onSelectComment={selectComment}
+          onFocusComment={focusComment}
+          onHoverComment={setHoveredCommentId}
+          pendingFocusCommentId={pendingFocusCommentId}
+          onAutoFocusComment={(commentId) => {
+            setPendingFocusCommentId((current) =>
+              current === commentId ? null : current,
+            );
+          }}
+        />
+      </div>
+    </div>
+  );
+});
+
+export function PageCard({
+  page,
+  x = 0,
+  y = 0,
+  selected = false,
+  focusRequestKey = null,
+  canDelete = true,
+  mode = "canvas",
+  onSelect,
+  onSave,
+  onReposition,
+  onDelete,
+  onSaveStateChange,
+  documentToolbarHost = null,
+  backend,
+  onEditorReady,
+}: PageCardProps) {
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0, pageX: 0, pageY: 0 });
+  const scale = useCanvasScale();
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+
+  useEffect(() => {
+    onSaveStateChange?.(saveState);
+  }, [onSaveStateChange, saveState]);
 
   const handleDragPointerDown = useCallback(
     (event: ReactPointerEvent) => {
@@ -575,33 +906,10 @@ export function PageCard({
     isDragging.current = false;
   }, []);
 
-  const handleBodyPointerDown = useCallback(
-    (event: ReactPointerEvent) => {
-      event.stopPropagation();
-      onSelect?.(page.id);
-    },
-    [onSelect, page.id],
-  );
-
-  const handleSelectPageCapture = useCallback(() => {
-    onSelect?.(page.id);
-  }, [onSelect, page.id]);
-
   const isCanvasMode = mode === "canvas";
-  const showCanvasRail = isCanvasMode && comments.size > 0;
   const chromeTitle = isCanvasMode
     ? getCanvasFilenameLabel(page.id)
     : page.title;
-  const activeComments = activeCommentIds
-    .map((commentId) => comments.get(commentId))
-    .filter((comment): comment is CriticComment => Boolean(comment));
-  const toolbar = (
-    <EditorToolbar
-      editor={editor}
-      onPickFiles={insertFiles}
-      variant={isCanvasMode ? "canvas" : "document"}
-    />
-  );
 
   return (
     <div
@@ -653,110 +961,33 @@ export function PageCard({
                 </button>
               ) : null}
             </div>
-            <div
-              className="cursor-text rounded-b-3xl bg-white px-5 pt-4 pb-6"
-              onPointerDown={handleBodyPointerDown}
-            >
-              {toolbar}
-              <div className="relative">
-                <EditorContextMenu
-                  editor={editor}
-                  backend={backend}
-                  onAddComment={handleAddComment}
-                >
-                  <EditorContent editor={editor} />
-                </EditorContextMenu>
-                {showCanvasRail ? (
-                  <div
-                    className="absolute top-0"
-                    style={{
-                      left: CANVAS_EDITOR_FRAME_WIDTH + CANVAS_RAIL_GAP,
-                      width: CANVAS_RAIL_WIDTH,
-                    }}
-                    onPointerDownCapture={handleSelectPageCapture}
-                    onPointerDown={handleBodyPointerDown}
-                  >
-                    <DocumentCommentRail
-                      className="w-full"
-                      commentGroups={commentGroups}
-                      comments={comments}
-                      selectedCommentId={selectedCommentId}
-                      hoveredCommentId={hoveredCommentId}
-                      contentHeight={contentHeight}
-                      onDeleteComment={deleteComment}
-                      onUpdateComment={(commentId, nextContent) => {
-                        updateComment(commentId, (current) => ({
-                          ...current,
-                          content: nextContent,
-                        }));
-                      }}
-                      onSelectComment={selectComment}
-                      onFocusComment={focusComment}
-                      onHoverComment={setHoveredCommentId}
-                    />
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div
-          className="cursor-text bg-transparent"
-          onPointerDown={handleBodyPointerDown}
-        >
-          {!documentToolbarHost
-            ? toolbar
-            : createPortal(toolbar, documentToolbarHost)}
-          <div className="document-page-shell">
-            <div className="document-page-main min-w-0">
-              {activeComments.length > 0 ? (
-                <CommentEditorList
-                  comments={activeComments}
-                  className="document-comment-fallback mb-4"
-                  selectedCommentId={selectedCommentId}
-                  hoveredCommentId={hoveredCommentId}
-                  onDeleteComment={deleteComment}
-                  onUpdateComment={(commentId, nextContent) => {
-                    updateComment(commentId, (current) => ({
-                      ...current,
-                      content: nextContent,
-                    }));
-                  }}
-                  onSelectComment={selectComment}
-                  onHoverComment={setHoveredCommentId}
-                />
-              ) : null}
-              <div className="pb-24">
-                <EditorContextMenu
-                  editor={editor}
-                  backend={backend}
-                  onAddComment={handleAddComment}
-                >
-                  <EditorContent editor={editor} />
-                </EditorContextMenu>
-              </div>
-            </div>
-            <DocumentCommentRail
-              className="document-comment-rail"
-              commentGroups={commentGroups}
-              comments={comments}
-              selectedCommentId={selectedCommentId}
-              hoveredCommentId={hoveredCommentId}
-              contentHeight={contentHeight}
-              onDeleteComment={deleteComment}
-              onUpdateComment={(commentId, nextContent) => {
-                updateComment(commentId, (current) => ({
-                  ...current,
-                  content: nextContent,
-                }));
-              }}
-              onSelectComment={selectComment}
-              onFocusComment={focusComment}
-              onHoverComment={setHoveredCommentId}
+            <PageCardEditorSurface
+              page={page}
+              selected={selected}
+              focusRequestKey={focusRequestKey}
+              mode={mode}
+              onSelect={onSelect}
+              onSave={onSave}
+              onSaveStateChange={setSaveState}
+              documentToolbarHost={documentToolbarHost}
+              backend={backend}
+              onEditorReady={onEditorReady}
             />
           </div>
         </div>
+      ) : (
+        <PageCardEditorSurface
+          page={page}
+          selected={selected}
+          focusRequestKey={focusRequestKey}
+          mode={mode}
+          onSelect={onSelect}
+          onSave={onSave}
+          onSaveStateChange={setSaveState}
+          documentToolbarHost={documentToolbarHost}
+          backend={backend}
+          onEditorReady={onEditorReady}
+        />
       )}
     </div>
   );

@@ -24,6 +24,11 @@ export interface CriticComment {
   parentCommentId?: string | null;
 }
 
+export interface CriticCommentThread {
+  comment: CriticComment;
+  replies: CriticCommentThread[];
+}
+
 interface CriticCommentToken {
   type: "criticCommentAnchor";
   raw: string;
@@ -32,16 +37,8 @@ interface CriticCommentToken {
 }
 
 const extensions = createEditorExtensions("");
-const criticCommentWithAnchorPattern =
-  /^\{==([\s\S]+?)==\}\{>>([\s\S]*?)<<\}(?:\{@([\s\S]+?)@\})?/;
-
-function createCommentId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return `cmt_${crypto.randomUUID()}`;
-  }
-
-  return `cmt_${Math.random().toString(36).slice(2, 10)}`;
-}
+const criticCommentAnchorPattern = /^\{==([\s\S]+?)==\}/;
+const criticCommentBlockPattern = /^\{>>([\s\S]*?)<<\}(?:\{@([\s\S]+?)@\})?/;
 
 function escapeHtml(value: string): string {
   return value
@@ -51,7 +48,9 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
-function parseMetadata(metadataText?: string): Omit<CriticComment, "content"> {
+function parseMetadata(
+  metadataText?: string,
+): Partial<Omit<CriticComment, "content">> {
   const fields = new Map<string, string>();
 
   for (const part of metadataText?.split(";") ?? []) {
@@ -66,7 +65,7 @@ function parseMetadata(metadataText?: string): Omit<CriticComment, "content"> {
   const author = fields.get("by") ?? "user";
 
   return {
-    id: fields.get("id") ?? createCommentId(),
+    id: fields.get("id"),
     createdAt: fields.get("at") ?? new Date().toISOString(),
     authorType: author.toUpperCase() === "AI" ? "ai" : "user",
     authorId: author.toUpperCase() === "AI" ? null : author,
@@ -88,33 +87,191 @@ function serializeMetadata(comment: CriticComment): string {
   return `{@${fields.join(";")}@}`;
 }
 
+export function createNextCommentId(
+  existingComments: Iterable<Pick<CriticComment, "id">>,
+): string {
+  let maxId = 0;
+
+  for (const comment of existingComments) {
+    const match = comment.id.match(/^c(\d+)$/);
+    if (!match) continue;
+
+    const parsed = Number.parseInt(match[1] || "0", 10);
+    if (parsed > maxId) {
+      maxId = parsed;
+    }
+  }
+
+  return `c${maxId + 1}`;
+}
+
+function createCommentWithContext(
+  partial?: Partial<CriticComment>,
+  existingComments: Iterable<Pick<CriticComment, "id">> = [],
+): CriticComment {
+  const authorType = partial?.authorType ?? "user";
+
+  return {
+    id: partial?.id ?? createNextCommentId(existingComments),
+    content: partial?.content ?? "",
+    createdAt: partial?.createdAt ?? new Date().toISOString(),
+    authorType,
+    authorId: partial?.authorId ?? (authorType === "ai" ? null : "user"),
+    parentCommentId: partial?.parentCommentId ?? null,
+  };
+}
+
+function buildCommentThreadsFromOrderedComments(
+  orderedComments: CriticComment[],
+): CriticCommentThread[] {
+  const validCommentIds = new Set(orderedComments.map((comment) => comment.id));
+  const repliesByParentId = new Map<string, CriticComment[]>();
+  const rootComments: CriticComment[] = [];
+
+  for (const comment of orderedComments) {
+    const parentCommentId = comment.parentCommentId;
+
+    if (
+      !parentCommentId ||
+      parentCommentId === comment.id ||
+      !validCommentIds.has(parentCommentId)
+    ) {
+      rootComments.push(comment);
+      continue;
+    }
+
+    const replies = repliesByParentId.get(parentCommentId) ?? [];
+    replies.push(comment);
+    repliesByParentId.set(parentCommentId, replies);
+  }
+
+  const buildNode = (comment: CriticComment): CriticCommentThread => ({
+    comment,
+    replies: (repliesByParentId.get(comment.id) ?? []).map(buildNode),
+  });
+
+  return rootComments.map(buildNode);
+}
+
+export function buildCommentThreads(
+  comments: Iterable<CriticComment>,
+): CriticCommentThread[] {
+  return buildCommentThreadsFromOrderedComments([...comments]);
+}
+
+export function flattenCommentThreads(
+  threads: Iterable<CriticCommentThread>,
+): CriticComment[] {
+  const orderedComments: CriticComment[] = [];
+
+  const visit = (thread: CriticCommentThread) => {
+    orderedComments.push(thread.comment);
+    for (const reply of thread.replies) {
+      visit(reply);
+    }
+  };
+
+  for (const thread of threads) {
+    visit(thread);
+  }
+
+  return orderedComments;
+}
+
+export function getOrderedAnchorComments(
+  commentIds: string[],
+  comments: ReadonlyMap<string, CriticComment>,
+): CriticComment[] {
+  const visibleComments = commentIds
+    .map((commentId) => comments.get(commentId))
+    .filter((comment): comment is CriticComment => Boolean(comment));
+
+  return flattenCommentThreads(buildCommentThreads(visibleComments));
+}
+
+export function getCommentDescendantIds(
+  commentId: string,
+  comments: ReadonlyMap<string, CriticComment>,
+): string[] {
+  const childrenByParentId = new Map<string, string[]>();
+
+  for (const comment of comments.values()) {
+    if (!comment.parentCommentId || comment.parentCommentId === comment.id) {
+      continue;
+    }
+
+    const childIds = childrenByParentId.get(comment.parentCommentId) ?? [];
+    childIds.push(comment.id);
+    childrenByParentId.set(comment.parentCommentId, childIds);
+  }
+
+  const descendantIds: string[] = [];
+  const stack = [...(childrenByParentId.get(commentId) ?? [])].reverse();
+
+  while (stack.length > 0) {
+    const nextCommentId = stack.pop();
+    if (!nextCommentId) continue;
+
+    descendantIds.push(nextCommentId);
+
+    const childIds = childrenByParentId.get(nextCommentId) ?? [];
+    for (let index = childIds.length - 1; index >= 0; index -= 1) {
+      const childId = childIds[index];
+      if (childId) {
+        stack.push(childId);
+      }
+    }
+  }
+
+  return descendantIds;
+}
+
 function tokenizeCriticCommentAnchor(
   lexer: TokenizerThis["lexer"],
   src: string,
+  existingComments: Iterable<Pick<CriticComment, "id">>,
 ):
   | {
       token: CriticCommentToken;
-      comment: CriticComment;
+      comments: CriticComment[];
     }
   | undefined {
-  const match = src.match(criticCommentWithAnchorPattern);
+  const anchorMatch = src.match(criticCommentAnchorPattern);
 
-  if (!match) return undefined;
+  if (!anchorMatch) return undefined;
 
-  const [, anchor, commentText, metadataText] = match;
-  const comment: CriticComment = {
-    ...parseMetadata(metadataText),
-    content: commentText,
-  };
+  const [, anchor] = anchorMatch;
+  let raw = anchorMatch[0];
+  let offset = raw.length;
+  const parsedComments: CriticComment[] = [];
+
+  while (offset < src.length) {
+    const nextMatch = src.slice(offset).match(criticCommentBlockPattern);
+    if (!nextMatch) break;
+
+    const [, commentText, metadataText] = nextMatch;
+    const comment = createCommentWithContext(
+      {
+        ...parseMetadata(metadataText),
+        content: commentText,
+      },
+      [...existingComments, ...parsedComments],
+    );
+    parsedComments.push(comment);
+    raw += nextMatch[0];
+    offset += nextMatch[0].length;
+  }
+
+  if (parsedComments.length === 0) return undefined;
 
   return {
     token: {
       type: "criticCommentAnchor",
-      raw: match[0],
-      commentIds: [comment.id],
+      raw,
+      commentIds: parsedComments.map((comment) => comment.id),
       tokens: lexer.inlineTokens(anchor),
     },
-    comment,
+    comments: parsedComments,
   };
 }
 
@@ -141,16 +298,10 @@ function addCriticCommentRule(
         return content;
       }
 
-      const rootComments = commentIds
-        .map((commentId) => comments.get(commentId))
-        .filter(
-          (comment): comment is CriticComment =>
-            comment != null && !comment.parentCommentId,
-        );
+      const orderedComments = getOrderedAnchorComments(commentIds, comments);
+      if (orderedComments.length === 0) return content;
 
-      if (rootComments.length === 0) return content;
-
-      const [firstComment, ...remainingComments] = rootComments;
+      const [firstComment, ...remainingComments] = orderedComments;
       let result = `{==${content}==}{>>${firstComment.content}<<}${serializeMetadata(firstComment)}`;
 
       for (const comment of remainingComments) {
@@ -180,10 +331,16 @@ function createCriticMarked(markdownOptions?: MarkdownOptions) {
           return src.indexOf("{==");
         },
         tokenizer(this: TokenizerThis, src: string) {
-          const result = tokenizeCriticCommentAnchor(this.lexer, src);
+          const result = tokenizeCriticCommentAnchor(
+            this.lexer,
+            src,
+            comments.values(),
+          );
           if (!result) return undefined;
 
-          comments.set(result.comment.id, result.comment);
+          for (const comment of result.comments) {
+            comments.set(comment.id, comment);
+          }
           return result.token;
         },
         renderer(this: RendererThis, token: Tokens.Generic) {
@@ -223,15 +380,9 @@ export function editorStateToCriticMarkdown(
 
 export function createCriticComment(
   partial?: Partial<CriticComment>,
+  options?: {
+    existingComments?: Iterable<Pick<CriticComment, "id">>;
+  },
 ): CriticComment {
-  const authorType = partial?.authorType ?? "user";
-
-  return {
-    id: partial?.id ?? createCommentId(),
-    content: partial?.content ?? "",
-    createdAt: partial?.createdAt ?? new Date().toISOString(),
-    authorType,
-    authorId: partial?.authorId ?? (authorType === "ai" ? null : "user"),
-    parentCommentId: partial?.parentCommentId ?? null,
-  };
+  return createCommentWithContext(partial, options?.existingComments);
 }

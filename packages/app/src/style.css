@@ -23,7 +23,7 @@
 
   body {
     @apply antialiased bg-background text-foreground;
-    font-family: "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
+    font-family: var(--font-sans);
   }
 
   button,
@@ -79,6 +79,12 @@
   }
 
   .tiptap .comment-anchor {
+    @apply text-inherit;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+
+  .tiptap .comment-decoration {
     @apply rounded-[0.4rem] bg-amber-100/90 px-0.5 text-inherit ring-1 ring-amber-300/70;
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
@@ -89,12 +95,12 @@
       ring-color 140ms ease;
   }
 
-  .tiptap .comment-anchor[data-hovered="true"] {
-    @apply bg-amber-100 text-slate-900 ring-amber-400/80;
+  .tiptap .comment-decoration.comment-decoration-hovered {
+    @apply bg-amber-200/95 text-slate-900 ring-amber-400/80;
   }
 
-  .tiptap .comment-anchor[data-selected="true"] {
-    @apply bg-amber-200/95 text-slate-950 ring-amber-500;
+  .tiptap .comment-decoration.comment-decoration-active {
+    @apply bg-amber-300/95 text-slate-950 ring-amber-600;
   }
 
   .tiptap code {
@@ -248,7 +254,7 @@
   @media (min-width: 1100px) {
     .document-page-shell {
       display: grid;
-      grid-template-columns: minmax(0, 43.75rem) minmax(19rem, 1fr);
+      grid-template-columns: minmax(0, 43.75rem) minmax(26rem, 1fr);
       gap: 2rem;
       align-items: start;
       justify-content: space-between;
