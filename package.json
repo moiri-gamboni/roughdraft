@@ -18,7 +18,7 @@
     "test": "pnpm --filter @roughdraft/app test && pnpm --filter @roughdraft/server test",
     "check": "pnpm lint && pnpm test && pnpm build",
     "build": "pnpm --filter @roughdraft/app build && pnpm --filter @roughdraft/server build",
-    "preview": "node packages/server/bin/roughdraft.mjs"
+    "preview": "node packages/server/bin/roughdraft.mjs open ."
   },
   "files": [
     "packages/app/dist",

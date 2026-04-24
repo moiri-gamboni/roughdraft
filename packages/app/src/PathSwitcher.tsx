@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useFileSystemBrowser } from "./file-system-browser";
 import type { FileSystemListing, StorageBackend } from "./storage";
 
 interface PathSwitcherProps {
@@ -43,21 +44,11 @@ interface DirectorySubmenuProps extends Omit<ListingEntriesProps, "listing"> {
   directory: FileSystemListing["directories"][number];
 }
 
-const ROOT_LISTING_KEY = "__root__";
-
 const menuPopupClass =
   "z-50 w-[min(22rem,calc(100vw-32px))] origin-(--transform-origin) overflow-y-auto overflow-x-hidden rounded-md border border-slate-200/80 bg-white p-1.5 text-sm text-slate-900 shadow-lg ring-1 ring-slate-950/5 outline-hidden duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95";
 
 const menuItemClass =
   "flex min-w-0 cursor-default items-center gap-2 rounded-md px-2.5 py-2 text-sm text-slate-700 outline-none transition data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-950 data-[disabled]:pointer-events-none data-[disabled]:opacity-50";
-
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-
-  return fallback;
-}
 
 function MenuPanel({ eyebrow, title, children }: MenuPanelProps) {
   return (
@@ -265,62 +256,15 @@ export function PathSwitcher({
   description,
 }: PathSwitcherProps) {
   const [open, setOpen] = useState(false);
-  const [rootPath, setRootPath] = useState<string | null>(null);
-  const [listingsByPath, setListingsByPath] = useState<
-    Record<string, FileSystemListing>
-  >({});
-  const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
-  const [errorByPath, setErrorByPath] = useState<Record<string, string | null>>(
-    {},
-  );
-
-  const setPathLoading = useCallback((pathKey: string, loading: boolean) => {
-    setLoadingPaths((prev) => {
-      const next = new Set(prev);
-      if (loading) {
-        next.add(pathKey);
-      } else {
-        next.delete(pathKey);
-      }
-      return next;
-    });
-  }, []);
-
-  const loadListing = useCallback(
-    async (path?: string) => {
-      const normalizedPath = path?.trim() || undefined;
-      const pathKey = normalizedPath ?? ROOT_LISTING_KEY;
-
-      if (normalizedPath && listingsByPath[normalizedPath]) {
-        return listingsByPath[normalizedPath];
-      }
-
-      if (!normalizedPath && rootPath && listingsByPath[rootPath]) {
-        return listingsByPath[rootPath];
-      }
-
-      if (loadingPaths.has(pathKey)) {
-        return null;
-      }
-
-      setPathLoading(pathKey, true);
-      setErrorByPath((prev) => ({ ...prev, [pathKey]: null }));
-
-      try {
-        const listing = await backend.listFileSystem(normalizedPath);
-        setListingsByPath((prev) => ({ ...prev, [listing.path]: listing }));
-        setRootPath((prev) => prev ?? listing.path);
-        return listing;
-      } catch (error) {
-        const message = getErrorMessage(error, "Could not load folders.");
-        setErrorByPath((prev) => ({ ...prev, [pathKey]: message }));
-        return null;
-      } finally {
-        setPathLoading(pathKey, false);
-      }
-    },
-    [backend, listingsByPath, loadingPaths, rootPath, setPathLoading],
-  );
+  const {
+    rootListing,
+    rootLoading,
+    rootError,
+    listingsByPath,
+    loadingPaths,
+    errorByPath,
+    loadListing,
+  } = useFileSystemBrowser(backend);
 
   useEffect(() => {
     if (!open || !backend.canManageProjects) return;
@@ -343,21 +287,12 @@ export function PathSwitcher({
 
   const openDirectory = useCallback(
     async (path: string) => {
-      try {
-        await backend.openProject(path);
-        setOpen(false);
-        window.location.assign(buildLocationForPath(path));
-      } catch (error) {
-        const message = getErrorMessage(error, "Could not open folder.");
-        setErrorByPath((prev) => ({ ...prev, [path]: message }));
-      }
+      setOpen(false);
+      window.location.assign(buildLocationForPath(path));
     },
-    [backend, buildLocationForPath],
+    [buildLocationForPath],
   );
 
-  const rootListing = rootPath ? (listingsByPath[rootPath] ?? null) : null;
-  const rootLoading = loadingPaths.has(ROOT_LISTING_KEY);
-  const rootError = errorByPath[ROOT_LISTING_KEY] ?? null;
   const canBrowseProjects = backend.canManageProjects;
 
   return (

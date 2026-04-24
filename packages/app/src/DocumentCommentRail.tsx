@@ -1,7 +1,9 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCanvasScale } from "./Canvas";
 import type { CriticComment } from "./critic-markup";
 import {
   getPreferredCommentId,
+  normalizeCommentMeasurement,
   resolveCommentRailLayouts,
   type CommentGroupAnchor,
 } from "./document-comments";
@@ -36,6 +38,7 @@ export function DocumentCommentRail({
   onHoverComment,
 }: DocumentCommentRailProps) {
   const groupRefs = useRef(new Map<string, HTMLDivElement>());
+  const scale = useCanvasScale();
   const [groupHeights, setGroupHeights] = useState<Record<string, number>>({});
 
   const visibleGroups = useMemo(
@@ -87,9 +90,13 @@ export function DocumentCommentRail({
 
         for (const group of visibleGroups) {
           const element = groupRefs.current.get(group.key);
-          const height = Math.ceil(
-            element?.getBoundingClientRect().height ?? current[group.key] ?? 0,
+          const measuredHeight = Math.ceil(
+            element?.getBoundingClientRect().height ?? 0,
           );
+          const height =
+            measuredHeight > 0
+              ? Math.ceil(normalizeCommentMeasurement(measuredHeight, scale))
+              : (current[group.key] ?? 0);
           next[group.key] = height;
           if (current[group.key] !== height) {
             changed = true;
@@ -123,7 +130,7 @@ export function DocumentCommentRail({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [visibleGroups]);
+  }, [scale, visibleGroups]);
 
   const layouts = useMemo(() => {
     const baseLayouts = resolveCommentRailLayouts(visibleGroups, groupHeights);

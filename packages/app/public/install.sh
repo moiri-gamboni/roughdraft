@@ -10,13 +10,12 @@ log() {
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    printf 'roughdraft install error: missing required command `%s`\n' "$1" >&2
+    printf 'roughdraft installer error: missing required command `%s`\n' "$1" >&2
     exit 1
   fi
 }
 
-require_command node
-require_command npx
+require_command npm
 
-log "Running npx --yes ${PACKAGE_SPEC} install"
-exec npx --yes "$PACKAGE_SPEC" install
+log "Installing ${PACKAGE_SPEC} globally"
+exec npm install --global "$PACKAGE_SPEC"

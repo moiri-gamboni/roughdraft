@@ -27,6 +27,17 @@ interface CommentAnchorElementLike {
   };
 }
 
+export function normalizeCommentMeasurement(
+  value: number,
+  measurementScale = 1,
+) {
+  if (!Number.isFinite(measurementScale) || measurementScale <= 0) {
+    return value;
+  }
+
+  return value / measurementScale;
+}
+
 export function parseCommentIds(value: string | null | undefined): string[] {
   if (!value) return [];
 
@@ -61,6 +72,7 @@ export function getPreferredCommentId(
 export function getCommentAnchorMeasurements(
   anchorElements: Iterable<CommentAnchorElementLike>,
   containerTop: number,
+  measurementScale = 1,
 ): CommentAnchorMeasurement[] {
   const measurements: CommentAnchorMeasurement[] = [];
 
@@ -71,8 +83,14 @@ export function getCommentAnchorMeasurements(
     const rect = element.getBoundingClientRect();
     measurements.push({
       commentIds,
-      anchorTop: rect.top - containerTop,
-      anchorBottom: rect.bottom - containerTop,
+      anchorTop: normalizeCommentMeasurement(
+        rect.top - containerTop,
+        measurementScale,
+      ),
+      anchorBottom: normalizeCommentMeasurement(
+        rect.bottom - containerTop,
+        measurementScale,
+      ),
     });
   }
 

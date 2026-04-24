@@ -186,14 +186,7 @@ export class ApiBackend implements StorageBackend {
   }
 
   async openProject(path: string): Promise<void> {
-    const res = await fetch("/api/project/open", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
-    });
-    if (!res.ok) throw new Error(`Failed to open project: ${res.status}`);
-    const payload = (await res.json()) as { projectDir?: string };
-    this.updateProjectInfo(payload.projectDir);
+    this.updateProjectInfo(path);
   }
 
   async createProject(path: string): Promise<void> {

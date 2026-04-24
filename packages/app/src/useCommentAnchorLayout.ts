@@ -1,5 +1,6 @@
 import type { Editor } from "@tiptap/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useCanvasScale } from "./Canvas";
 import {
   getCommentAnchorMeasurements,
   groupCommentAnchorMeasurements,
@@ -13,6 +14,7 @@ interface CommentAnchorLayoutState {
 
 export function useCommentAnchorLayout(editor: Editor | null, enabled = true) {
   const frameRef = useRef<number | null>(null);
+  const scale = useCanvasScale();
   const [layoutState, setLayoutState] = useState<CommentAnchorLayoutState>({
     commentGroups: [],
     contentHeight: 0,
@@ -49,14 +51,15 @@ export function useCommentAnchorLayout(editor: Editor | null, enabled = true) {
       const measurements = getCommentAnchorMeasurements(
         anchorElements,
         editorRect.top,
+        scale,
       );
 
       setLayoutState({
         commentGroups: groupCommentAnchorMeasurements(measurements),
-        contentHeight: editorRect.height,
+        contentHeight: editorRect.height / scale,
       });
     });
-  }, [editor, enabled]);
+  }, [editor, enabled, scale]);
 
   useEffect(() => {
     measureLayout();

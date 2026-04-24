@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getCommentAnchorMeasurements,
   groupCommentAnchorMeasurements,
+  normalizeCommentMeasurement,
   resolveCommentRailLayouts,
 } from "../src/document-comments";
 
@@ -29,6 +30,33 @@ describe("document comment layout helpers", () => {
         anchorBottom: 92,
       },
     ]);
+  });
+
+  it("normalizes anchor positions when the canvas is zoomed", () => {
+    const measurements = getCommentAnchorMeasurements(
+      [
+        {
+          dataset: {
+            commentIds: JSON.stringify(["cmt-zoom"]),
+          },
+          getBoundingClientRect: () => ({
+            top: 220,
+            bottom: 284,
+          }),
+        },
+      ],
+      100,
+      2,
+    );
+
+    expect(measurements).toEqual([
+      {
+        commentIds: ["cmt-zoom"],
+        anchorTop: 60,
+        anchorBottom: 92,
+      },
+    ]);
+    expect(normalizeCommentMeasurement(120, 0.5)).toBe(240);
   });
 
   it("groups multiple DOM spans that belong to the same anchored comments", () => {

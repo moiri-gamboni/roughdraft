@@ -709,7 +709,7 @@ export function PageCard({
             ? toolbar
             : createPortal(toolbar, documentToolbarHost)}
           <div className="document-page-shell">
-            <div className="min-w-0">
+            <div className="document-page-main min-w-0">
               {activeComments.length > 0 ? (
                 <CommentEditorList
                   comments={activeComments}

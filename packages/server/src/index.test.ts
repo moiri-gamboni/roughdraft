@@ -7,24 +7,27 @@ import { createApp } from "./index";
 
 describe("createApp", () => {
   let projectDir: string;
+  let homeDir: string;
 
   beforeEach(() => {
     projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-server-"));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-home-"));
   });
 
   afterEach(() => {
     fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
   it("creates a page and persists it in roughdraft.json", async () => {
     const { app } = createApp({
-      projectDir,
+      homeDir,
       staticDirPath: projectDir,
     });
 
     const response = await request(app)
       .post("/api/pages")
-      .send({ title: "Draft" });
+      .send({ title: "Draft", projectPath: projectDir });
 
     expect(response.status).toBe(201);
     expect(response.body).toMatchObject({
@@ -63,11 +66,12 @@ describe("createApp", () => {
     fs.writeFileSync(path.join(nestedDir, "draft.md"), "# Nested draft\n");
 
     const { app } = createApp({
-      projectDir,
+      homeDir,
       staticDirPath: projectDir,
     });
 
     const response = await request(app).get("/api/markdown-file").query({
+      projectPath: projectDir,
       path: "notes/draft.md",
     });
 
@@ -86,15 +90,72 @@ describe("createApp", () => {
     );
 
     const { app } = createApp({
-      projectDir,
+      homeDir,
       staticDirPath: projectDir,
     });
 
     const response = await request(app).get("/api/markdown-file").query({
+      projectPath: projectDir,
       path: "../secrets.md",
     });
 
     expect(response.status).toBe(404);
     expect(response.body).toEqual({ error: "Markdown file not found" });
+  });
+
+  it("requires projectPath on project-backed routes", async () => {
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+    });
+
+    const response = await request(app).get("/api/pages");
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: "projectPath is required" });
+  });
+
+  it("reports neutral server status without an active project", async () => {
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+      port: 4312,
+    });
+
+    const response = await request(app).get("/api/status");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      backend: "local-files",
+      port: 4312,
+      stateless: true,
+      capabilities: {
+        projectPathRequired: true,
+        fileSystemBrowsing: true,
+      },
+    });
+    expect(response.body).not.toHaveProperty("projectDir");
+  });
+
+  it("lists directories from the home directory when no path is provided", async () => {
+    fs.mkdirSync(path.join(homeDir, "docs"));
+
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+    });
+
+    const response = await request(app).get("/api/directories");
+
+    expect(response.status).toBe(200);
+    expect(response.body.path).toBe(homeDir);
+    expect(response.body.directories).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "docs",
+          path: path.join(homeDir, "docs"),
+        }),
+      ]),
+    );
   });
 });

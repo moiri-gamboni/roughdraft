@@ -13,23 +13,19 @@ export async function detectBackend(): Promise<StorageBackend> {
       const payload = (await res.json()) as {
         backend?: string;
         projectDir?: string;
+        stateless?: boolean;
       };
 
-      if (payload.backend === "local-files" && payload.projectDir) {
+      if (payload.backend === "local-files") {
         return new ApiBackend({
           kind: "local-files",
           label: "Local files",
-          detail: payload.projectDir,
+          detail: payload.stateless
+            ? "Choose a file or folder to open"
+            : "Project folder on disk",
           projectPath: payload.projectDir,
         });
       }
-
-      return new ApiBackend({
-        kind: "local-files",
-        label: "Local files",
-        detail: "Project folder on disk",
-        projectPath: payload.projectDir,
-      });
     }
   } catch {
     // network error — no server available

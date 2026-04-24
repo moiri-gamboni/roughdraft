@@ -3,12 +3,19 @@ import {
   Bold,
   CheckSquare,
   Code2,
+  type LucideIcon,
+  Heading1,
+  Heading2,
+  Heading3,
   Italic,
   Link2,
   List,
   ListOrdered,
   MoreHorizontal,
+  Pilcrow,
+  Quote,
   Redo2,
+  SquareCode,
   Table2,
   Undo2,
   Upload,
@@ -58,13 +65,17 @@ type BlockType =
   | "blockquote"
   | "codeBlock";
 
-const BLOCK_TYPE_OPTIONS: Array<{ label: string; value: BlockType }> = [
-  { label: "Paragraph", value: "paragraph" },
-  { label: "Heading 1", value: "heading1" },
-  { label: "Heading 2", value: "heading2" },
-  { label: "Heading 3", value: "heading3" },
-  { label: "Quote", value: "blockquote" },
-  { label: "Code block", value: "codeBlock" },
+const BLOCK_TYPE_OPTIONS: Array<{
+  label: string;
+  value: BlockType;
+  icon: LucideIcon;
+}> = [
+  { label: "Paragraph", value: "paragraph", icon: Pilcrow },
+  { label: "Heading 1", value: "heading1", icon: Heading1 },
+  { label: "Heading 2", value: "heading2", icon: Heading2 },
+  { label: "Heading 3", value: "heading3", icon: Heading3 },
+  { label: "Quote", value: "blockquote", icon: Quote },
+  { label: "Code block", value: "codeBlock", icon: SquareCode },
 ];
 
 function getBlockType(editor: Editor): BlockType {
@@ -74,6 +85,13 @@ function getBlockType(editor: Editor): BlockType {
   if (editor.isActive("blockquote")) return "blockquote";
   if (editor.isActive("codeBlock")) return "codeBlock";
   return "paragraph";
+}
+
+function getBlockTypeOption(blockType: BlockType) {
+  return (
+    BLOCK_TYPE_OPTIONS.find((option) => option.value === blockType) ??
+    BLOCK_TYPE_OPTIONS[0]
+  );
 }
 
 function ToolbarButton({
@@ -98,14 +116,14 @@ function ToolbarButton({
           <Button
             type="button"
             variant="ghost"
-            size="icon"
+            size={variant === "document" ? "icon-sm" : "icon"}
             className={cn(
               variant === "document"
-                ? "size-8 rounded-lg border border-transparent text-slate-600 hover:bg-slate-100"
+                ? "rounded-md border border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                 : "size-8 rounded-xl border border-transparent text-slate-700 hover:border-slate-300 hover:bg-white",
               active &&
                 (variant === "document"
-                  ? "bg-slate-900 text-white hover:bg-slate-900"
+                  ? "bg-slate-900 text-white hover:bg-slate-900 hover:text-white"
                   : "border-sky-200 bg-sky-50 text-sky-700 shadow-sm"),
             )}
           >
@@ -212,22 +230,24 @@ export function EditorToolbar({
   const isDocumentToolbar = variant === "document";
   const sectionClass =
     variant === "document"
-      ? "inline-flex items-center gap-0.5 rounded-xl"
+      ? "inline-flex items-center gap-0.5 rounded-lg"
       : "inline-flex items-center gap-0.5 rounded-2xl border border-slate-200 bg-slate-50/80 p-1 shadow-sm";
   const toolbarClass = cn(
-    "min-h-11",
+    "min-h-8",
     isDocumentToolbar
-      ? "flex flex-wrap items-center gap-1"
+      ? "flex items-center gap-1 whitespace-nowrap"
       : "mb-4 flex flex-wrap items-center gap-2 border-b border-slate-200/80 pb-4",
   );
   const selectTriggerClass = cn(
-    "h-8 text-sm font-medium text-slate-700",
+    "font-medium text-slate-700",
     isDocumentToolbar
-      ? "min-w-32 rounded-lg border border-transparent bg-transparent px-2.5 hover:bg-slate-100 focus-visible:border-slate-300 focus-visible:ring-slate-300/50"
+      ? "h-6 min-w-[7.5rem] rounded-md border border-transparent bg-transparent px-2 text-xs hover:bg-slate-100 focus-visible:border-slate-300 focus-visible:ring-slate-300/50"
       : "min-w-40 rounded-xl border-transparent bg-transparent px-3 hover:border-slate-300 hover:bg-white focus-visible:border-sky-400 focus-visible:ring-sky-300/50",
   );
   const overflowActionClass =
     "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100";
+  const activeBlockTypeOption = getBlockTypeOption(blockType);
+  const ActiveBlockTypeIcon = activeBlockTypeOption.icon;
 
   return (
     <>
@@ -244,14 +264,24 @@ export function EditorToolbar({
               aria-label="Block type"
               className={selectTriggerClass}
             >
-              <SelectValue />
+              <SelectValue>
+                <span className="flex items-center gap-2">
+                  <ActiveBlockTypeIcon size={15} className="text-slate-500" />
+                  <span>{activeBlockTypeOption.label}</span>
+                </span>
+              </SelectValue>
             </SelectTrigger>
             <SelectContent align="start" className="rounded-2xl">
-              {BLOCK_TYPE_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
+              {BLOCK_TYPE_OPTIONS.map((option) => {
+                const OptionIcon = option.icon;
+
+                return (
+                  <SelectItem key={option.value} value={option.value}>
+                    <OptionIcon size={15} className="text-slate-500" />
+                    <span>{option.label}</span>
+                  </SelectItem>
+                );
+              })}
             </SelectContent>
           </Select>
         </div>
@@ -279,14 +309,16 @@ export function EditorToolbar({
             icon={<Italic size={16} />}
             variant={variant}
           />
-          <ToolbarButton
-            active={editor.isActive("code")}
-            disabled={!editor.can().chain().focus().toggleCode().run()}
-            label="Inline code"
-            onClick={() => editor.chain().focus().toggleCode().run()}
-            icon={<Code2 size={16} />}
-            variant={variant}
-          />
+          {!isDocumentToolbar ? (
+            <ToolbarButton
+              active={editor.isActive("code")}
+              disabled={!editor.can().chain().focus().toggleCode().run()}
+              label="Inline code"
+              onClick={() => editor.chain().focus().toggleCode().run()}
+              icon={<Code2 size={16} />}
+              variant={variant}
+            />
+          ) : null}
         </div>
         {!isDocumentToolbar ? (
           <Separator
@@ -304,14 +336,6 @@ export function EditorToolbar({
             icon={<List size={16} />}
             variant={variant}
           />
-          <ToolbarButton
-            active={editor.isActive("orderedList")}
-            disabled={!editor.can().chain().focus().toggleOrderedList().run()}
-            label="Numbered list"
-            onClick={() => editor.chain().focus().toggleOrderedList().run()}
-            icon={<ListOrdered size={16} />}
-            variant={variant}
-          />
           {!isDocumentToolbar ? (
             <ToolbarButton
               active={editor.isActive("taskList")}
@@ -319,6 +343,16 @@ export function EditorToolbar({
               label="Task list"
               onClick={() => editor.chain().focus().toggleTaskList().run()}
               icon={<CheckSquare size={16} />}
+              variant={variant}
+            />
+          ) : null}
+          {!isDocumentToolbar ? (
+            <ToolbarButton
+              active={editor.isActive("orderedList")}
+              disabled={!editor.can().chain().focus().toggleOrderedList().run()}
+              label="Numbered list"
+              onClick={() => editor.chain().focus().toggleOrderedList().run()}
+              icon={<ListOrdered size={16} />}
               variant={variant}
             />
           ) : null}
@@ -368,22 +402,24 @@ export function EditorToolbar({
             aria-hidden="true"
           />
         ) : null}
-        <div className={sectionClass} aria-label="History" role="group">
-          <ToolbarButton
-            label="Undo"
-            disabled={!editor.can().chain().focus().undo().run()}
-            onClick={() => editor.chain().focus().undo().run()}
-            icon={<Undo2 size={16} />}
-            variant={variant}
-          />
-          <ToolbarButton
-            label="Redo"
-            disabled={!editor.can().chain().focus().redo().run()}
-            onClick={() => editor.chain().focus().redo().run()}
-            icon={<Redo2 size={16} />}
-            variant={variant}
-          />
-        </div>
+        {!isDocumentToolbar ? (
+          <div className={sectionClass} aria-label="History" role="group">
+            <ToolbarButton
+              label="Undo"
+              disabled={!editor.can().chain().focus().undo().run()}
+              onClick={() => editor.chain().focus().undo().run()}
+              icon={<Undo2 size={16} />}
+              variant={variant}
+            />
+            <ToolbarButton
+              label="Redo"
+              disabled={!editor.can().chain().focus().redo().run()}
+              onClick={() => editor.chain().focus().redo().run()}
+              icon={<Redo2 size={16} />}
+              variant={variant}
+            />
+          </div>
+        ) : null}
         {isDocumentToolbar ? (
           <Popover>
             <PopoverTrigger
@@ -391,8 +427,8 @@ export function EditorToolbar({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon"
-                  className="size-8 rounded-lg border border-transparent text-slate-600 hover:bg-slate-100"
+                  size="icon-sm"
+                  className="rounded-md border border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                   aria-label="More editor actions"
                 >
                   <MoreHorizontal size={16} />
@@ -404,6 +440,22 @@ export function EditorToolbar({
               sideOffset={8}
               className="w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_14px_36px_rgba(15,23,42,0.12)]"
             >
+              <button
+                type="button"
+                className={overflowActionClass}
+                onClick={() => editor.chain().focus().toggleOrderedList().run()}
+              >
+                <ListOrdered size={16} />
+                <span>Numbered list</span>
+              </button>
+              <button
+                type="button"
+                className={overflowActionClass}
+                onClick={() => editor.chain().focus().toggleCode().run()}
+              >
+                <Code2 size={16} />
+                <span>Inline code</span>
+              </button>
               <button
                 type="button"
                 className={overflowActionClass}
@@ -433,6 +485,22 @@ export function EditorToolbar({
               >
                 <Upload size={16} />
                 <span>Insert file</span>
+              </button>
+              <button
+                type="button"
+                className={overflowActionClass}
+                onClick={() => editor.chain().focus().undo().run()}
+              >
+                <Undo2 size={16} />
+                <span>Undo</span>
+              </button>
+              <button
+                type="button"
+                className={overflowActionClass}
+                onClick={() => editor.chain().focus().redo().run()}
+              >
+                <Redo2 size={16} />
+                <span>Redo</span>
               </button>
             </PopoverContent>
           </Popover>

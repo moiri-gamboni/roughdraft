@@ -67,7 +67,6 @@ interface CreateAppOptions {
 
 interface CreateAppResult {
   app: Express;
-  defaultProjectDir: string;
   port: number;
 }
 
@@ -298,12 +297,9 @@ function listProjectTree(projectDir: string): ProjectTreeListing {
 
 export function createApp(options: CreateAppOptions = {}): CreateAppResult {
   const port = options.port ?? 3000;
-  const defaultProjectDir = path.resolve(options.projectDir || process.cwd());
   const homeDir = options.homeDir ?? os.homedir();
   const staticDirPath = options.staticDirPath ?? staticDir;
   const app = express();
-
-  ensureDirectoryExists(defaultProjectDir);
 
   app.use(express.json({ limit: "50mb" }));
 
@@ -326,9 +322,12 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     options?: { mustExist?: boolean },
   ): string | null {
     const nextProjectPath = requestedProjectPath(req);
-    const resolvedProjectDir = path.resolve(
-      nextProjectPath || defaultProjectDir,
-    );
+    if (!nextProjectPath) {
+      res.status(400).json({ error: "projectPath is required" });
+      return null;
+    }
+
+    const resolvedProjectDir = path.resolve(nextProjectPath);
     const mustExist = options?.mustExist ?? true;
 
     if (mustExist && !isExistingDirectory(resolvedProjectDir)) {
@@ -494,8 +493,12 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
   app.get("/api/status", (_req, res) => {
     res.json({
       backend: "local-files",
-      projectDir: defaultProjectDir,
       port,
+      stateless: true,
+      capabilities: {
+        projectPathRequired: true,
+        fileSystemBrowsing: true,
+      },
     });
   });
 
@@ -503,7 +506,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     const requestedPath =
       typeof req.query.path === "string" && req.query.path.trim().length > 0
         ? path.resolve(req.query.path)
-        : defaultProjectDir;
+        : homeDir;
 
     if (!isExistingDirectory(requestedPath)) {
       res.status(404).json({ error: "Directory not found" });
@@ -655,14 +658,14 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     res.sendFile(path.join(staticDirPath, "index.html"));
   });
 
-  return { app, defaultProjectDir, port };
+  return { app, port };
 }
 
 export async function createServer(
   port = 3000,
   projectDir?: string,
 ): Promise<void> {
-  const { app, defaultProjectDir } = createApp({ port, projectDir });
+  const { app } = createApp({ port, projectDir });
   const listeningHosts: string[] = [];
 
   await Promise.all(
@@ -698,5 +701,5 @@ export async function createServer(
   console.log(
     `\n  Roughdraft running at http://${ROUGHDRAFT_PUBLIC_HOST}:${port}`,
   );
-  console.log(`  Default project directory: ${defaultProjectDir}\n`);
+  console.log("  No active project is stored on the server.\n");
 }
