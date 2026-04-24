@@ -19,6 +19,7 @@ describe("comment shortcuts", () => {
     expect(
       matchesAddCommentShortcut(
         {
+          code: "KeyM",
           key: "m",
           altKey: true,
           ctrlKey: false,
@@ -34,6 +35,7 @@ describe("comment shortcuts", () => {
     expect(
       matchesAddCommentShortcut(
         {
+          code: "KeyM",
           key: "M",
           altKey: true,
           ctrlKey: true,
@@ -49,6 +51,7 @@ describe("comment shortcuts", () => {
     expect(
       matchesAddCommentShortcut(
         {
+          code: "KeyM",
           key: "m",
           altKey: false,
           ctrlKey: true,
@@ -62,9 +65,42 @@ describe("comment shortcuts", () => {
     expect(
       matchesAddCommentShortcut(
         {
+          code: "KeyM",
           key: "m",
           altKey: true,
           ctrlKey: true,
+          metaKey: true,
+          shiftKey: false,
+        },
+        "MacIntel",
+      ),
+    ).toBe(false);
+  });
+
+  it("matches the Mac shortcut from the physical key code even when Option changes the character", () => {
+    expect(
+      matchesAddCommentShortcut(
+        {
+          code: "KeyM",
+          key: "µ",
+          altKey: true,
+          ctrlKey: false,
+          metaKey: true,
+          shiftKey: false,
+        },
+        "MacIntel",
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects non-M physical keys even if the produced character is m", () => {
+    expect(
+      matchesAddCommentShortcut(
+        {
+          code: "KeyN",
+          key: "m",
+          altKey: true,
+          ctrlKey: false,
           metaKey: true,
           shiftKey: false,
         },

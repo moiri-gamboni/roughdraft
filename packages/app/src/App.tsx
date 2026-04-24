@@ -7,8 +7,10 @@ import { HomeScreen } from "./HomeScreen";
 import { PageCard } from "./PageCard";
 import { PathSwitcher } from "./PathSwitcher";
 import { ProjectTreeSidebar } from "./ProjectTreeSidebar";
+import { UpdateNotice } from "./UpdateNotice";
 import { LocalStorageBackend } from "./local-storage-backend";
 import { recordRecentOpen } from "./recent-items";
+import { fetchUpdateStatus, type UpdateStatus } from "./update-status";
 import { Button } from "./components/ui/button";
 
 interface RequestedPathState {
@@ -279,6 +281,7 @@ export function App() {
   const [projectTreeVersion, setProjectTreeVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [demoModeEnabled, setDemoModeEnabled] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(
     () => !getRequestedPathState().documentPath,
   );
@@ -356,6 +359,23 @@ export function App() {
     setSelectedId(null);
     setDocumentPage(null);
     setActiveDocumentPath(null);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadUpdateStatus = async () => {
+      const nextUpdateStatus = await fetchUpdateStatus();
+      if (!cancelled) {
+        setUpdateStatus(nextUpdateStatus);
+      }
+    };
+
+    void loadUpdateStatus();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -673,11 +693,7 @@ export function App() {
   );
 
   if (loading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-slate-950 text-sm font-medium tracking-[0.18em] text-slate-200 uppercase">
-        <p>Loading canvas...</p>
-      </div>
-    );
+    return <div className="h-screen bg-white" aria-hidden="true" />;
   }
 
   const shouldShowHomepage = !requestedPathState.rawPath && !demoModeEnabled;
@@ -688,6 +704,7 @@ export function App() {
         backend={backend}
         buildLocationForPath={buildLocationForPath}
         onOpenDemo={() => void handleOpenDemo()}
+        updateStatus={updateStatus}
       />
     );
   }
@@ -870,6 +887,17 @@ export function App() {
       ) : null}
 
       <main className="relative min-w-0 flex-1 overflow-hidden">
+        {updateStatus ? (
+          <div
+            className={`pointer-events-none absolute right-4 z-40 max-w-sm ${
+              isDocumentMode ? "top-16" : "top-4"
+            }`}
+          >
+            <div className="pointer-events-auto">
+              <UpdateNotice updateStatus={updateStatus} />
+            </div>
+          </div>
+        ) : null}
         {!sidebarVisible && !isDocumentMode ? (
           <div className="absolute top-4 left-4 z-30">
             <Button

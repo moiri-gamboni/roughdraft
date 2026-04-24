@@ -137,6 +137,36 @@ describe("createApp", () => {
     expect(response.body).not.toHaveProperty("projectDir");
   });
 
+  it("reports update status from npm metadata", async () => {
+    const packageJsonPath = path.join(projectDir, "package.json");
+    fs.writeFileSync(
+      packageJsonPath,
+      JSON.stringify({ name: "roughdraft", version: "0.1.0" }),
+    );
+
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+      packageJsonPath,
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ version: "0.2.0" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+
+    const response = await request(app).get("/api/update-status");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      packageName: "roughdraft",
+      currentVersion: "0.1.0",
+      latestVersion: "0.2.0",
+      updateAvailable: true,
+      updateCommand: "npm i -g roughdraft@latest",
+    });
+  });
+
   it("lists directories from the home directory when no path is provided", async () => {
     fs.mkdirSync(path.join(homeDir, "docs"));
 

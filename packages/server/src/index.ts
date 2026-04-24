@@ -8,6 +8,7 @@ import {
   ROUGHDRAFT_LOOPBACK_HOSTS,
   ROUGHDRAFT_PUBLIC_HOST,
 } from "./network.js";
+import { resolveUpdateStatus } from "./update-status.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const staticDir = path.resolve(__dirname, "../../app/dist");
@@ -63,6 +64,9 @@ interface CreateAppOptions {
   projectDir?: string;
   homeDir?: string;
   staticDirPath?: string;
+  packageJsonPath?: string;
+  fetchImpl?: typeof fetch;
+  packageName?: string;
 }
 
 interface CreateAppResult {
@@ -299,6 +303,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
   const port = options.port ?? 3000;
   const homeDir = options.homeDir ?? os.homedir();
   const staticDirPath = options.staticDirPath ?? staticDir;
+  const fetchImpl = options.fetchImpl ?? fetch;
   const app = express();
 
   app.use(express.json({ limit: "50mb" }));
@@ -500,6 +505,15 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
         fileSystemBrowsing: true,
       },
     });
+  });
+
+  app.get("/api/update-status", async (_req, res) => {
+    const updateStatus = await resolveUpdateStatus({
+      fetchImpl,
+      packageJsonPath: options.packageJsonPath,
+      packageName: options.packageName,
+    });
+    res.json(updateStatus);
   });
 
   app.get("/api/directories", (req, res) => {

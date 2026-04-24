@@ -9,6 +9,7 @@ export function getAddCommentShortcutLabel(platform?: string | null) {
 }
 
 export interface AddCommentShortcutEventLike {
+  code: string;
   key: string;
   altKey: boolean;
   ctrlKey: boolean;
@@ -20,7 +21,7 @@ export function matchesAddCommentShortcut(
   event: AddCommentShortcutEventLike,
   platform?: string | null,
 ) {
-  if (event.shiftKey || event.key.toLowerCase() !== "m" || !event.altKey) {
+  if (event.shiftKey || event.code !== "KeyM" || !event.altKey) {
     return false;
   }
 

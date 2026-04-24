@@ -3,15 +3,18 @@ import { ChevronLeft, ChevronRight, FileText, Folder } from "lucide-react";
 import type { StorageBackend } from "./storage";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
+import { UpdateNotice } from "./UpdateNotice";
 import {
   getFileSystemBrowserError,
   useFileSystemBrowser,
 } from "./file-system-browser";
+import type { UpdateStatus } from "./update-status";
 
 interface HomeScreenProps {
   backend: StorageBackend | null;
   buildLocationForPath: (path?: string | null) => string;
   onOpenDemo: () => void;
+  updateStatus: UpdateStatus | null;
 }
 
 const disabledBackend: StorageBackend = {
@@ -284,6 +287,7 @@ export function HomeScreen({
   backend,
   buildLocationForPath,
   onOpenDemo,
+  updateStatus,
 }: HomeScreenProps) {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950">
@@ -305,6 +309,12 @@ export function HomeScreen({
             >
               Open demo workspace
             </Button>
+          ) : null}
+
+          {updateStatus ? (
+            <div className="mt-6 max-w-xl">
+              <UpdateNotice updateStatus={updateStatus} />
+            </div>
           ) : null}
 
           <div className="mt-8">
