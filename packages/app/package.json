@@ -19,6 +19,7 @@
     "@joplin/turndown-plugin-gfm": "^1.0.64",
     "@pierre/trees": "1.0.0-beta.3",
     "@tiptap/core": "^3.22.4",
+    "@tiptap/extension-code": "^3.22.4",
     "@tiptap/extension-image": "^3.22.4",
     "@tiptap/extension-link": "^3.22.4",
     "@tiptap/extension-placeholder": "^3.22.4",

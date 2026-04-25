@@ -1,4 +1,5 @@
 import { Extension, Mark, mergeAttributes } from "@tiptap/core";
+import Code from "@tiptap/extension-code";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -8,13 +9,13 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { TableRow } from "@tiptap/extension-table-row";
 import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
-import StarterKit from "@tiptap/starter-kit";
 import type {
   Mark as ProseMirrorMark,
   Node as ProseMirrorNode,
 } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import StarterKit from "@tiptap/starter-kit";
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
@@ -257,6 +258,10 @@ const MarkdownLink = Link.extend({
   },
 });
 
+const MarkdownCode = Code.extend({
+  excludes: "bold italic strike link",
+});
+
 const MarkdownImage = Image.extend({
   addAttributes() {
     return {
@@ -279,6 +284,7 @@ export function createEditorExtensions(placeholder: string) {
       heading: {
         levels: [1, 2, 3],
       },
+      code: false,
       link: false,
     }),
     Placeholder.configure({
@@ -289,6 +295,7 @@ export function createEditorExtensions(placeholder: string) {
       openOnClick: false,
       linkOnPaste: true,
     }),
+    MarkdownCode,
     Table.configure({
       resizable: true,
     }),

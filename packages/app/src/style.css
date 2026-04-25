@@ -119,6 +119,12 @@
     @apply rounded bg-slate-100 px-1.5 py-0.5 text-[0.9em] text-slate-900;
   }
 
+  .tiptap .comment-decoration code,
+  .tiptap .comment-anchor code {
+    @apply bg-transparent;
+    box-shadow: inset 0 0 0 1px rgb(15 23 42 / 12%);
+  }
+
   .tiptap pre {
     @apply overflow-x-auto rounded-2xl border p-4;
     margin: 1.35em 0;
