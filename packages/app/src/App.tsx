@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, Copy } from "lucide-react";
 import {
   type DocumentEditorViewMode,
   buildLocationForDocumentEditorViewMode,
@@ -21,6 +22,8 @@ import { UpdateNotice } from "./UpdateNotice";
 
 type SaveState = "idle" | "saving" | "error";
 type DocumentDiskChangeState = "clean" | "changed" | "conflict";
+const AGENT_SETUP_PROMPT =
+  "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.";
 
 function EmptyState({
   message,
@@ -29,21 +32,58 @@ function EmptyState({
   message: string;
   updateStatus: UpdateStatus | null;
 }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
+    "idle",
+  );
+
+  const handleCopySetupPrompt = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(AGENT_SETUP_PROMPT);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 1800);
+    } catch {
+      setCopyState("error");
+    }
+  }, []);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#FCFCFC] px-6 text-slate-950">
+    <div className="flex min-h-screen items-center justify-center bg-[#FCFCFC] px-6 py-12 text-slate-950">
       {updateStatus ? (
         <div className="absolute top-4 right-4 max-w-sm">
           <UpdateNotice updateStatus={updateStatus} />
         </div>
       ) : null}
-      <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold tracking-tight">
-          Open a markdown file
+      <div className="w-full max-w-xl">
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+          Copy this into your coding agent
         </h1>
-        <p className="mt-2 text-sm leading-6 text-slate-500">{message}</p>
-        <code className="mt-5 block rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-600">
-          roughdraft open /absolute/path/to/file.md
-        </code>
+        {message ? (
+          <p className="mt-3 text-sm leading-6 text-slate-500">{message}</p>
+        ) : null}
+
+        <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
+          <p className="break-words text-base leading-7 text-slate-800">
+            {AGENT_SETUP_PROMPT}
+          </p>
+          {copyState === "error" ? (
+            <p className="mt-3 text-sm text-red-600">
+              Copy failed. Select the instruction text and copy it manually.
+            </p>
+          ) : null}
+        </div>
+
+        <button
+          className="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:outline-none"
+          type="button"
+          onClick={handleCopySetupPrompt}
+        >
+          {copyState === "copied" ? (
+            <Check className="size-4" aria-hidden="true" />
+          ) : (
+            <Copy className="size-4" aria-hidden="true" />
+          )}
+          {copyState === "copied" ? "Copied" : "Copy prompt"}
+        </button>
       </div>
     </div>
   );
@@ -341,7 +381,7 @@ export function App() {
       <EmptyState
         message={
           loadError ??
-          "Use the Roughdraft CLI to open a single markdown file from disk."
+          "Install Roughdraft and set up the review workflow in one step."
         }
         updateStatus={updateStatus}
       />

@@ -38,7 +38,9 @@ Then recompute `roughdraft_cmd` and use it.
 
 ## Roughdraft Workflow
 
-Use Roughdraft when the user wants to open, review, comment on, or compare Markdown files.
+Use Roughdraft when the user wants to open, review, or comment on a Markdown file.
+
+The user may refer to Roughdraft as `rd` in natural language. Treat `rd` as shorthand for Roughdraft in user requests, but do not create or modify any shell alias, executable, symlink, or command named `rd`.
 
 Preferred flow:
 
@@ -49,14 +51,13 @@ Preferred flow:
 "$roughdraft_cmd" start
 ```
 
-3. Open the relevant file or folder:
+3. Open the relevant Markdown file:
 
 ```bash
 "$roughdraft_cmd" open "/absolute/path/to/file.md"
-"$roughdraft_cmd" open "/absolute/path/to/folder"
 ```
 
-4. After the user finishes reviewing in Roughdraft, read the markdown files from disk and make the requested changes there.
+4. After the user finishes reviewing in Roughdraft, read the markdown file from disk and make the requested changes there.
 
 Useful commands:
 

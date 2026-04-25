@@ -4,6 +4,14 @@ A local-first markdown editor and viewer for working with AI.
 
 Open one markdown file on your machine. Review it, comment on it, and suggest edits.
 
+Paste this into your coding agent:
+
+```text
+Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.
+```
+
+Or install and open a file yourself:
+
 ```bash
 npm i -g roughdraft
 roughdraft open /absolute/path/to/file.md
@@ -32,6 +40,8 @@ Roughdraft opens a single markdown file directly for CriticMarkup comments and s
 
 ## Quick start
 
+Install Roughdraft and start the local server:
+
 ```bash
 npm i -g roughdraft
 roughdraft start
@@ -54,7 +64,7 @@ roughdraft stop
 
 `roughdraft open` will reuse the running server and auto-start it if needed.
 
-Roughdraft does not edit `~/CLAUDE.md`, `~/AGENTS.md`, or other user-level agent files. If you want your agent to remember the workflow, ask it to update its own guidance.
+Roughdraft does not edit `~/CLAUDE.md`, `~/AGENTS.md`, or other user-level agent files. The setup prompt asks your agent to update its own guidance.
 
 If the local server is already running, you can also open a file directly by URL:
 
@@ -121,18 +131,13 @@ Roughdraft reads and writes the markdown file directly.
 
 ## Agent setup
 
-If you want your local agent to remember the Roughdraft workflow, point it at the commands and review loop explicitly:
+If you want your local agent to remember the Roughdraft workflow, ask it to read the live setup prompt:
 
 ```text
-Use Roughdraft when I want to open, review, or comment on a markdown file.
-
-Start it with `roughdraft start` if needed.
-Open markdown files with `roughdraft open "/absolute/path/to/file.md"`.
-After I finish reviewing in Roughdraft, continue by reading the markdown file from disk and making the requested changes there.
-Use CriticMarkup for inline review feedback in markdown.
+Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.
 ```
 
-Use `roughdraft help` or `roughdraft help criticmarkup` if you need a refresher while setting that up.
+Use `roughdraft help`, `roughdraft help agent`, or `roughdraft help criticmarkup` if you need a local refresher.
 
 ## CriticMarkup
 

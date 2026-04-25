@@ -614,6 +614,64 @@ describe("cli", () => {
     expect(test.logs).toContain(
       "  Comment ids are document-local and usually look like `c1`, `c2`, `c3`.",
     );
+    expect(test.logs).toContain(
+      "  Treat CriticMarkup inside fenced code blocks as literal example text.",
+    );
+  });
+
+  it("points general help to agent setup", async () => {
+    const test = createTestDependencies();
+
+    const exitCode = await runCli(["help"], test.deps);
+
+    expect(exitCode).toBe(0);
+    expect(test.logs).toContain("  roughdraft help agent");
+    expect(test.logs).toContain(
+      "Agent setup: https://roughdraft.page/setup.md",
+    );
+    expect(test.logs).toContain(
+      "Use `roughdraft help agent` for a copyable setup prompt.",
+    );
+  });
+
+  it("prints a copyable agent setup prompt", async () => {
+    const test = createTestDependencies();
+
+    const exitCode = await runCli(["help", "agent"], test.deps);
+
+    expect(exitCode).toBe(0);
+    expect(test.logs).toContain(
+      "To set up your coding agent, paste this into it:",
+    );
+    expect(test.logs).toContain(
+      "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.",
+    );
+    expect(test.logs).toContain(
+      "This command only prints setup text. It does not edit agent instruction files.",
+    );
+  });
+
+  it("keeps install deprecated and points to agent setup", async () => {
+    const test = createTestDependencies();
+
+    const exitCode = await runCli(["install"], test.deps);
+
+    expect(exitCode).toBe(1);
+    expect(test.errors).toContain("`roughdraft install` has been removed.");
+    expect(test.logs).toContain(
+      "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.",
+    );
+  });
+
+  it("supports agent-setup as a direct setup helper", async () => {
+    const test = createTestDependencies();
+
+    const exitCode = await runCli(["agent-setup"], test.deps);
+
+    expect(exitCode).toBe(0);
+    expect(test.logs).toContain(
+      "Live setup instructions: https://roughdraft.page/setup.md",
+    );
   });
 
   it("starts a new server when the preferred port belongs to another checkout", async () => {

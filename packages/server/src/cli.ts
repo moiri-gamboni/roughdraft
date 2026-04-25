@@ -12,6 +12,8 @@ import {
 import { findAvailablePort } from "./ports.js";
 
 const DEFAULT_PORT = 3000;
+const AGENT_SETUP_URL = "https://roughdraft.page/setup.md";
+const AGENT_SETUP_PROMPT = `Install Roughdraft for me using \`npm i -g roughdraft\`, then read ${AGENT_SETUP_URL} and set yourself up to use it.`;
 const STATUS_PATH = "/api/status";
 const STATUS_TIMEOUT_MS = 750;
 const SERVER_WAIT_ATTEMPTS = 40;
@@ -245,13 +247,16 @@ function printHelp(log: (message: string) => void) {
   log("  roughdraft status");
   log("  roughdraft stop");
   log("  roughdraft help");
+  log("  roughdraft help agent");
   log("  roughdraft help criticmarkup");
   log("");
-  log("Start the local server once:");
-  log("  roughdraft start");
-  log("");
-  log("Open a markdown file:");
+  log("Open one markdown file:");
   log("  roughdraft open /absolute/path/to/file.md");
+  log("  Relative paths also work; absolute paths are best for agents.");
+  log("");
+  log("Server:");
+  log("  `roughdraft open` starts the server if needed.");
+  log("  Use `roughdraft status` or `roughdraft stop` to manage it.");
   log("");
   log("Review loop:");
   log("  1. Open a markdown file in Roughdraft.");
@@ -262,7 +267,22 @@ function printHelp(log: (message: string) => void) {
   log("  {>>comment<<}  {++inserted++}  {--deleted--}");
   log("  {~~old~>new~~}  {==highlighted==}");
   log("");
+  log(`Agent setup: ${AGENT_SETUP_URL}`);
+  log("Use `roughdraft help agent` for a copyable setup prompt.");
+  log("");
   log("Use `roughdraft help criticmarkup` for examples.");
+}
+
+function printAgentHelp(log: (message: string) => void) {
+  log("To set up your coding agent, paste this into it:");
+  log("");
+  log(AGENT_SETUP_PROMPT);
+  log("");
+  log(`Live setup instructions: ${AGENT_SETUP_URL}`);
+  log("");
+  log(
+    "This command only prints setup text. It does not edit agent instruction files.",
+  );
 }
 
 function printCriticMarkupHelp(log: (message: string) => void) {
@@ -292,6 +312,11 @@ function printCriticMarkupHelp(log: (message: string) => void) {
   log(
     "  Comment ids are document-local and usually look like `c1`, `c2`, `c3`.",
   );
+  log("");
+  log("Code blocks:");
+  log(
+    "  Treat CriticMarkup inside fenced code blocks as literal example text.",
+  );
 }
 
 function printInstallDeprecation(
@@ -299,12 +324,13 @@ function printInstallDeprecation(
   error: (message: string) => void,
 ) {
   error("`roughdraft install` has been removed.");
-  log("Install Roughdraft with:");
-  log("  npm i -g roughdraft");
+  log("To set up your coding agent, paste this into it:");
   log("");
-  log(
-    "Roughdraft no longer edits `~/CLAUDE.md`, `~/AGENTS.md`, or other user-level agent files.",
-  );
+  log(AGENT_SETUP_PROMPT);
+  log("");
+  log(`Live setup instructions: ${AGENT_SETUP_URL}`);
+  log("");
+  log("Roughdraft no longer edits user-level agent files directly.");
 }
 
 function parsePort(value: string | undefined): number {
@@ -767,6 +793,11 @@ export async function runCli(
     command === "--help" ||
     command === "-h"
   ) {
+    if (rest[0] === "agent") {
+      printAgentHelp(deps.log);
+      return 0;
+    }
+
     if (rest[0] === "criticmarkup") {
       printCriticMarkupHelp(deps.log);
       return 0;
@@ -778,6 +809,11 @@ export async function runCli(
 
   if (command === "criticmarkup") {
     printCriticMarkupHelp(deps.log);
+    return 0;
+  }
+
+  if (command === "agent-setup") {
+    printAgentHelp(deps.log);
     return 0;
   }
 
