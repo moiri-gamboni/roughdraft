@@ -119,6 +119,29 @@ pnpm check
 
 `pnpm check` is the same command the pull request workflow runs before merge.
 
+## Publishing
+
+Roughdraft publishes from `main` when the root `package.json` version is newer than the current npm `latest` version.
+
+Release flow:
+
+1.  Bump the root `package.json` version in a pull request.
+    
+2.  Merge the pull request to `main`.
+    
+3.  The `Publish to npm` GitHub Actions workflow runs `pnpm check`, publishes the package if that exact version is not already on npm and is newer than `latest`, then creates a `v<version>` git tag.
+    
+
+The workflow uses npm trusted publishing, so npm must be configured with this trusted publisher:
+
+```text
+Owner: Lex-Inc
+Repository: roughdraft
+Workflow filename: publish.yml
+```
+
+No `NPM_TOKEN` secret is required.
+
 ## Files on disk
 
 ```

@@ -4,6 +4,10 @@
   "description": "A local markdown review app",
   "license": "MIT",
   "author": "Nathan Baschez",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lex-Inc/roughdraft.git"
+  },
   "bin": {
     "roughdraft": "./packages/server/bin/roughdraft.mjs"
   },
