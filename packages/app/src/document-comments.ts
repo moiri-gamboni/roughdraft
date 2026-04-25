@@ -4,7 +4,7 @@ import {
   flattenCommentThreads,
 } from "./critic-markup";
 
-export interface CommentAnchorMeasurement {
+interface CommentAnchorMeasurement {
   commentIds: string[];
   anchorTop: number;
   anchorBottom: number;
@@ -17,7 +17,7 @@ export interface CommentGroupAnchor {
   anchorBottom: number;
 }
 
-export interface CommentRailLayout extends CommentGroupAnchor {
+interface CommentRailLayout extends CommentGroupAnchor {
   railTop: number;
   railBottom: number;
   height: number;
@@ -32,7 +32,7 @@ export interface CommentThreadRailItem {
   anchorBottom: number;
 }
 
-export interface CommentThreadRailLayout extends CommentThreadRailItem {
+interface CommentThreadRailLayout extends CommentThreadRailItem {
   railTop: number;
   railBottom: number;
   height: number;
@@ -75,7 +75,7 @@ export function parseCommentIds(value: string | null | undefined): string[] {
   }
 }
 
-export function getCommentGroupKey(commentIds: string[]): string {
+function getCommentGroupKey(commentIds: string[]): string {
   return [...new Set(commentIds)].sort().join("::");
 }
 

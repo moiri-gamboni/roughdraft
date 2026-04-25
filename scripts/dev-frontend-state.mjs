@@ -37,7 +37,3 @@ export function removeDevFrontendState() {
     fs.rmSync(devFrontendStatePath, { force: true });
   } catch {}
 }
-
-export function getDevFrontendStatePath() {
-  return devFrontendStatePath;
-}

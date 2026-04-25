@@ -507,8 +507,11 @@ describe("cli", () => {
       error: () => {},
     });
 
+    const documentPath = path.join(projectDir, "draft.md");
+    fs.writeFileSync(documentPath, "# Draft\n");
+
     const statusExitCode = await runCli(["status"], deps);
-    const openExitCode = await runCli(["open", projectDir], deps);
+    const openExitCode = await runCli(["open", documentPath], deps);
 
     expect(statusExitCode).toBe(0);
     expect(openExitCode).toBe(0);
@@ -517,6 +520,19 @@ describe("cli", () => {
       `This server is not managed by ${getServerStateFilePath(deps.env)}.`,
     );
     expect(fs.existsSync(stateFilePath)).toBeFalsy();
+  });
+
+  it("rejects directories before opening", async () => {
+    const test = createTestDependencies();
+
+    const exitCode = await runCli(["open", projectDir], test.deps);
+
+    expect(exitCode).toBe(1);
+    expect(test.getSpawnCount()).toBe(0);
+    expect(test.errors).toContain(
+      `Roughdraft can only open .md files: ${projectDir}`,
+    );
+    expect(test.getLastOpenedUrl()).toBeNull();
   });
 
   it("cleans stale state and warns when another Roughdraft instance owns the port during stop", async () => {

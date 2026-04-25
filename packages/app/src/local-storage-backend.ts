@@ -1,12 +1,4 @@
-import type {
-  BackendInfo,
-  DirectoryListing,
-  FileSystemListing,
-  Page,
-  ProjectTreeListing,
-  StorageBackend,
-  StoredAsset,
-} from "./storage";
+import type { BackendInfo, Page, StorageBackend, StoredAsset } from "./storage";
 
 const PAGES_KEY = "roughdraft:pages";
 const ASSETS_KEY = "roughdraft:assets";
@@ -83,12 +75,6 @@ function normalizeAssetPath(input: string): string {
   return `./${input.replace(/^\/+/, "")}`;
 }
 
-function nextId(pages: Record<string, Page>): string {
-  let i = 1;
-  while (pages[`untitled-${i}`]) i++;
-  return `untitled-${i}`;
-}
-
 export class LocalStorageBackend implements StorageBackend {
   info: BackendInfo = {
     kind: "local-storage",
@@ -97,11 +83,7 @@ export class LocalStorageBackend implements StorageBackend {
   };
   canManageProjects = false;
 
-  async listPages(): Promise<Page[]> {
-    return Object.values(readPages());
-  }
-
-  async getPage(id: string): Promise<Page> {
+  private async getPage(id: string): Promise<Page> {
     const pages = readPages();
     const page = pages[id];
     if (!page) throw new Error(`Page not found: ${id}`);
@@ -113,11 +95,10 @@ export class LocalStorageBackend implements StorageBackend {
     return this.getPage(id);
   }
 
-  async savePage(id: string, content: string): Promise<void> {
+  private async savePage(id: string, content: string): Promise<void> {
     const pages = readPages();
     if (!pages[id]) throw new Error(`Page not found: ${id}`);
     pages[id].content = content;
-    // Derive title from first line of content
     const firstLine = content.split("\n")[0] || "";
     pages[id].title = firstLine.replace(/^#*\s*/, "") || id;
     writePages(pages);
@@ -130,26 +111,6 @@ export class LocalStorageBackend implements StorageBackend {
     const id = relativePath.replace(/\.md$/i, "");
     await this.savePage(id, content);
     return undefined;
-  }
-
-  async createPage(title?: string, content?: string): Promise<Page> {
-    const pages = readPages();
-    const id = nextId(pages);
-    const page: Page = {
-      id,
-      title: title || id,
-      content: content || `# ${title || "Untitled"}\n`,
-    };
-    pages[id] = page;
-    writePages(pages);
-
-    return page;
-  }
-
-  async deletePage(id: string): Promise<void> {
-    const pages = readPages();
-    delete pages[id];
-    writePages(pages);
   }
 
   async saveAsset(file: File): Promise<StoredAsset> {
@@ -177,23 +138,9 @@ export class LocalStorageBackend implements StorageBackend {
     return assets[normalized]?.dataUrl ?? null;
   }
 
-  async listDirectories(_path?: string): Promise<DirectoryListing> {
-    throw new Error("Project folders are unavailable in browser storage mode.");
-  }
-
-  async listFileSystem(_path?: string): Promise<FileSystemListing> {
-    throw new Error("Project folders are unavailable in browser storage mode.");
-  }
-
-  async listProjectTree(): Promise<ProjectTreeListing> {
-    throw new Error("Project folders are unavailable in browser storage mode.");
-  }
-
   async openProject(_path: string): Promise<void> {
-    throw new Error("Project folders are unavailable in browser storage mode.");
-  }
-
-  async createProject(_path: string): Promise<void> {
-    throw new Error("Project folders are unavailable in browser storage mode.");
+    throw new Error(
+      "Local file access is unavailable in browser storage mode.",
+    );
   }
 }

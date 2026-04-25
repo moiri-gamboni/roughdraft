@@ -250,14 +250,13 @@ function printHelp(log: (message: string) => void) {
   log("Start the local server once:");
   log("  roughdraft start");
   log("");
-  log("Open a markdown file or folder:");
+  log("Open a markdown file:");
   log("  roughdraft open /absolute/path/to/file.md");
-  log("  roughdraft open /absolute/path/to/folder");
   log("");
   log("Review loop:");
-  log("  1. Open a file or folder in Roughdraft.");
+  log("  1. Open a markdown file in Roughdraft.");
   log("  2. Read, comment, and suggest edits with CriticMarkup.");
-  log("  3. After review, continue by reading the markdown files from disk.");
+  log("  3. After review, continue by reading the markdown file from disk.");
   log("");
   log("CriticMarkup quick reference:");
   log("  {>>comment<<}  {++inserted++}  {--deleted--}");
@@ -355,14 +354,12 @@ function resolveTargetPath(inputPath: string): ResolvedTargetPath {
   try {
     const stat = fs.statSync(resolvedPath);
     if (stat.isDirectory()) {
-      return { projectDir: resolvedPath, openPath: resolvedPath };
+      throw new Error(`Roughdraft can only open .md files: ${resolvedPath}`);
     }
 
     if (stat.isFile()) {
       if (!looksLikeMarkdownFile) {
-        throw new Error(
-          `Roughdraft can only open directories and .md files: ${resolvedPath}`,
-        );
+        throw new Error(`Roughdraft can only open .md files: ${resolvedPath}`);
       }
 
       return {

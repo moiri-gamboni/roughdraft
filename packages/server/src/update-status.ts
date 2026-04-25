@@ -16,7 +16,7 @@ interface ParsedVersion {
   prerelease: string[];
 }
 
-export interface UpdateStatus {
+interface UpdateStatus {
   packageName: string;
   currentVersion: string | null;
   latestVersion: string | null;

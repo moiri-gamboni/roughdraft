@@ -1,7 +1,7 @@
 {
   "name": "roughdraft",
   "version": "0.1.0",
-  "description": "A local-first markdown editor for AI review workflows",
+  "description": "A local markdown review app",
   "license": "MIT",
   "author": "Nathan Baschez",
   "bin": {
@@ -15,11 +15,12 @@
     "dev:web": "node scripts/dev-web.mjs",
     "lint": "biome check . --assist-enabled=false",
     "lint:fix": "biome check --write . --assist-enabled=false",
+    "unused": "knip --no-progress",
     "format": "biome format --write .",
     "test": "pnpm --filter @roughdraft/app test && pnpm --filter @roughdraft/server test",
     "check": "pnpm lint && pnpm test && pnpm build",
     "build": "pnpm --filter @roughdraft/app build && pnpm --filter @roughdraft/server build",
-    "preview": "node packages/server/bin/roughdraft.mjs open ."
+    "preview": "node packages/server/bin/roughdraft.mjs open README.md"
   },
   "files": [
     "packages/app/dist",
@@ -31,6 +32,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
+    "knip": "^6.7.0",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3"
   },

@@ -1,4 +1,4 @@
-export interface RequestedPathState {
+interface RequestedPathState {
   rawPath: string | null;
   projectPath: string | null;
   documentPath: string | null;
@@ -6,11 +6,11 @@ export interface RequestedPathState {
 
 export type DocumentEditorViewMode = "rich-text" | "code";
 
-export function normalizePathSeparators(value: string) {
+function normalizePathSeparators(value: string) {
   return value.replace(/\\/g, "/");
 }
 
-export function getRawPathFromLocation(): string | null {
+function getRawPathFromLocation(): string | null {
   const searchParams = new URLSearchParams(window.location.search);
   const queryPath = searchParams.get("path")?.trim();
   if (queryPath) return queryPath;
@@ -59,10 +59,6 @@ export function getRequestedPathState(): RequestedPathState {
   return { rawPath, projectPath, documentPath };
 }
 
-export function getWorkspacePath(path?: string) {
-  return path?.trim() || null;
-}
-
 export function formatWorkspacePathForDisplay(path?: string | null) {
   const value = path?.trim();
   if (!value) return null;
@@ -77,24 +73,12 @@ export function formatWorkspacePathForDisplay(path?: string | null) {
     : collapsedHomePath;
 }
 
-export function getWorkspaceName(path?: string) {
-  const workspacePath = getWorkspacePath(path);
-  if (!workspacePath) return "Browser drafts";
-
-  const segments = workspacePath.split(/[\\/]/).filter(Boolean);
-  return segments.at(-1) || workspacePath;
-}
-
 export function getPathLeaf(path?: string | null) {
   const value = path?.trim();
   if (!value) return null;
 
   const segments = value.split(/[\\/]/).filter(Boolean);
   return segments.at(-1) || value;
-}
-
-export function hasCriticMarkupComments(content: string) {
-  return content.includes("{>>");
 }
 
 export function joinPath(basePath: string, relativePath: string) {
@@ -112,57 +96,7 @@ export function joinPath(basePath: string, relativePath: string) {
     );
 }
 
-export function getContainingPath(pathValue: string) {
-  const trimmedPath = pathValue.trim();
-  if (!trimmedPath) return trimmedPath;
-
-  const normalizedPath = trimmedPath.replace(/[\\/]+$/, "");
-  if (!normalizedPath) return trimmedPath.startsWith("\\") ? "\\" : "/";
-
-  const lastSeparatorIndex = Math.max(
-    normalizedPath.lastIndexOf("/"),
-    normalizedPath.lastIndexOf("\\"),
-  );
-
-  if (lastSeparatorIndex < 0) return ".";
-  if (lastSeparatorIndex === 0) return normalizedPath[0] === "\\" ? "\\" : "/";
-  return normalizedPath.slice(0, lastSeparatorIndex);
-}
-
-export function getOpenedFolderPath(pathValue: string) {
-  const trimmedPath = pathValue.trim();
-  if (!trimmedPath) return trimmedPath;
-
-  return normalizePathSeparators(trimmedPath).toLowerCase().endsWith(".md")
-    ? getContainingPath(trimmedPath)
-    : trimmedPath.replace(/[\\/]+$/, "") || trimmedPath;
-}
-
-export function getDocumentNavigationState(
-  projectPath: string,
-  relativePath: string,
-  currentRawPath: string | null,
-): RequestedPathState {
-  const relativeFolderPath = getContainingPath(relativePath);
-  const nextFolderPath =
-    relativeFolderPath === "."
-      ? projectPath
-      : joinPath(projectPath, relativeFolderPath);
-  const shouldPreserveUrl =
-    !!currentRawPath &&
-    normalizePathSeparators(getOpenedFolderPath(currentRawPath)) ===
-      normalizePathSeparators(nextFolderPath);
-
-  return {
-    rawPath: shouldPreserveUrl
-      ? currentRawPath
-      : joinPath(projectPath, relativePath),
-    projectPath,
-    documentPath: relativePath,
-  };
-}
-
-export function buildLocationForPath(path?: string | null) {
+function buildLocationForPath(path?: string | null) {
   const nextPath = path?.trim() || null;
   const url = new URL(window.location.href);
 
@@ -188,14 +122,6 @@ export function buildLocationForDocumentEditorViewMode(
   const url = new URL(window.location.href);
   url.searchParams.set("editor", mode);
   return `${url.pathname}${url.search}${url.hash}`;
-}
-
-export function syncProjectPathInUrl(projectPath?: string) {
-  const nextLocation = buildLocationForPath(getWorkspacePath(projectPath));
-  const currentLocation = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-  if (nextLocation !== currentLocation) {
-    window.history.replaceState(null, "", nextLocation);
-  }
 }
 
 export function syncRequestedPathInUrl(path?: string | null) {

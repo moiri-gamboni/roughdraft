@@ -1,62 +1,73 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  type DocumentEditorViewMode,
+  buildLocationForDocumentEditorViewMode,
+  formatWorkspacePathForDisplay,
+  getDocumentEditorViewModeFromLocation,
+  getPathLeaf,
+  getRequestedPathState,
+  joinPath,
+  syncRequestedPathInUrl,
+} from "./app-navigation";
+import { detectBackend } from "./detect-backend";
+import { DocumentWorkspace } from "./DocumentWorkspace";
+import {
   MarkdownFileConflictError,
   type Page,
   type StorageBackend,
 } from "./storage";
-import { detectBackend } from "./detect-backend";
-import { AppSidebar } from "./AppSidebar";
-import { DocumentWorkspace } from "./DocumentWorkspace";
-import { HomeScreen } from "./HomeScreen";
-import { UpdateNotice } from "./UpdateNotice";
-import {
-  type DocumentEditorViewMode,
-  type RequestedPathState,
-  buildLocationForDocumentEditorViewMode,
-  buildLocationForPath,
-  formatWorkspacePathForDisplay,
-  getDocumentEditorViewModeFromLocation,
-  getDocumentNavigationState,
-  getPathLeaf,
-  getRequestedPathState,
-  getWorkspaceName,
-  getWorkspacePath,
-  joinPath,
-  syncRequestedPathInUrl,
-} from "./app-navigation";
-import { LocalStorageBackend } from "./local-storage-backend";
-import { recordRecentOpen } from "./recent-items";
 import { fetchUpdateStatus, type UpdateStatus } from "./update-status";
+import { UpdateNotice } from "./UpdateNotice";
 
+type SaveState = "idle" | "saving" | "error";
 type DocumentDiskChangeState = "clean" | "changed" | "conflict";
+
+function EmptyState({
+  message,
+  updateStatus,
+}: {
+  message: string;
+  updateStatus: UpdateStatus | null;
+}) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#FCFCFC] px-6 text-slate-950">
+      {updateStatus ? (
+        <div className="absolute top-4 right-4 max-w-sm">
+          <UpdateNotice updateStatus={updateStatus} />
+        </div>
+      ) : null}
+      <div className="max-w-md text-center">
+        <h1 className="text-xl font-semibold tracking-tight">
+          Open a markdown file
+        </h1>
+        <p className="mt-2 text-sm leading-6 text-slate-500">{message}</p>
+        <code className="mt-5 block rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-600">
+          roughdraft open /absolute/path/to/file.md
+        </code>
+      </div>
+    </div>
+  );
+}
 
 export function App() {
   const initialRequestedPathState = getRequestedPathState();
-  const [requestedPathState, setRequestedPathState] =
-    useState<RequestedPathState>(initialRequestedPathState);
+  const [requestedPathState] = useState(initialRequestedPathState);
   const [backend, setBackend] = useState<StorageBackend | null>(null);
   const [documentPage, setDocumentPage] = useState<Page | null>(null);
   const [activeDocumentPath, setActiveDocumentPath] = useState<string | null>(
-    requestedPathState.documentPath,
+    initialRequestedPathState.documentPath,
   );
-  const [pathSwitcherDismissCount, setPathSwitcherDismissCount] = useState(0);
-  const [, setDocumentSaveState] = useState<"idle" | "saving" | "error">(
-    "idle",
-  );
+  const [, setDocumentSaveState] = useState<SaveState>("idle");
   const [documentDiskChangeState, setDocumentDiskChangeState] =
     useState<DocumentDiskChangeState>("clean");
   const [documentForceResetKey, setDocumentForceResetKey] = useState<
     string | null
   >(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const documentEditorViewMode =
     getDocumentEditorViewModeFromLocation("rich-text");
-  const [projectTreeVersion, setProjectTreeVersion] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [demoModeEnabled, setDemoModeEnabled] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
-  const [sidebarVisible, setSidebarVisible] = useState(
-    () => !getRequestedPathState().documentPath,
-  );
   const backendRef = useRef<StorageBackend | null>(null);
   const documentPageRef = useRef<Page | null>(null);
   const activeDocumentPathRef = useRef<string | null>(activeDocumentPath);
@@ -66,11 +77,6 @@ export function App() {
   backendRef.current = backend;
   documentPageRef.current = documentPage;
   activeDocumentPathRef.current = activeDocumentPath;
-
-  const loadProject = useCallback(async (nextBackend: StorageBackend) => {
-    const pageList = await nextBackend.listPages();
-    return pageList;
-  }, []);
 
   const applyDocumentPage = useCallback((nextDocument: Page) => {
     setDocumentPage(nextDocument);
@@ -88,14 +94,6 @@ export function App() {
     },
     [applyDocumentPage],
   );
-
-  const resetProjectState = useCallback(() => {
-    setDocumentPage(null);
-    setActiveDocumentPath(null);
-    documentDirtyRef.current = false;
-    documentDraftContentRef.current = null;
-    setDocumentDiskChangeState("clean");
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,44 +116,52 @@ export function App() {
     let cancelled = false;
 
     const initialize = async () => {
-      const detectedBackend = await detectBackend();
-      if (cancelled) return;
+      setLoading(true);
+      setLoadError(null);
+      setDocumentPage(null);
 
-      if (requestedPathState.rawPath && detectedBackend.canManageProjects) {
-        const requestedProjectPath = requestedPathState.projectPath;
-        if (
-          requestedProjectPath &&
-          requestedProjectPath !==
-            getWorkspacePath(detectedBackend.info.projectPath)
-        ) {
-          try {
-            await detectedBackend.openProject(requestedProjectPath);
-          } catch (error) {
-            console.error("Failed to open project from URL:", error);
-          }
+      try {
+        const detectedBackend = await detectBackend();
+        if (cancelled) return;
+
+        setBackend(detectedBackend);
+
+        if (!requestedPathState.rawPath) {
+          setActiveDocumentPath(null);
+          setLoading(false);
+          return;
         }
-      }
 
-      syncRequestedPathInUrl(requestedPathState.rawPath);
-      setBackend(detectedBackend);
+        syncRequestedPathInUrl(requestedPathState.rawPath);
 
-      if (!requestedPathState.projectPath) {
-        resetProjectState();
-        setLoading(false);
-        return;
-      }
+        if (
+          !requestedPathState.projectPath ||
+          !requestedPathState.documentPath
+        ) {
+          setActiveDocumentPath(null);
+          setLoadError("Roughdraft now opens one .md file at a time.");
+          setLoading(false);
+          return;
+        }
 
-      await loadProject(detectedBackend);
+        if (detectedBackend.canManageProjects) {
+          await detectedBackend.openProject(requestedPathState.projectPath);
+        }
 
-      if (requestedPathState.documentPath) {
+        if (cancelled) return;
+
         await loadDocument(detectedBackend, requestedPathState.documentPath);
-      } else {
-        setDocumentPage(null);
-        setActiveDocumentPath(null);
-      }
+        if (cancelled) return;
 
-      if (cancelled) return;
-      setLoading(false);
+        setLoading(false);
+      } catch (error) {
+        if (cancelled) return;
+
+        console.error("Failed to open markdown file:", error);
+        setActiveDocumentPath(null);
+        setLoadError("Could not open that markdown file.");
+        setLoading(false);
+      }
     };
 
     void initialize();
@@ -165,17 +171,10 @@ export function App() {
     };
   }, [
     loadDocument,
-    loadProject,
-    resetProjectState,
     requestedPathState.documentPath,
     requestedPathState.projectPath,
     requestedPathState.rawPath,
   ]);
-
-  useEffect(() => {
-    if (!requestedPathState.rawPath) return;
-    recordRecentOpen(requestedPathState.rawPath);
-  }, [requestedPathState.rawPath]);
 
   useEffect(() => {
     const workspaceTitlePath = activeDocumentPath
@@ -184,68 +183,12 @@ export function App() {
             ? joinPath(backend.info.projectPath, activeDocumentPath)
             : requestedPathState.rawPath,
         )
-      : formatWorkspacePathForDisplay(
-          backend?.info.projectPath ?? requestedPathState.projectPath,
-        );
+      : null;
 
     document.title = workspaceTitlePath
       ? `Roughdraft of ${workspaceTitlePath}`
       : "Roughdraft";
-  }, [
-    activeDocumentPath,
-    backend,
-    requestedPathState.projectPath,
-    requestedPathState.rawPath,
-  ]);
-
-  const openDocumentPage = useCallback(
-    (
-      page: Page,
-      relativePath: string,
-      projectPath: string | null,
-      currentRawPath: string | null,
-    ) => {
-      applyDocumentPage(page);
-      setActiveDocumentPath(relativePath);
-      setDocumentSaveState("idle");
-      documentDirtyRef.current = false;
-      setDocumentDiskChangeState("clean");
-
-      if (!projectPath) return;
-
-      const nextPathState = getDocumentNavigationState(
-        projectPath,
-        relativePath,
-        currentRawPath,
-      );
-      setRequestedPathState(nextPathState);
-      syncRequestedPathInUrl(nextPathState.rawPath);
-    },
-    [applyDocumentPage],
-  );
-
-  const handleOpenDemo = useCallback(async () => {
-    const nextBackend = new LocalStorageBackend();
-    setLoading(true);
-    setDemoModeEnabled(true);
-    setSidebarVisible(true);
-    syncRequestedPathInUrl(null);
-    setBackend(nextBackend);
-    resetProjectState();
-
-    try {
-      const loadedPages = await loadProject(nextBackend);
-      const page =
-        loadedPages[0] ??
-        (await nextBackend.createPage(
-          "Untitled",
-          "# Welcome to Roughdraft\n\nStart writing. Your work is saved automatically.\n",
-        ));
-      openDocumentPage(page, `${page.id}.md`, null, null);
-    } finally {
-      setLoading(false);
-    }
-  }, [loadProject, openDocumentPage, resetProjectState]);
+  }, [activeDocumentPath, backend, requestedPathState.rawPath]);
 
   const handleSaveDocument = useCallback(
     async (id: string, content: string) => {
@@ -381,69 +324,6 @@ export function App() {
     };
   }, [activeDocumentPath, applyDocumentPage, backend]);
 
-  const handleCreatePage = useCallback(async () => {
-    if (!backendRef.current) return;
-    const page = await backendRef.current.createPage(
-      "Untitled",
-      "# Untitled\n",
-    );
-    const projectPath =
-      backendRef.current.info.projectPath ?? requestedPathState.projectPath;
-    const relativePath = `${page.id}.md`;
-
-    setProjectTreeVersion((version) => version + 1);
-    openDocumentPage(
-      page,
-      relativePath,
-      projectPath ?? null,
-      requestedPathState.rawPath,
-    );
-  }, [
-    openDocumentPage,
-    requestedPathState.projectPath,
-    requestedPathState.rawPath,
-  ]);
-
-  const openDocumentInRegularMode = useCallback(
-    async (relativePath: string) => {
-      if (!backendRef.current) return;
-
-      const projectPath =
-        backendRef.current.info.projectPath ?? requestedPathState.projectPath;
-      if (!projectPath) return;
-
-      try {
-        const nextDocument = await loadDocument(
-          backendRef.current,
-          relativePath,
-        );
-        openDocumentPage(
-          nextDocument,
-          relativePath,
-          projectPath,
-          requestedPathState.rawPath,
-        );
-      } catch (error) {
-        console.error("Failed to open markdown file:", error);
-      }
-
-      setPathSwitcherDismissCount((count) => count + 1);
-    },
-    [
-      loadDocument,
-      openDocumentPage,
-      requestedPathState.projectPath,
-      requestedPathState.rawPath,
-    ],
-  );
-
-  const handleOpenMarkdownPage = useCallback(
-    async (relativePath: string) => {
-      await openDocumentInRegularMode(relativePath);
-    },
-    [openDocumentInRegularMode],
-  );
-
   const handleDocumentEditorViewModeChange = useCallback(
     (nextMode: DocumentEditorViewMode) => {
       if (nextMode === documentEditorViewMode) return;
@@ -456,14 +336,13 @@ export function App() {
     return <div className="h-screen bg-[#FCFCFC]" aria-hidden="true" />;
   }
 
-  const shouldShowHomepage = !requestedPathState.rawPath && !demoModeEnabled;
-
-  if (shouldShowHomepage) {
+  if (!requestedPathState.rawPath || loadError) {
     return (
-      <HomeScreen
-        backend={backend}
-        buildLocationForPath={buildLocationForPath}
-        onOpenDemo={() => void handleOpenDemo()}
+      <EmptyState
+        message={
+          loadError ??
+          "Use the Roughdraft CLI to open a single markdown file from disk."
+        }
         updateStatus={updateStatus}
       />
     );
@@ -473,71 +352,34 @@ export function App() {
     activeDocumentPath && backend?.info.projectPath
       ? joinPath(backend.info.projectPath, activeDocumentPath)
       : requestedPathState.rawPath;
-  const displayPath = documentPage
-    ? documentAbsolutePath
-    : backend?.info.projectPath;
-  const workspaceName = getWorkspaceName(displayPath ?? undefined);
-  const workspacePath =
-    getWorkspacePath(
-      backend?.info.projectPath ?? requestedPathState.projectPath ?? undefined,
-    ) ?? "Browser drafts";
-  const workspacePathLabel =
-    formatWorkspacePathForDisplay(workspacePath) ?? workspacePath;
-  const treeCurrentPath = documentAbsolutePath ?? backend?.info.projectPath;
-  const projectLabel = getPathLeaf(backend?.info.projectPath) ?? workspaceName;
   const documentFilenameLabel =
-    getPathLeaf(activeDocumentPath) ?? "Untitled.md";
-  const sidebarToggleLabel = sidebarVisible ? "Hide sidebar" : "Show sidebar";
+    getPathLeaf(documentAbsolutePath ?? activeDocumentPath) ?? "Untitled.md";
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#FCFCFC] text-slate-950">
-      {sidebarVisible ? (
-        <AppSidebar
-          sidebarToggleLabel={sidebarToggleLabel}
-          backend={backend}
-          projectLabel={projectLabel}
-          displayPath={displayPath ?? null}
-          workspacePathLabel={workspacePathLabel}
-          buildLocationForPath={buildLocationForPath}
-          pathSwitcherDismissCount={pathSwitcherDismissCount}
-          onCreatePage={() => void handleCreatePage()}
-          onHideSidebar={() => setSidebarVisible(false)}
-          treeCurrentPath={treeCurrentPath ?? null}
-          projectTreeVersion={projectTreeVersion}
-          onOpenMarkdownPage={handleOpenMarkdownPage}
-        />
-      ) : null}
-
-      <main className="relative min-w-0 flex-1 overflow-hidden">
-        {updateStatus ? (
-          <div className="pointer-events-none absolute top-4 right-4 z-40 max-w-sm">
-            <div className="pointer-events-auto">
-              <UpdateNotice updateStatus={updateStatus} />
-            </div>
+    <main className="relative flex h-screen min-w-0 flex-col overflow-hidden bg-[#FCFCFC] text-slate-950">
+      {updateStatus ? (
+        <div className="pointer-events-none absolute top-4 right-4 z-40 max-w-sm">
+          <div className="pointer-events-auto">
+            <UpdateNotice updateStatus={updateStatus} />
           </div>
-        ) : null}
-        <div className="flex h-full flex-col overflow-hidden bg-[#FCFCFC]">
-          <DocumentWorkspace
-            sidebarVisible={sidebarVisible}
-            sidebarToggleLabel={sidebarToggleLabel}
-            onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
-            documentPage={documentPage}
-            activeDocumentPath={activeDocumentPath}
-            documentFilenameLabel={documentFilenameLabel}
-            documentEditorViewMode={documentEditorViewMode}
-            onDocumentEditorViewModeChange={handleDocumentEditorViewModeChange}
-            onSaveDocument={handleSaveDocument}
-            onDocumentSaveStateChange={setDocumentSaveState}
-            onDocumentDirtyStateChange={handleDocumentDirtyStateChange}
-            onDocumentLocalContentChange={handleDocumentLocalContentChange}
-            documentDiskChangeState={documentDiskChangeState}
-            documentForceResetKey={documentForceResetKey}
-            onReloadDocumentFromDisk={handleReloadDocumentFromDisk}
-            onOverwriteDocumentOnDisk={handleOverwriteDocumentOnDisk}
-            backend={backend}
-          />
         </div>
-      </main>
-    </div>
+      ) : null}
+      <DocumentWorkspace
+        documentPage={documentPage}
+        activeDocumentPath={activeDocumentPath}
+        documentFilenameLabel={documentFilenameLabel}
+        documentEditorViewMode={documentEditorViewMode}
+        onDocumentEditorViewModeChange={handleDocumentEditorViewModeChange}
+        onSaveDocument={handleSaveDocument}
+        onDocumentSaveStateChange={setDocumentSaveState}
+        onDocumentDirtyStateChange={handleDocumentDirtyStateChange}
+        onDocumentLocalContentChange={handleDocumentLocalContentChange}
+        documentDiskChangeState={documentDiskChangeState}
+        documentForceResetKey={documentForceResetKey}
+        onReloadDocumentFromDisk={handleReloadDocumentFromDisk}
+        onOverwriteDocumentOnDisk={handleOverwriteDocumentOnDisk}
+        backend={backend}
+      />
+    </main>
   );
 }

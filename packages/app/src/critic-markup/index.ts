@@ -227,7 +227,7 @@ export function flattenCommentThreads(
   return orderedComments;
 }
 
-export function getOrderedAnchorComments(
+function getOrderedAnchorComments(
   commentIds: string[],
   comments: ReadonlyMap<string, CriticComment>,
 ): CriticComment[] {

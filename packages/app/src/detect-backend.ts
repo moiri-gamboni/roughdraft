@@ -21,8 +21,8 @@ export async function detectBackend(): Promise<StorageBackend> {
           kind: "local-files",
           label: "Local files",
           detail: payload.stateless
-            ? "Choose a file or folder to open"
-            : "Project folder on disk",
+            ? "Open a markdown file"
+            : "Markdown file on disk",
           projectPath: payload.projectDir,
         });
       }

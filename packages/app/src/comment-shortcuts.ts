@@ -1,4 +1,4 @@
-export function isApplePlatform(platform?: string | null) {
+function isApplePlatform(platform?: string | null) {
   if (!platform) return false;
 
   return /mac|iphone|ipad|ipod/i.test(platform);
@@ -8,7 +8,7 @@ export function getAddCommentShortcutLabel(platform?: string | null) {
   return isApplePlatform(platform) ? "Cmd + Option + M" : "Ctrl + Alt + M";
 }
 
-export interface AddCommentShortcutEventLike {
+interface AddCommentShortcutEventLike {
   code: string;
   key: string;
   altKey: boolean;

@@ -1,11 +1,8 @@
 import {
   MarkdownFileConflictError,
   type BackendInfo,
-  type DirectoryListing,
-  type FileSystemListing,
   type MarkdownFileChangeEvent,
   type Page,
-  type ProjectTreeListing,
   type StorageBackend,
   type StoredAsset,
 } from "./storage";
@@ -21,7 +18,7 @@ export class ApiBackend implements StorageBackend {
   private updateProjectInfo(projectPath?: string): void {
     this.info = {
       ...this.info,
-      detail: projectPath || "Project folder on disk",
+      detail: projectPath || "Markdown file on disk",
       projectPath,
     };
   }
@@ -41,20 +38,6 @@ export class ApiBackend implements StorageBackend {
     return `${url.pathname}${url.search}`;
   }
 
-  async listPages(): Promise<Page[]> {
-    const res = await fetch(this.buildUrl("/api/pages"));
-    if (!res.ok) throw new Error(`Failed to list pages: ${res.status}`);
-    return res.json();
-  }
-
-  async getPage(id: string): Promise<Page> {
-    const res = await fetch(
-      this.buildUrl(`/api/pages/${encodeURIComponent(id)}`),
-    );
-    if (!res.ok) throw new Error(`Failed to get page ${id}: ${res.status}`);
-    return res.json();
-  }
-
   async getMarkdownFile(relativePath: string): Promise<Page> {
     const res = await fetch(
       this.buildUrl("/api/markdown-file", {
@@ -67,18 +50,6 @@ export class ApiBackend implements StorageBackend {
       );
     }
     return res.json();
-  }
-
-  async savePage(id: string, content: string): Promise<void> {
-    const res = await fetch(
-      this.buildUrl(`/api/pages/${encodeURIComponent(id)}`),
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, projectPath: this.info.projectPath }),
-      },
-    );
-    if (!res.ok) throw new Error(`Failed to save page ${id}: ${res.status}`);
   }
 
   async saveMarkdownFile(
@@ -137,30 +108,6 @@ export class ApiBackend implements StorageBackend {
     };
   }
 
-  async createPage(title?: string, content?: string): Promise<Page> {
-    const res = await fetch(this.buildUrl("/api/pages"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title,
-        content,
-        projectPath: this.info.projectPath,
-      }),
-    });
-    if (!res.ok) throw new Error(`Failed to create page: ${res.status}`);
-    return res.json();
-  }
-
-  async deletePage(id: string): Promise<void> {
-    const res = await fetch(
-      this.buildUrl(`/api/pages/${encodeURIComponent(id)}`),
-      {
-        method: "DELETE",
-      },
-    );
-    if (!res.ok) throw new Error(`Failed to delete page ${id}: ${res.status}`);
-  }
-
   async saveAsset(file: File): Promise<StoredAsset> {
     const buffer = await file.arrayBuffer();
     let binary = "";
@@ -191,38 +138,7 @@ export class ApiBackend implements StorageBackend {
     return this.buildUrl("/api/files", { path: normalized });
   }
 
-  async listDirectories(path?: string): Promise<DirectoryListing> {
-    const query = path ? `?path=${encodeURIComponent(path)}` : "";
-    const res = await fetch(`/api/directories${query}`);
-    if (!res.ok) throw new Error(`Failed to list directories: ${res.status}`);
-    return res.json();
-  }
-
-  async listFileSystem(path?: string): Promise<FileSystemListing> {
-    const query = path ? `?path=${encodeURIComponent(path)}` : "";
-    const res = await fetch(`/api/fs/list${query}`);
-    if (!res.ok) throw new Error(`Failed to list file system: ${res.status}`);
-    return res.json();
-  }
-
-  async listProjectTree(): Promise<ProjectTreeListing> {
-    const res = await fetch(this.buildUrl("/api/file-tree"));
-    if (!res.ok) throw new Error(`Failed to list project tree: ${res.status}`);
-    return res.json();
-  }
-
   async openProject(path: string): Promise<void> {
     this.updateProjectInfo(path);
-  }
-
-  async createProject(path: string): Promise<void> {
-    const res = await fetch("/api/project/create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
-    });
-    if (!res.ok) throw new Error(`Failed to create project: ${res.status}`);
-    const payload = (await res.json()) as { projectDir?: string };
-    this.updateProjectInfo(payload.projectDir);
   }
 }

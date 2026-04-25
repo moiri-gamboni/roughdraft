@@ -2,7 +2,7 @@
 
 A local-first markdown editor and viewer for working with AI.
 
-Open any markdown file on your machine. Review it, comment on it, suggest edits, and keep the file in plain markdown on disk.
+Open one markdown file on your machine. Review it, comment on it, and suggest edits.
 
 ```bash
 npm i -g roughdraft
@@ -15,7 +15,7 @@ Roughdraft is a local-first markdown editor and viewer that runs on your compute
 
 Its job is to make markdown files easy to open, read, edit, review, and discuss with your AI agent without moving them into a proprietary format or a hosted app.
 
-You can open a single markdown file directly or open a folder, browse its markdown files, and review each document with CriticMarkup comments and suggested changes.
+Roughdraft opens a single markdown file directly for CriticMarkup comments and suggested changes.
 
 ## How it works
 
@@ -24,8 +24,6 @@ You can open a single markdown file directly or open a folder, browse its markdo
 *   **Works with your AI agent** — Tell your local agent to open a file in Roughdraft on your computer, then keep collaborating from there
     
 *   **Comments & suggested changes** — Use CriticMarkup for inline feedback, revisions, and review conversations
-    
-*   **Folder browsing** — Open a folder of docs, pick a markdown file from the sidebar, and keep your review focused on the active document
     
 *   **Markdown files on disk** — Everything stays as regular markdown files you can also edit in VS Code, Vim, Cursor, or anywhere else
     
@@ -41,13 +39,7 @@ roughdraft start
 
 `roughdraft start` runs Roughdraft in the background, reuses or chooses a free localhost port, writes server state to `~/.roughdraft/server.json`, prints the active URL, and exits while the server keeps running.
 
-Open a specific project folder:
-
-```bash
-roughdraft open ./path/to/my-essay
-```
-
-Open a specific markdown file directly:
+Open a specific markdown file:
 
 ```bash
 roughdraft open ./path/to/my-essay/draft.md
@@ -64,10 +56,9 @@ roughdraft stop
 
 Roughdraft does not edit `~/CLAUDE.md`, `~/AGENTS.md`, or other user-level agent files. If you want your agent to remember the workflow, ask it to update its own guidance.
 
-If the local server is already running, you can also open a folder or file directly by URL:
+If the local server is already running, you can also open a file directly by URL:
 
 ```text
-http://localhost:3000/absolute/path/to/my-essay
 http://localhost:3000/absolute/path/to/my-essay/draft.md
 ```
 
@@ -75,7 +66,7 @@ That makes an agent-friendly workflow possible:
 
 1.  Your AI writes or updates markdown files on disk.
     
-2.  You tell it to open a file or folder in Roughdraft.
+2.  You tell it to open a markdown file in Roughdraft.
     
 3.  Roughdraft opens locally on your machine.
     
@@ -118,27 +109,26 @@ pnpm check
 
 `pnpm check` is the same command the pull request workflow runs before merge.
 
-## What's in the folder
+## Files on disk
 
 ```
 my-essay/
   draft-1.md            # A normal markdown file on disk
-  draft-1-alt.md        # A variation you are reviewing
-  draft-2.md            # Another page you can open directly
+  draft-2.md            # Another file you can open separately
 ```
 
-Every page is a regular markdown file. Roughdraft reads and writes those files directly.
+Roughdraft reads and writes the markdown file directly.
 
 ## Agent setup
 
 If you want your local agent to remember the Roughdraft workflow, point it at the commands and review loop explicitly:
 
 ```text
-Use Roughdraft when I want to open, review, comment on, or compare markdown files.
+Use Roughdraft when I want to open, review, or comment on a markdown file.
 
 Start it with `roughdraft start` if needed.
-Open files or folders with `roughdraft open "/absolute/path/to/file.md"`.
-After I finish reviewing in Roughdraft, continue by reading the markdown files from disk and making the requested changes there.
+Open markdown files with `roughdraft open "/absolute/path/to/file.md"`.
+After I finish reviewing in Roughdraft, continue by reading the markdown file from disk and making the requested changes there.
 Use CriticMarkup for inline review feedback in markdown.
 ```
 
@@ -166,8 +156,6 @@ This matters because the main workflow is often:
 *   The user leaves comments and suggested changes
     
 *   The AI reads those comments and responds in the same markdown file
-    
-*   The user and AI keep alternatives as normal markdown files in the same folder
     
 
 ## Try the demo
