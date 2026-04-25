@@ -9,7 +9,7 @@ import {
 describe("CriticMarkup comments", () => {
   it("round-trips a highlighted comment anchor", () => {
     const input =
-      "This is {==highlighted==}{>>comment text<<}{@id:cmt1;by:AI;at:2024-01-15T10:30:00.000Z@} text.\n";
+      'This is {==highlighted==}{>>comment text<<}{id="cmt1" by="AI" at="2024-01-15T10:30:00.000Z"} text.\n';
 
     const { doc, comments } = criticMarkdownToEditorState(input);
 
@@ -23,7 +23,7 @@ describe("CriticMarkup comments", () => {
 
   it("preserves formatting nested inside a comment anchor", () => {
     const input =
-      "The {==**important**==}{>>Review this phrasing<<}{@id:cmt2;by:user@example.com;at:2024-01-15T10:31:00.000Z@} section stays bold.\n";
+      'The {==**important**==}{>>Review this phrasing<<}{id="cmt2" by="user@example.com" at="2024-01-15T10:31:00.000Z"} section stays bold.\n';
 
     const { doc, comments } = criticMarkdownToEditorState(input);
 
@@ -32,7 +32,7 @@ describe("CriticMarkup comments", () => {
 
   it("keeps the anchor attached when nearby text changes", () => {
     const input =
-      "Before {==target==}{>>Check this<<}{@id:cmt3;by:AI;at:2024-01-15T10:32:00.000Z@} after.\n";
+      'Before {==target==}{>>Check this<<}{id="cmt3" by="AI" at="2024-01-15T10:32:00.000Z"} after.\n';
     const { doc, comments } = criticMarkdownToEditorState(input);
     const nextDoc = structuredClone(doc);
     const firstParagraph = nextDoc.content?.[0];
@@ -45,7 +45,7 @@ describe("CriticMarkup comments", () => {
     firstTextNode.text = "Before nearby ";
 
     expect(editorStateToCriticMarkdown(nextDoc, comments)).toBe(
-      "Before nearby {==target==}{>>Check this<<}{@id:cmt3;by:AI;at:2024-01-15T10:32:00.000Z@} after.\n",
+      'Before nearby {==target==}{>>Check this<<}{id="cmt3" by="AI" at="2024-01-15T10:32:00.000Z"} after.\n',
     );
   });
 
@@ -53,7 +53,7 @@ describe("CriticMarkup comments", () => {
     const input = `## Sprint Notes
 
 * First item
-* {==Second item==}{>>Needs review<<}{@id:cmt4;by:AI;at:2024-01-15T10:33:00.000Z@}
+* {==Second item==}{>>Needs review<<}{id="cmt4" by="AI" at="2024-01-15T10:33:00.000Z"}
 `;
 
     const { doc, comments } = criticMarkdownToEditorState(input);
@@ -61,7 +61,7 @@ describe("CriticMarkup comments", () => {
 
     expect(output).toContain("## Sprint Notes");
     expect(output).toContain(
-      "{==Second item==}{>>Needs review<<}{@id:cmt4;by:AI;at:2024-01-15T10:33:00.000Z@}",
+      '{==Second item==}{>>Needs review<<}{id="cmt4" by="AI" at="2024-01-15T10:33:00.000Z"}',
     );
     expect(output).toContain("*   First item");
   });
@@ -96,7 +96,7 @@ Use CriticMarkup for inline review feedback in markdown.`,
 
   it("round-trips an anchored reply thread", () => {
     const input =
-      "Please revisit {==this sentence==}{>>Needs a source<<}{@id:c1;by:user;at:2024-01-15T10:30:00.000Z@}{>>I can add one from the intro.<<}{@id:c2;by:AI;at:2024-01-15T10:31:00.000Z;re:c1@}.\n";
+      'Please revisit {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2024-01-15T10:30:00.000Z"}{>>I can add one from the intro.<<}{id="c2" by="AI" at="2024-01-15T10:31:00.000Z" re="c1"}.\n';
 
     const { doc, comments } = criticMarkdownToEditorState(input);
 
@@ -110,13 +110,42 @@ Use CriticMarkup for inline review feedback in markdown.`,
 
   it("round-trips nested replies in preorder", () => {
     const input =
-      "Please revisit {==this sentence==}{>>Needs a source<<}{@id:c1;by:user;at:2024-01-15T10:30:00.000Z@}{>>I can add one from the intro.<<}{@id:c2;by:AI;at:2024-01-15T10:31:00.000Z;re:c1@}{>>Use the market report too.<<}{@id:c3;by:user;at:2024-01-15T10:32:00.000Z;re:c2@}.\n";
+      'Please revisit {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2024-01-15T10:30:00.000Z"}{>>I can add one from the intro.<<}{id="c2" by="AI" at="2024-01-15T10:31:00.000Z" re="c1"}{>>Use the market report too.<<}{id="c3" by="user" at="2024-01-15T10:32:00.000Z" re="c2"}.\n';
 
     const { doc, comments } = criticMarkdownToEditorState(input);
 
     expect(comments.get("c3")).toMatchObject({
       id: "c3",
       parentCommentId: "c2",
+    });
+    expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it("migrates legacy metadata to attribute metadata on save", () => {
+    const input =
+      "Please revisit {==this sentence==}{>>Needs a source<<}{@id:c1;by:user;at:2024-01-15T10:30:00.000Z@}.\n";
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+
+    expect(comments.get("c1")).toMatchObject({
+      id: "c1",
+      content: "Needs a source",
+      authorType: "user",
+      authorId: "user",
+    });
+    expect(editorStateToCriticMarkdown(doc, comments)).toBe(
+      'Please revisit {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2024-01-15T10:30:00.000Z"}.\n',
+    );
+  });
+
+  it("round-trips escaped attribute metadata values", () => {
+    const input =
+      'Please revisit {==this sentence==}{>>Needs a source<<}{id="c1" by="user\\\\\\"name" at="2024-01-15T10:30:00.000Z"}.\n';
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+
+    expect(comments.get("c1")).toMatchObject({
+      authorId: 'user\\"name',
     });
     expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
   });

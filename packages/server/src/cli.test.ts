@@ -593,7 +593,7 @@ describe("cli", () => {
     expect(exitCode).toBe(0);
     expect(test.logs).toContain("Reply to an existing comment:");
     expect(test.logs).toContain(
-      "  Use explicit `id:` and `re:` metadata for replies.",
+      '  Use explicit `id="..."` and `re="..."` metadata for replies.',
     );
     expect(test.logs).toContain(
       "  Comment ids are document-local and usually look like `c1`, `c2`, `c3`.",

@@ -280,16 +280,16 @@ function printCriticMarkupHelp(log: (message: string) => void) {
   log("");
   log("Anchored comment with id:");
   log(
-    "  Review {==this sentence==}{>>Needs a source<<}{@id:c1;by:user;at:2026-04-23T18:00:00.000Z@}.",
+    '  Review {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2026-04-23T18:00:00.000Z"}.',
   );
   log("");
   log("Reply to an existing comment:");
   log(
-    "  Review {==this sentence==}{>>Needs a source<<}{@id:c1;by:user;at:2026-04-23T18:00:00.000Z@}{>>I can add one from the intro.<<}{@id:c2;by:AI;at:2026-04-23T18:05:00.000Z;re:c1@}.",
+    '  Review {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2026-04-23T18:00:00.000Z"}{>>I can add one from the intro.<<}{id="c2" by="AI" at="2026-04-23T18:05:00.000Z" re="c1"}.',
   );
   log("");
   log("Reply guidance:");
-  log("  Use explicit `id:` and `re:` metadata for replies.");
+  log('  Use explicit `id="..."` and `re="..."` metadata for replies.');
   log(
     "  Comment ids are document-local and usually look like `c1`, `c2`, `c3`.",
   );

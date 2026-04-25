@@ -38,7 +38,10 @@ interface CriticCommentToken {
 
 const extensions = createEditorExtensions("");
 const criticCommentAnchorPattern = /^\{==([\s\S]+?)==\}/;
-const criticCommentBlockPattern = /^\{>>([\s\S]*?)<<\}(?:\{@([\s\S]+?)@\})?/;
+const criticCommentBlockPattern =
+  /^\{>>([\s\S]*?)<<\}(?:(\{@([\s\S]+?)@\})|(\{(?:\s*[A-Za-z][A-Za-z0-9_-]*="(?:\\[\s\S]|[^"\\])*")+\s*\}))?/;
+const metadataAttributePattern =
+  /([A-Za-z][A-Za-z0-9_-]*)="((?:\\[\s\S]|[^"\\])*)"/g;
 
 function escapeHtml(value: string): string {
   return value
@@ -48,7 +51,7 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
-function parseMetadata(
+function parseLegacyMetadata(
   metadataText?: string,
 ): Partial<Omit<CriticComment, "content">> {
   const fields = new Map<string, string>();
@@ -73,18 +76,64 @@ function parseMetadata(
   };
 }
 
+function unescapeMetadataAttributeValue(value: string): string {
+  return value.replaceAll(/\\([\s\S])/g, "$1");
+}
+
+function escapeMetadataAttributeValue(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function parseAttributeMetadata(
+  metadataText?: string,
+): Partial<Omit<CriticComment, "content">> {
+  if (!metadataText?.startsWith("{") || !metadataText.endsWith("}")) {
+    return {};
+  }
+
+  const fields = new Map<string, string>();
+  const content = metadataText.slice(1, -1);
+
+  for (const match of content.matchAll(metadataAttributePattern)) {
+    fields.set(match[1], unescapeMetadataAttributeValue(match[2]));
+  }
+
+  const author = fields.get("by") ?? "user";
+
+  return {
+    id: fields.get("id"),
+    createdAt: fields.get("at") ?? new Date().toISOString(),
+    authorType: author.toUpperCase() === "AI" ? "ai" : "user",
+    authorId: author.toUpperCase() === "AI" ? null : author,
+    parentCommentId: fields.get("re") ?? null,
+  };
+}
+
+function parseMetadata(
+  legacyMetadataText?: string,
+  attributeMetadataText?: string,
+): Partial<Omit<CriticComment, "content">> {
+  if (attributeMetadataText) {
+    return parseAttributeMetadata(attributeMetadataText);
+  }
+
+  return parseLegacyMetadata(legacyMetadataText);
+}
+
 function serializeMetadata(comment: CriticComment): string {
   const fields = [
-    `id:${comment.id}`,
-    `by:${comment.authorType === "ai" ? "AI" : comment.authorId || "user"}`,
-    `at:${comment.createdAt || new Date().toISOString()}`,
+    ["id", comment.id],
+    ["by", comment.authorType === "ai" ? "AI" : comment.authorId || "user"],
+    ["at", comment.createdAt || new Date().toISOString()],
   ];
 
   if (comment.parentCommentId) {
-    fields.push(`re:${comment.parentCommentId}`);
+    fields.push(["re", comment.parentCommentId]);
   }
 
-  return `{@${fields.join(";")}@}`;
+  return `{${fields
+    .map(([key, value]) => `${key}="${escapeMetadataAttributeValue(value)}"`)
+    .join(" ")}}`;
 }
 
 export function createNextCommentId(
@@ -249,10 +298,11 @@ function tokenizeCriticCommentAnchor(
     const nextMatch = src.slice(offset).match(criticCommentBlockPattern);
     if (!nextMatch) break;
 
-    const [, commentText, metadataText] = nextMatch;
+    const [, commentText, , legacyMetadataText, attributeMetadataText] =
+      nextMatch;
     const comment = createCommentWithContext(
       {
-        ...parseMetadata(metadataText),
+        ...parseMetadata(legacyMetadataText, attributeMetadataText),
         content: commentText,
       },
       [...existingComments, ...parsedComments],

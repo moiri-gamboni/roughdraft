@@ -158,6 +158,7 @@ This is {++inserted++} text.
 This is {~~old~>new~~} substituted text.
 This is {>>a comment<<} in the margin.
 This is {==highlighted==} text.
+This is {==anchored text==}{>>a threaded comment<<}{id="c1" by="user" at="2026-04-23T18:00:00.000Z"}.
 ```
 
 This matters because the main workflow is often:
