@@ -32,13 +32,11 @@ const disabledBackend: StorageBackend = {
     throw new Error("Unavailable");
   },
   savePage: async () => {},
-  saveMarkdownFile: async () => {},
+  saveMarkdownFile: async () => undefined,
   createPage: async () => {
     throw new Error("Unavailable");
   },
   deletePage: async () => {},
-  getProject: async () => ({ pages: {} }),
-  saveProject: async () => {},
   saveAsset: async () => {
     throw new Error("Unavailable");
   },

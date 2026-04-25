@@ -3,14 +3,12 @@ import type {
   DirectoryListing,
   FileSystemListing,
   Page,
-  ProjectLayout,
   ProjectTreeListing,
   StorageBackend,
   StoredAsset,
 } from "./storage";
 
 const PAGES_KEY = "roughdraft:pages";
-const PROJECT_KEY = "roughdraft:project";
 const ASSETS_KEY = "roughdraft:assets";
 
 interface LocalAssetRecord {
@@ -31,20 +29,6 @@ function readPages(): Record<string, Page> {
 
 function writePages(pages: Record<string, Page>): void {
   localStorage.setItem(PAGES_KEY, JSON.stringify(pages));
-}
-
-function readProject(): ProjectLayout {
-  try {
-    const raw = localStorage.getItem(PROJECT_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {
-    // ignore
-  }
-  return { pages: {} };
-}
-
-function writeProject(project: ProjectLayout): void {
-  localStorage.setItem(PROJECT_KEY, JSON.stringify(project));
 }
 
 function readAssets(): Record<string, LocalAssetRecord> {
@@ -139,9 +123,13 @@ export class LocalStorageBackend implements StorageBackend {
     writePages(pages);
   }
 
-  async saveMarkdownFile(relativePath: string, content: string): Promise<void> {
+  async saveMarkdownFile(
+    relativePath: string,
+    content: string,
+  ): Promise<undefined> {
     const id = relativePath.replace(/\.md$/i, "");
-    return this.savePage(id, content);
+    await this.savePage(id, content);
+    return undefined;
   }
 
   async createPage(title?: string, content?: string): Promise<Page> {
@@ -155,14 +143,6 @@ export class LocalStorageBackend implements StorageBackend {
     pages[id] = page;
     writePages(pages);
 
-    // Also add to project layout
-    const project = readProject();
-    const existing = Object.values(project.pages);
-    const maxX =
-      existing.length > 0 ? Math.max(...existing.map((p) => p.x + p.width)) : 0;
-    project.pages[id] = { x: maxX + 20, y: 0, width: 400, height: 500 };
-    writeProject(project);
-
     return page;
   }
 
@@ -170,18 +150,6 @@ export class LocalStorageBackend implements StorageBackend {
     const pages = readPages();
     delete pages[id];
     writePages(pages);
-
-    const project = readProject();
-    delete project.pages[id];
-    writeProject(project);
-  }
-
-  async getProject(): Promise<ProjectLayout> {
-    return readProject();
-  }
-
-  async saveProject(project: ProjectLayout): Promise<void> {
-    writeProject(project);
   }
 
   async saveAsset(file: File): Promise<StoredAsset> {

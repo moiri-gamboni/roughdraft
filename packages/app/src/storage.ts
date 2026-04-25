@@ -2,19 +2,29 @@ export interface Page {
   id: string;
   title: string;
   content: string; // markdown string
+  version?: string;
+}
+
+export interface MarkdownFileChangeEvent {
+  path: string;
+  exists: boolean;
+  version: string | null;
+}
+
+export class MarkdownFileConflictError extends Error {
+  current: Page;
+
+  constructor(current: Page) {
+    super("Markdown file changed on disk");
+    this.name = "MarkdownFileConflictError";
+    this.current = current;
+  }
 }
 
 export interface StoredAsset {
   markdownPath: string;
   previewUrl: string;
   mimeType: string;
-}
-
-export interface ProjectLayout {
-  pages: Record<
-    string,
-    { x: number; y: number; width: number; height: number }
-  >;
 }
 
 export interface BackendInfo {
@@ -60,11 +70,17 @@ export interface StorageBackend {
   getPage(id: string): Promise<Page>;
   getMarkdownFile(relativePath: string): Promise<Page>;
   savePage(id: string, content: string): Promise<void>;
-  saveMarkdownFile(relativePath: string, content: string): Promise<void>;
+  saveMarkdownFile(
+    relativePath: string,
+    content: string,
+    expectedVersion?: string,
+  ): Promise<Page | undefined>;
+  watchMarkdownFile?(
+    relativePath: string,
+    onChange: (event: MarkdownFileChangeEvent) => void,
+  ): () => void;
   createPage(title?: string, content?: string): Promise<Page>;
   deletePage(id: string): Promise<void>;
-  getProject(): Promise<ProjectLayout>;
-  saveProject(project: ProjectLayout): Promise<void>;
   saveAsset(file: File): Promise<StoredAsset>;
   resolveFileUrl(path: string): string | null;
   listDirectories(path?: string): Promise<DirectoryListing>;

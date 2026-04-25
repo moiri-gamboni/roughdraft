@@ -3,10 +3,8 @@ import { Button } from "./components/ui/button";
 import { PathSwitcher } from "./PathSwitcher";
 import { ProjectTreeSidebar } from "./ProjectTreeSidebar";
 import type { StorageBackend } from "./storage";
-import type { ViewMode } from "./app-navigation";
 
 interface AppSidebarProps {
-  isDocumentMode: boolean;
   sidebarToggleLabel: string;
   backend: StorageBackend | null;
   projectLabel: string;
@@ -14,8 +12,6 @@ interface AppSidebarProps {
   workspacePathLabel: string;
   buildLocationForPath: (path?: string | null) => string;
   pathSwitcherDismissCount: number;
-  viewMode: ViewMode;
-  onViewModeChange: (mode: ViewMode) => void;
   onCreatePage: () => void;
   onHideSidebar: () => void;
   treeCurrentPath: string | null;
@@ -24,7 +20,6 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({
-  isDocumentMode,
   sidebarToggleLabel,
   backend,
   projectLabel,
@@ -32,8 +27,6 @@ export function AppSidebar({
   workspacePathLabel,
   buildLocationForPath,
   pathSwitcherDismissCount,
-  viewMode,
-  onViewModeChange,
   onCreatePage,
   onHideSidebar,
   treeCurrentPath,
@@ -41,31 +34,21 @@ export function AppSidebar({
   onOpenMarkdownPage,
 }: AppSidebarProps) {
   return (
-    <aside
-      className={`flex h-full w-[320px] max-w-[34vw] min-w-[280px] shrink-0 flex-col border-r ${
-        isDocumentMode
-          ? "border-slate-200 bg-white"
-          : "border-slate-200/80 bg-white"
-      }`}
-    >
-      <div
-        className={`border-b px-4 pt-5 pb-4 ${isDocumentMode ? "border-slate-200" : "border-slate-200/80"}`}
-      >
-        {!isDocumentMode ? (
-          <div className="mb-3 flex justify-end">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="rounded-[10px] text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-              onClick={onHideSidebar}
-              aria-label={sidebarToggleLabel}
-              title={sidebarToggleLabel}
-            >
-              <ChevronLeft className="size-4" />
-            </Button>
-          </div>
-        ) : null}
+    <aside className="flex h-full w-[320px] max-w-[34vw] min-w-[280px] shrink-0 flex-col border-r border-slate-200 bg-white">
+      <div className="border-b border-slate-200 px-4 pt-5 pb-4">
+        <div className="mb-3 flex justify-end">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="rounded-[10px] text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+            onClick={onHideSidebar}
+            aria-label={sidebarToggleLabel}
+            title={sidebarToggleLabel}
+          >
+            <ChevronLeft className="size-4" />
+          </Button>
+        </div>
 
         {backend ? (
           <PathSwitcher
@@ -88,46 +71,15 @@ export function AppSidebar({
           </div>
         )}
 
-        <div className="mt-4">
-          <div className="grid h-9 grid-cols-2 rounded-[10px] border border-slate-200/80 bg-white/75 p-1 shadow-[0_6px_18px_rgba(15,23,42,0.04)]">
-            <button
-              type="button"
-              className={`rounded-[8px] px-3 text-[0.82rem] font-semibold transition ${
-                viewMode === "canvas"
-                  ? "bg-slate-900 text-white shadow-[0_6px_14px_rgba(15,23,42,0.18)]"
-                  : "text-slate-600 hover:bg-slate-100/80"
-              }`}
-              onClick={() => onViewModeChange("canvas")}
-            >
-              Canvas
-            </button>
-            <button
-              type="button"
-              className={`rounded-[8px] px-3 text-[0.82rem] font-semibold transition ${
-                isDocumentMode
-                  ? "bg-slate-900 text-white shadow-[0_6px_14px_rgba(15,23,42,0.18)]"
-                  : "text-slate-600 hover:bg-slate-100/80"
-              }`}
-              onClick={() => onViewModeChange("document")}
-            >
-              Document
-            </button>
-          </div>
-        </div>
-
         <div className="mt-3">
           <Button
             type="button"
-            variant={isDocumentMode ? "outline" : "default"}
-            className={`h-10 w-full justify-center rounded-[10px] border text-[0.84rem] font-semibold shadow-none ${
-              isDocumentMode
-                ? "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                : "border-slate-900 bg-slate-900 text-white hover:bg-slate-800"
-            }`}
+            variant="outline"
+            className="h-10 w-full justify-center rounded-[10px] border border-slate-200 bg-white text-[0.84rem] font-semibold text-slate-700 shadow-none hover:bg-slate-50"
             onClick={onCreatePage}
-            title={isDocumentMode ? "New document" : "New page"}
+            title="New document"
           >
-            {isDocumentMode ? "+ New document" : "+ New page"}
+            + New document
           </Button>
         </div>
       </div>

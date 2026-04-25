@@ -1,4 +1,11 @@
-import { ChevronLeft, CodeXml, Eye, Menu } from "lucide-react";
+import {
+  ChevronLeft,
+  CodeXml,
+  Eye,
+  Menu,
+  RefreshCcw,
+  Upload,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DocumentEditorViewMode } from "./app-navigation";
 import { Button } from "./components/ui/button";
@@ -7,6 +14,7 @@ import { PageCard } from "./PageCard";
 import type { Page, StorageBackend } from "./storage";
 
 type SaveState = "idle" | "saving" | "error";
+type DiskChangeState = "clean" | "changed" | "conflict";
 
 interface DocumentWorkspaceProps {
   sidebarVisible: boolean;
@@ -19,6 +27,12 @@ interface DocumentWorkspaceProps {
   onDocumentEditorViewModeChange: (mode: DocumentEditorViewMode) => void;
   onSaveDocument: (id: string, content: string) => Promise<void>;
   onDocumentSaveStateChange: (state: SaveState) => void;
+  onDocumentDirtyStateChange: (isDirty: boolean) => void;
+  onDocumentLocalContentChange: (markdown: string) => void;
+  documentDiskChangeState: DiskChangeState;
+  documentForceResetKey: string | null;
+  onReloadDocumentFromDisk: () => void | Promise<void>;
+  onOverwriteDocumentOnDisk: () => void | Promise<void>;
   backend: StorageBackend | null;
 }
 
@@ -33,6 +47,12 @@ export function DocumentWorkspace({
   onDocumentEditorViewModeChange,
   onSaveDocument,
   onDocumentSaveStateChange,
+  onDocumentDirtyStateChange,
+  onDocumentLocalContentChange,
+  documentDiskChangeState,
+  documentForceResetKey,
+  onReloadDocumentFromDisk,
+  onOverwriteDocumentOnDisk,
   backend,
 }: DocumentWorkspaceProps) {
   const [documentHasComments, setDocumentHasComments] = useState(
@@ -67,7 +87,7 @@ export function DocumentWorkspace({
           {documentPage ? (
             <div
               className={cn(
-                "document-page-header mb-2 flex w-full max-w-[46.5rem] items-center gap-1.5 px-1 text-[0.62rem] font-medium tracking-[0.01em] text-stone-400",
+                "document-page-header mb-2 flex w-full max-w-[46.5rem] flex-wrap items-center gap-1.5 px-1 text-[0.62rem] font-medium tracking-[0.01em] text-stone-400",
                 !documentHasComments && "document-page-header-no-comments",
               )}
             >
@@ -117,6 +137,35 @@ export function DocumentWorkspace({
               >
                 {documentFilenameLabel}
               </div>
+              {documentDiskChangeState !== "clean" ? (
+                <div className="ml-auto flex max-w-full shrink-0 items-center gap-1.5 rounded-[8px] border border-amber-200 bg-amber-50 px-2 py-1 text-[0.68rem] text-amber-900">
+                  <span className="whitespace-nowrap">
+                    {documentDiskChangeState === "conflict"
+                      ? "Save conflict"
+                      : "Changed on disk"}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 rounded-[7px] px-1.5 text-[0.68rem] text-amber-950 hover:bg-amber-100"
+                    onClick={() => void onReloadDocumentFromDisk()}
+                  >
+                    <RefreshCcw className="size-3" />
+                    Reload
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 rounded-[7px] px-1.5 text-[0.68rem] text-amber-950 hover:bg-amber-100"
+                    onClick={() => void onOverwriteDocumentOnDisk()}
+                  >
+                    <Upload className="size-3" />
+                    Overwrite
+                  </Button>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {documentPage ? (
@@ -124,14 +173,16 @@ export function DocumentWorkspace({
               <PageCard
                 key={`${documentPage.id}:${activeDocumentPath ?? ""}`}
                 page={documentPage}
-                mode="document"
                 selected
-                canDelete={false}
                 onSave={onSaveDocument}
                 onSaveStateChange={onDocumentSaveStateChange}
                 editorViewMode={documentEditorViewMode}
                 backend={backend}
                 onCommentRailPresenceChange={setDocumentHasComments}
+                onDirtyStateChange={onDocumentDirtyStateChange}
+                onLocalContentChange={onDocumentLocalContentChange}
+                saveBlocked={documentDiskChangeState !== "clean"}
+                forceResetKey={documentForceResetKey}
               />
             ) : null
           ) : (

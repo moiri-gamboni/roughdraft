@@ -3,8 +3,6 @@ import type { Editor } from "@tiptap/react";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { TextSelection } from "@tiptap/pm/state";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
-import { useCanvasScale } from "./Canvas";
 import { CommentEditorList } from "./CommentEditorList";
 import { DocumentCommentRail } from "./DocumentCommentRail";
 import {
@@ -20,63 +18,52 @@ import {
   commentHighlightPluginKey,
   createEditorExtensions,
 } from "./editor-extensions";
-import { EditorToolbar } from "./EditorToolbar";
 import { cn } from "./lib/utils";
 import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
 import { toHtml } from "./markdown";
 import type { Page, StorageBackend } from "./storage";
 import { useCommentAnchorLayout } from "./useCommentAnchorLayout";
 
-const CANVAS_CONTENT_WIDTH = 680;
-const CANVAS_CONTENT_HORIZONTAL_PADDING = 20;
-const CANVAS_EDITOR_FRAME_WIDTH =
-  CANVAS_CONTENT_WIDTH - CANVAS_CONTENT_HORIZONTAL_PADDING * 2;
-const CANVAS_RAIL_WIDTH = 420;
-const CANVAS_RAIL_GAP = 24;
-
 type SaveState = "idle" | "saving" | "error";
 type EditorViewMode = "rich-text" | "code";
 
 interface PageCardProps {
   page: Page;
-  x?: number;
-  y?: number;
   selected?: boolean;
   focusRequestKey?: string | null;
-  canDelete?: boolean;
-  mode?: "canvas" | "document";
-  onSelect?: (id: string) => void;
   onSave: (id: string, content: string) => Promise<void>;
-  onReposition?: (id: string, x: number, y: number) => void;
-  onDelete?: (id: string) => void;
   onSaveStateChange?: (state: SaveState) => void;
   editorViewMode?: EditorViewMode;
   backend: StorageBackend;
   onEditorReady?: (editor: Editor | null) => void;
   onCommentRailPresenceChange?: (hasCommentRailSpace: boolean) => void;
+  onDirtyStateChange?: (isDirty: boolean) => void;
+  onLocalContentChange?: (markdown: string) => void;
+  saveBlocked?: boolean;
+  forceResetKey?: string | null;
 }
 
 interface PageCardEditorSurfaceProps {
   page: Page;
   selected: boolean;
   focusRequestKey: string | null;
-  mode: "canvas" | "document";
-  onSelect?: (id: string) => void;
   onSave: (id: string, content: string) => Promise<void>;
   onSaveStateChange: (state: SaveState) => void;
   editorViewMode: EditorViewMode;
   backend: StorageBackend;
   onEditorReady?: (editor: Editor | null) => void;
   onCommentRailPresenceChange?: (hasCommentRailSpace: boolean) => void;
+  onDirtyStateChange?: (isDirty: boolean) => void;
+  onLocalContentChange?: (markdown: string) => void;
+  saveBlocked?: boolean;
+  forceResetKey?: string | null;
 }
 
 interface RichTextEditorSurfaceProps {
   page: Page;
   selected: boolean;
   focusRequestKey: string | null;
-  mode: "canvas" | "document";
   sourceMarkdown: string;
-  onSelect?: (id: string) => void;
   onMarkdownChange: (markdown: string) => void;
   backend: StorageBackend;
   onEditorReady?: (editor: Editor | null) => void;
@@ -84,16 +71,9 @@ interface RichTextEditorSurfaceProps {
 }
 
 interface CodeEditorSurfaceProps {
-  page: Page;
   markdown: string;
   hasCommentRailSpace: boolean;
-  onSelect?: (id: string) => void;
   onMarkdownChange: (markdown: string) => void;
-}
-
-function getCanvasFilenameLabel(pageId: string) {
-  const leaf = pageId.split(/[\\/]/).filter(Boolean).at(-1) || pageId;
-  return leaf.toLowerCase().endsWith(".md") ? leaf : `${leaf}.md`;
 }
 
 function areCommentIdListsEqual(
@@ -270,9 +250,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
   page,
   selected,
   focusRequestKey,
-  mode,
   sourceMarkdown,
-  onSelect,
   onMarkdownChange,
   backend,
   onEditorReady,
@@ -369,10 +347,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
       shouldRerenderOnTransaction: false,
       editorProps: {
         attributes: {
-          class:
-            mode === "canvas"
-              ? "tiptap min-h-[120px] selection:bg-sky-100"
-              : "tiptap min-h-[70vh] selection:bg-sky-100",
+          class: "tiptap min-h-[70vh] selection:bg-sky-100",
         },
         handleDrop: (_view, event) => {
           const files = Array.from(event.dataTransfer?.files ?? []);
@@ -693,95 +668,15 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     currentEditor.commands.focus(undefined, { scrollIntoView: false });
   }, []);
 
-  const handleBodyPointerDown = useCallback(
-    (event: ReactPointerEvent) => {
-      event.stopPropagation();
-      onSelect?.(page.id);
-    },
-    [onSelect, page.id],
-  );
-
-  const handleSelectPageCapture = useCallback(() => {
-    onSelect?.(page.id);
-  }, [onSelect, page.id]);
-
-  const isCanvasMode = mode === "canvas";
-  const showCanvasRail = isCanvasMode && comments.size > 0;
   const hasComments = comments.size > 0;
   const activeComments = activeCommentIds
     .map((commentId) => comments.get(commentId))
     .filter((comment): comment is CriticComment => Boolean(comment));
-  const toolbar = isCanvasMode ? (
-    <EditorToolbar editor={editor} onPickFiles={insertFiles} variant="canvas" />
-  ) : null;
   const contentCardClass =
     "rounded-[0.75rem] border border-[#E9E9E8] bg-white shadow-[0_18px_44px_rgba(57,47,38,0.08)]";
 
-  if (isCanvasMode) {
-    return (
-      <div
-        className="cursor-text rounded-b-2xl bg-[#FCFCFC] px-5 pt-4 pb-6"
-        onPointerDown={handleBodyPointerDown}
-      >
-        {toolbar}
-        <div className="relative">
-          <div className={cn(contentCardClass, "px-8 py-5")}>
-            <EditorContextMenu
-              editor={editor}
-              backend={backend}
-              onAddComment={handleAddComment}
-            >
-              <EditorContent editor={editor} />
-            </EditorContextMenu>
-          </div>
-          {showCanvasRail ? (
-            <div
-              className="absolute top-0"
-              style={{
-                left: CANVAS_EDITOR_FRAME_WIDTH + CANVAS_RAIL_GAP,
-                width: CANVAS_RAIL_WIDTH,
-              }}
-              onPointerDownCapture={handleSelectPageCapture}
-              onPointerDown={handleBodyPointerDown}
-            >
-              <DocumentCommentRail
-                className="w-full"
-                commentGroups={commentGroups}
-                comments={comments}
-                selectedCommentId={selectedCommentId}
-                hoveredCommentId={hoveredCommentId}
-                contentHeight={contentHeight}
-                onDeleteComment={deleteComment}
-                onUpdateComment={(commentId, nextContent) => {
-                  updateComment(commentId, (current) => ({
-                    ...current,
-                    content: nextContent,
-                  }));
-                }}
-                onReplyComment={replyToComment}
-                onSelectComment={selectComment}
-                onFocusComment={focusComment}
-                onHoverComment={setHoveredCommentId}
-                pendingFocusCommentId={pendingFocusCommentId}
-                onAutoFocusComment={(commentId) => {
-                  setPendingFocusCommentId((current) =>
-                    current === commentId ? null : current,
-                  );
-                }}
-              />
-            </div>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div
-      className="cursor-text bg-transparent"
-      onPointerDown={handleBodyPointerDown}
-    >
-      {toolbar}
+    <div className="cursor-text bg-transparent">
       <div
         className={cn(
           "document-page-shell",
@@ -858,25 +753,12 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
 });
 
 const CodeEditorSurface = memo(function CodeEditorSurface({
-  page,
   markdown,
   hasCommentRailSpace,
-  onSelect,
   onMarkdownChange,
 }: CodeEditorSurfaceProps) {
-  const handleBodyPointerDown = useCallback(
-    (event: ReactPointerEvent) => {
-      event.stopPropagation();
-      onSelect?.(page.id);
-    },
-    [onSelect, page.id],
-  );
-
   return (
-    <div
-      className="cursor-text bg-transparent"
-      onPointerDown={handleBodyPointerDown}
-    >
+    <div className="cursor-text bg-transparent">
       <div
         className={cn(
           "document-page-shell",
@@ -909,26 +791,54 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
   page,
   selected,
   focusRequestKey,
-  mode,
-  onSelect,
   onSave,
   onSaveStateChange,
   editorViewMode,
   backend,
   onEditorReady,
   onCommentRailPresenceChange,
+  onDirtyStateChange,
+  onLocalContentChange,
+  saveBlocked = false,
+  forceResetKey = null,
 }: PageCardEditorSurfaceProps) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recentMarkdownRef = useRef<Set<string>>(new Set());
   const previousEditorViewModeRef = useRef<EditorViewMode>(editorViewMode);
+  const lastAcceptedMarkdownRef = useRef(page.content);
+  const localDirtyRef = useRef(false);
+  const forceResetKeyRef = useRef(forceResetKey);
   const [markdown, setMarkdown] = useState(page.content);
   const [richTextSourceMarkdown, setRichTextSourceMarkdown] = useState(
     page.content,
   );
   const [richTextSourceVersion, setRichTextSourceVersion] = useState(0);
 
+  const reportDirtyState = useCallback(
+    (isDirty: boolean) => {
+      if (localDirtyRef.current === isDirty) return;
+      localDirtyRef.current = isDirty;
+      onDirtyStateChange?.(isDirty);
+    },
+    [onDirtyStateChange],
+  );
+
+  const acceptMarkdown = useCallback(
+    (nextMarkdown: string) => {
+      lastAcceptedMarkdownRef.current = nextMarkdown;
+      setMarkdown(nextMarkdown);
+      setRichTextSourceMarkdown(nextMarkdown);
+      setRichTextSourceVersion((current) => current + 1);
+      onLocalContentChange?.(nextMarkdown);
+      reportDirtyState(false);
+    },
+    [onLocalContentChange, reportDirtyState],
+  );
+
   const scheduleSave = useCallback(
     (nextMarkdown: string) => {
+      if (saveBlocked) return;
+
       recentMarkdownRef.current.add(nextMarkdown);
       if (recentMarkdownRef.current.size > 10) {
         const iterator = recentMarkdownRef.current.values();
@@ -947,43 +857,61 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
         }
       }, 500);
     },
-    [onSave, onSaveStateChange, page.id],
+    [onSave, onSaveStateChange, page.id, saveBlocked],
   );
 
   const handleMarkdownChange = useCallback(
     (nextMarkdown: string) => {
       setMarkdown(nextMarkdown);
+      onLocalContentChange?.(nextMarkdown);
+      reportDirtyState(nextMarkdown !== lastAcceptedMarkdownRef.current);
       scheduleSave(nextMarkdown);
     },
-    [scheduleSave],
+    [onLocalContentChange, reportDirtyState, scheduleSave],
   );
 
   useEffect(() => {
-    if (recentMarkdownRef.current.has(page.content)) {
+    const forceResetChanged = forceResetKeyRef.current !== forceResetKey;
+    forceResetKeyRef.current = forceResetKey;
+
+    if (forceResetChanged) {
       recentMarkdownRef.current.delete(page.content);
+      acceptMarkdown(page.content);
       return;
     }
 
-    setMarkdown(page.content);
-    setRichTextSourceMarkdown(page.content);
-    setRichTextSourceVersion((current) => current + 1);
-  }, [page.content]);
+    if (recentMarkdownRef.current.has(page.content)) {
+      recentMarkdownRef.current.delete(page.content);
+      lastAcceptedMarkdownRef.current = page.content;
+      reportDirtyState(markdown !== page.content);
+      return;
+    }
+
+    if (localDirtyRef.current && markdown !== page.content) {
+      return;
+    }
+
+    acceptMarkdown(page.content);
+  }, [acceptMarkdown, forceResetKey, markdown, page.content, reportDirtyState]);
+
+  useEffect(() => {
+    if (!saveBlocked || !saveTimer.current) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    onSaveStateChange("idle");
+  }, [onSaveStateChange, saveBlocked]);
 
   useEffect(() => {
     const previousEditorViewMode = previousEditorViewModeRef.current;
     previousEditorViewModeRef.current = editorViewMode;
 
-    if (
-      mode !== "document" ||
-      previousEditorViewMode !== "code" ||
-      editorViewMode !== "rich-text"
-    ) {
+    if (previousEditorViewMode !== "code" || editorViewMode !== "rich-text") {
       return;
     }
 
     setRichTextSourceMarkdown(markdown);
     setRichTextSourceVersion((current) => current + 1);
-  }, [editorViewMode, markdown, mode]);
+  }, [editorViewMode, markdown]);
 
   useEffect(() => {
     return () => {
@@ -1000,13 +928,11 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     onCommentRailPresenceChange?.(hasCommentRailSpace);
   }, [editorViewMode, hasCommentRailSpace, onCommentRailPresenceChange]);
 
-  if (mode === "document" && editorViewMode === "code") {
+  if (editorViewMode === "code") {
     return (
       <CodeEditorSurface
-        page={page}
         markdown={markdown}
         hasCommentRailSpace={hasCommentRailSpace}
-        onSelect={onSelect}
         onMarkdownChange={handleMarkdownChange}
       />
     );
@@ -1018,9 +944,7 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
       page={page}
       selected={selected}
       focusRequestKey={focusRequestKey}
-      mode={mode}
       sourceMarkdown={richTextSourceMarkdown}
-      onSelect={onSelect}
       onMarkdownChange={handleMarkdownChange}
       onCommentRailPresenceChange={onCommentRailPresenceChange}
       backend={backend}
@@ -1031,143 +955,42 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
 
 export function PageCard({
   page,
-  x = 0,
-  y = 0,
   selected = false,
   focusRequestKey = null,
-  canDelete = true,
-  mode = "canvas",
-  onSelect,
   onSave,
-  onReposition,
-  onDelete,
   onSaveStateChange,
   editorViewMode = "rich-text",
   backend,
   onEditorReady,
   onCommentRailPresenceChange,
+  onDirtyStateChange,
+  onLocalContentChange,
+  saveBlocked,
+  forceResetKey,
 }: PageCardProps) {
-  const isDragging = useRef(false);
-  const dragStart = useRef({ x: 0, y: 0, pageX: 0, pageY: 0 });
-  const scale = useCanvasScale();
   const [saveState, setSaveState] = useState<SaveState>("idle");
 
   useEffect(() => {
     onSaveStateChange?.(saveState);
   }, [onSaveStateChange, saveState]);
 
-  const handleDragPointerDown = useCallback(
-    (event: ReactPointerEvent) => {
-      if (mode !== "canvas" || !onSelect) return;
-      event.stopPropagation();
-      event.preventDefault();
-      isDragging.current = true;
-      dragStart.current = { x, y, pageX: event.clientX, pageY: event.clientY };
-      (event.target as HTMLElement).setPointerCapture(event.pointerId);
-      onSelect(page.id);
-    },
-    [mode, onSelect, page.id, x, y],
-  );
-
-  const handleDragPointerMove = useCallback(
-    (event: ReactPointerEvent) => {
-      if (mode !== "canvas" || !onReposition || !isDragging.current) return;
-      const dx = (event.clientX - dragStart.current.pageX) / scale;
-      const dy = (event.clientY - dragStart.current.pageY) / scale;
-      onReposition(page.id, dragStart.current.x + dx, dragStart.current.y + dy);
-    },
-    [mode, onReposition, page.id, scale],
-  );
-
-  const handleDragPointerUp = useCallback(() => {
-    isDragging.current = false;
-  }, []);
-
-  const isCanvasMode = mode === "canvas";
-  const chromeTitle = isCanvasMode
-    ? getCanvasFilenameLabel(page.id)
-    : page.title;
-
   return (
-    <div
-      className={
-        isCanvasMode ? `absolute ${selected ? "z-10" : "z-0"}` : "w-full"
-      }
-      style={isCanvasMode ? { left: x, top: y } : undefined}
-    >
-      {isCanvasMode ? (
-        <div className="relative" style={{ width: CANVAS_CONTENT_WIDTH }}>
-          <div
-            className={`rounded-2xl border bg-[#FCFCFC] shadow-[0_18px_50px_rgba(15,23,42,0.14)] backdrop-blur transition-[border-color,box-shadow] ${
-              selected
-                ? "border-sky-300 shadow-[0_28px_72px_rgba(14,116,144,0.22)]"
-                : "border-slate-200/90"
-            }`}
-          >
-            <div
-              className="flex min-h-10 cursor-grab select-none items-center gap-2 rounded-t-2xl border-b border-slate-200/80 bg-slate-50/90 px-4 active:cursor-grabbing"
-              onPointerDown={handleDragPointerDown}
-              onPointerMove={handleDragPointerMove}
-              onPointerUp={handleDragPointerUp}
-            >
-              <span className="flex-1 truncate text-sm text-slate-500">
-                {chromeTitle}
-              </span>
-              {saveState === "saving" ? (
-                <span className="text-[11px] font-medium tracking-[0.08em] text-slate-400 uppercase">
-                  Saving…
-                </span>
-              ) : null}
-              {saveState === "error" ? (
-                <span className="text-[11px] font-medium tracking-[0.08em] text-rose-600 uppercase">
-                  Save failed
-                </span>
-              ) : null}
-              {canDelete ? (
-                <button
-                  type="button"
-                  className="inline-flex size-7 items-center justify-center rounded-full border border-transparent text-lg leading-none text-slate-400 transition hover:border-rose-100 hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDelete?.(page.id);
-                  }}
-                  title="Delete page"
-                >
-                  &times;
-                </button>
-              ) : null}
-            </div>
-            <PageCardEditorSurface
-              page={page}
-              selected={selected}
-              focusRequestKey={focusRequestKey}
-              mode={mode}
-              onSelect={onSelect}
-              onSave={onSave}
-              onSaveStateChange={setSaveState}
-              editorViewMode={editorViewMode}
-              backend={backend}
-              onEditorReady={onEditorReady}
-              onCommentRailPresenceChange={onCommentRailPresenceChange}
-            />
-          </div>
-        </div>
-      ) : (
-        <PageCardEditorSurface
-          page={page}
-          selected={selected}
-          focusRequestKey={focusRequestKey}
-          mode={mode}
-          onSelect={onSelect}
-          onSave={onSave}
-          onSaveStateChange={setSaveState}
-          editorViewMode={editorViewMode}
-          backend={backend}
-          onEditorReady={onEditorReady}
-          onCommentRailPresenceChange={onCommentRailPresenceChange}
-        />
-      )}
+    <div className="w-full">
+      <PageCardEditorSurface
+        page={page}
+        selected={selected}
+        focusRequestKey={focusRequestKey}
+        onSave={onSave}
+        onSaveStateChange={setSaveState}
+        editorViewMode={editorViewMode}
+        backend={backend}
+        onEditorReady={onEditorReady}
+        onCommentRailPresenceChange={onCommentRailPresenceChange}
+        onDirtyStateChange={onDirtyStateChange}
+        onLocalContentChange={onLocalContentChange}
+        saveBlocked={saveBlocked}
+        forceResetKey={forceResetKey}
+      />
     </div>
   );
 }

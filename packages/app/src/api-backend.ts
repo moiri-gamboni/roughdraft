@@ -1,12 +1,13 @@
-import type {
-  BackendInfo,
-  DirectoryListing,
-  FileSystemListing,
-  Page,
-  ProjectLayout,
-  ProjectTreeListing,
-  StorageBackend,
-  StoredAsset,
+import {
+  MarkdownFileConflictError,
+  type BackendInfo,
+  type DirectoryListing,
+  type FileSystemListing,
+  type MarkdownFileChangeEvent,
+  type Page,
+  type ProjectTreeListing,
+  type StorageBackend,
+  type StoredAsset,
 } from "./storage";
 
 export class ApiBackend implements StorageBackend {
@@ -80,20 +81,60 @@ export class ApiBackend implements StorageBackend {
     if (!res.ok) throw new Error(`Failed to save page ${id}: ${res.status}`);
   }
 
-  async saveMarkdownFile(relativePath: string, content: string): Promise<void> {
+  async saveMarkdownFile(
+    relativePath: string,
+    content: string,
+    expectedVersion?: string,
+  ): Promise<Page> {
     const res = await fetch(
       this.buildUrl("/api/markdown-file", { path: relativePath }),
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, projectPath: this.info.projectPath }),
+        body: JSON.stringify({
+          content,
+          expectedVersion,
+          projectPath: this.info.projectPath,
+        }),
       },
     );
+    if (res.status === 409) {
+      const payload = (await res.json()) as { current?: Page };
+      if (payload.current) {
+        throw new MarkdownFileConflictError(payload.current);
+      }
+    }
     if (!res.ok) {
       throw new Error(
         `Failed to save markdown file ${relativePath}: ${res.status}`,
       );
     }
+    return res.json();
+  }
+
+  watchMarkdownFile(
+    relativePath: string,
+    onChange: (event: MarkdownFileChangeEvent) => void,
+  ): () => void {
+    const source = new EventSource(
+      this.buildUrl("/api/markdown-file/events", { path: relativePath }),
+    );
+
+    source.addEventListener("change", (event) => {
+      try {
+        onChange(JSON.parse((event as MessageEvent<string>).data));
+      } catch (error) {
+        console.error("Failed to read markdown file change event:", error);
+      }
+    });
+
+    source.onerror = (error) => {
+      console.error("Markdown file event stream failed:", error);
+    };
+
+    return () => {
+      source.close();
+    };
   }
 
   async createPage(title?: string, content?: string): Promise<Page> {
@@ -118,21 +159,6 @@ export class ApiBackend implements StorageBackend {
       },
     );
     if (!res.ok) throw new Error(`Failed to delete page ${id}: ${res.status}`);
-  }
-
-  async getProject(): Promise<ProjectLayout> {
-    const res = await fetch(this.buildUrl("/api/project"));
-    if (!res.ok) throw new Error(`Failed to get project: ${res.status}`);
-    return res.json();
-  }
-
-  async saveProject(project: ProjectLayout): Promise<void> {
-    const res = await fetch(this.buildUrl("/api/project"), {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project, projectPath: this.info.projectPath }),
-    });
-    if (!res.ok) throw new Error(`Failed to save project: ${res.status}`);
   }
 
   async saveAsset(file: File): Promise<StoredAsset> {

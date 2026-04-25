@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { Editor } from "@tiptap/core";
 import {
   createNextCommentId,
   criticMarkdownToEditorState,
   editorStateToCriticMarkdown,
   getCommentDescendantIds,
 } from "../src/critic-markup";
+import { createEditorExtensions } from "../src/editor-extensions";
 
 describe("CriticMarkup comments", () => {
   it("round-trips a highlighted comment anchor", () => {
@@ -50,6 +52,49 @@ describe("CriticMarkup comments", () => {
       ]),
     });
     expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it("creates one comment anchor when a selection spans inline code", () => {
+    const input =
+      "Each dev wrapper keeps its own server state under `~/.roughdraft/dev/<wrapper-name>` by default, so opening works.\n";
+    const { doc } = criticMarkdownToEditorState(input);
+    const editor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: doc,
+    });
+
+    try {
+      const text = editor.state.doc.textBetween(
+        0,
+        editor.state.doc.content.size,
+        "\n",
+      );
+      const start = text.indexOf("its own server state under");
+      const end = text.indexOf(" by default") + " by default".length;
+
+      editor.commands.setTextSelection({ from: start + 1, to: end + 1 });
+      editor.commands.setCommentRef({ commentIds: ["c1"] });
+
+      expect(
+        editorStateToCriticMarkdown(
+          editor.getJSON(),
+          new Map([
+            [
+              "c1",
+              {
+                id: "c1",
+                content: "test",
+                createdAt: "2026-04-25T21:54:47.475Z",
+              },
+            ],
+          ]),
+        ),
+      ).toBe(
+        'Each dev wrapper keeps {==its own server state under `~/.roughdraft/dev/<wrapper-name>` by default==}{>>test<<}{id="c1" by="user" at="2026-04-25T21:54:47.475Z"}, so opening works.\n',
+      );
+    } finally {
+      editor.destroy();
+    }
   });
 
   it("keeps the anchor attached when nearby text changes", () => {

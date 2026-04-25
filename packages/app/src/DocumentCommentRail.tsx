@@ -1,5 +1,4 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useCanvasScale } from "./Canvas";
 import { CommentEditorList } from "./CommentEditorList";
 import type { CriticComment } from "./critic-markup";
 import {
@@ -47,7 +46,6 @@ export function DocumentCommentRail({
   onAutoFocusComment,
 }: DocumentCommentRailProps) {
   const threadRefs = useRef(new Map<string, HTMLDivElement>());
-  const scale = useCanvasScale();
   const [threadHeights, setThreadHeights] = useState<Record<string, number>>(
     {},
   );
@@ -111,7 +109,7 @@ export function DocumentCommentRail({
           );
           const height =
             measuredHeight > 0
-              ? Math.ceil(normalizeCommentMeasurement(measuredHeight, scale))
+              ? Math.ceil(normalizeCommentMeasurement(measuredHeight, 1))
               : (current[thread.key] ?? 0);
           next[thread.key] = height;
           if (current[thread.key] !== height) {
@@ -146,7 +144,7 @@ export function DocumentCommentRail({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [scale, visibleThreads]);
+  }, [visibleThreads]);
 
   const layouts = useMemo(() => {
     const baseLayouts = resolveCommentThreadRailLayouts(

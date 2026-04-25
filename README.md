@@ -2,15 +2,12 @@
 
 A local-first markdown editor and viewer for working with AI.
 
-Open any markdown file on your machine. Review it, comment on it, suggest edits, and explore variations on a canvas when you need to.
+Open any markdown file on your machine. Review it, comment on it, suggest edits, and keep the file in plain markdown on disk.
 
 ```bash
 npm i -g roughdraft
-roughdraft start
 roughdraft open /absolute/path/to/file.md
 ```
-
-[https://github.com/user-attachments/assets/placeholder.mp4](https://github.com/user-attachments/assets/placeholder.mp4)
 
 ## What is this?
 
@@ -18,7 +15,7 @@ Roughdraft is a local-first markdown editor and viewer that runs on your compute
 
 Its job is to make markdown files easy to open, read, edit, review, and discuss with your AI agent without moving them into a proprietary format or a hosted app.
 
-The canvas is part of the product, but it is not the whole product. You can open a single markdown file directly, review it with CriticMarkup comments and suggested changes, or open a folder and use the canvas to explore different versions of an idea.
+You can open a single markdown file directly or open a folder, browse its markdown files, and review each document with CriticMarkup comments and suggested changes.
 
 ## How it works
 
@@ -28,7 +25,7 @@ The canvas is part of the product, but it is not the whole product. You can open
     
 *   **Comments & suggested changes** — Use CriticMarkup for inline feedback, revisions, and review conversations
     
-*   **Canvas for exploration** — Open a folder of docs and arrange pages spatially when you want to compare, branch, or explore versions
+*   **Folder browsing** — Open a folder of docs, pick a markdown file from the sidebar, and keep your review focused on the active document
     
 *   **Markdown files on disk** — Everything stays as regular markdown files you can also edit in VS Code, Vim, Cursor, or anywhere else
     
@@ -125,10 +122,9 @@ pnpm check
 
 ```
 my-essay/
-  roughdraft.json       # Canvas layout and metadata
   draft-1.md            # A normal markdown file on disk
-  draft-1-alt.md        # A variation you are exploring
-  draft-2.md            # Another page you can open directly or on the canvas
+  draft-1-alt.md        # A variation you are reviewing
+  draft-2.md            # Another page you can open directly
 ```
 
 Every page is a regular markdown file. Roughdraft reads and writes those files directly.
@@ -171,7 +167,7 @@ This matters because the main workflow is often:
     
 *   The AI reads those comments and responds in the same markdown file
     
-*   The user and AI use the canvas when they want to branch or compare alternatives
+*   The user and AI keep alternatives as normal markdown files in the same folder
     
 
 ## Try the demo

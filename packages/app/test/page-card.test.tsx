@@ -2,7 +2,6 @@ import { act } from "react";
 import type { Editor } from "@tiptap/react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Canvas } from "../src/Canvas";
 import { PageCard, shouldDismissCommentThread } from "../src/PageCard";
 import type { Page, StorageBackend } from "../src/storage";
 
@@ -50,15 +49,13 @@ function createBackend(): StorageBackend {
       return { id: relativePath, title: relativePath, content: "" };
     },
     async savePage() {},
-    async saveMarkdownFile() {},
+    async saveMarkdownFile() {
+      return undefined;
+    },
     async createPage(title = "Untitled", content = "") {
       return { id: title, title, content };
     },
     async deletePage() {},
-    async getProject() {
-      return { pages: {} };
-    },
-    async saveProject() {},
     async saveAsset(file) {
       return {
         markdownPath: file.name,
@@ -156,12 +153,6 @@ function getEditable(container: HTMLElement) {
   return editable as HTMLElement;
 }
 
-function getBlockTypeTrigger(container: HTMLElement) {
-  const trigger = container.querySelector('[aria-label="Block type"]');
-  expect(trigger).not.toBeNull();
-  return trigger as HTMLElement;
-}
-
 function getToolbarButton(container: HTMLElement, label: string) {
   const button = container.querySelector(`button[aria-label="${label}"]`);
   expect(button).not.toBeNull();
@@ -170,7 +161,6 @@ function getToolbarButton(container: HTMLElement, label: string) {
 
 type PageCardTestOptions = Partial<{
   page: Page;
-  mode: "canvas" | "document";
   editorViewMode: "rich-text" | "code";
   selected: boolean;
   focusRequestKey: string | null;
@@ -180,7 +170,6 @@ type RenderedPageCard = {
   container: HTMLDivElement;
   onSave: ReturnType<typeof vi.fn>;
   onSaveStateChange: ReturnType<typeof vi.fn>;
-  onReposition: ReturnType<typeof vi.fn>;
   getEditor: () => Editor;
   rerender: (overrides?: PageCardTestOptions) => Promise<void>;
   unmount: () => Promise<void>;
@@ -197,7 +186,6 @@ async function renderPageCard(
   const backend = createBackend();
   const onSave = vi.fn().mockResolvedValue(undefined);
   const onSaveStateChange = vi.fn();
-  const onReposition = vi.fn();
   let editor: Editor | null = null;
 
   let props = {
@@ -206,17 +194,10 @@ async function renderPageCard(
       title: "Page 1",
       content: "Start",
     },
-    x: 12,
-    y: 18,
-    selected: options.selected ?? options.mode === "canvas",
+    selected: options.selected ?? true,
     focusRequestKey: options.focusRequestKey ?? null,
-    canDelete: true,
-    mode: options.mode ?? "document",
     editorViewMode: options.editorViewMode ?? "rich-text",
-    onSelect: vi.fn(),
     onSave,
-    onReposition,
-    onDelete: vi.fn(),
     onSaveStateChange,
     backend,
     onEditorReady: (nextEditor: Editor | null) => {
@@ -228,9 +209,7 @@ async function renderPageCard(
     await act(async () => {
       const pageCard = <PageCard {...props} />;
 
-      root.render(
-        props.mode === "canvas" ? <Canvas>{pageCard}</Canvas> : pageCard,
-      );
+      root.render(pageCard);
 
       await Promise.resolve();
     });
@@ -251,7 +230,6 @@ async function renderPageCard(
     container,
     onSave,
     onSaveStateChange,
-    onReposition,
     getEditor() {
       expect(editor).not.toBeNull();
       return editor as Editor;
@@ -382,7 +360,6 @@ describe("PageCard editor integration", () => {
         title: "Doc 1",
         content: "Start",
       },
-      mode: "document",
       selected: true,
     });
 
@@ -412,7 +389,6 @@ describe("PageCard editor integration", () => {
         title: "Doc Code 1",
         content: "{==alpha==}{>>Comment body<<}\n\n# Heading\n\n`inline`",
       },
-      mode: "document",
       editorViewMode: "code",
       selected: true,
     });
@@ -436,7 +412,6 @@ describe("PageCard editor integration", () => {
         title: "Doc Code 2",
         content: "{==alpha==}{>>Comment body<<}\n\nParagraph",
       },
-      mode: "document",
       editorViewMode: "code",
       selected: true,
     });
@@ -458,7 +433,6 @@ describe("PageCard editor integration", () => {
         title: "Doc Code 3",
         content: "# Heading\n\nParagraph",
       },
-      mode: "document",
       editorViewMode: "code",
       selected: true,
     });
@@ -480,7 +454,6 @@ describe("PageCard editor integration", () => {
         title: "Doc 2",
         content: "# Heading\n\nParagraph with **bold** text",
       },
-      mode: "document",
       selected: true,
     });
 
@@ -504,7 +477,6 @@ describe("PageCard editor integration", () => {
         title: "Doc 3",
         content: "Alpha",
       },
-      mode: "document",
       selected: true,
     });
 
@@ -529,7 +501,6 @@ describe("PageCard editor integration", () => {
         title: "Doc 4",
         content: "{==alpha==}{>>Comment body<<}\n\nTail",
       },
-      mode: "document",
       selected: true,
     });
 
@@ -577,7 +548,6 @@ describe("PageCard editor integration", () => {
         title: "Doc 5",
         content: "{==alpha==}{>>Comment body<<}\n\nParagraph",
       },
-      mode: "document",
       selected: true,
     });
 
@@ -597,7 +567,6 @@ describe("PageCard editor integration", () => {
         title: "Doc 6",
         content: "Just text",
       },
-      mode: "document",
       selected: true,
     });
 
@@ -622,14 +591,13 @@ describe("PageCard editor integration", () => {
     ).toBe(false);
   });
 
-  it("canvas props churn does not lose editor content or selection", async () => {
+  it("document props churn does not lose editor content or selection", async () => {
     const rendered = await renderPageCard({
       page: {
-        id: "canvas-1",
-        title: "Canvas 1",
-        content: "Hello canvas",
+        id: "doc-churn-1",
+        title: "Doc Churn 1",
+        content: "Hello document",
       },
-      mode: "canvas",
       selected: true,
     });
 
@@ -643,11 +611,11 @@ describe("PageCard editor integration", () => {
       to: editor.state.selection.to,
     };
 
-    await rendered.rerender({ x: 50, y: 60, selected: false });
-    await rendered.rerender({ x: 90, y: 120, selected: true });
-    await rendered.rerender({ x: 140, y: 180, selected: false });
+    await rendered.rerender({ selected: false });
+    await rendered.rerender({ selected: true });
+    await rendered.rerender({ selected: false });
 
-    expect(rendered.getEditor().getText()).toContain("Hello canvas updated");
+    expect(rendered.getEditor().getText()).toContain("Hello document updated");
     expect(rendered.getEditor().state.selection.from).toBe(
       initialSelection.from,
     );
@@ -658,11 +626,10 @@ describe("PageCard editor integration", () => {
   it("focus request changes focus the editor without recreating document state", async () => {
     const rendered = await renderPageCard({
       page: {
-        id: "canvas-2",
-        title: "Canvas 2",
+        id: "doc-focus-1",
+        title: "Doc Focus 1",
         content: "Focus target",
       },
-      mode: "canvas",
       selected: true,
       focusRequestKey: null,
     });
@@ -685,26 +652,24 @@ describe("PageCard editor integration", () => {
     expect(rendered.getEditor().getText()).toContain("Focus target");
   });
 
-  it("non-editor prop churn does not drop toolbar state", async () => {
+  it("non-editor prop churn does not recreate the editor", async () => {
     const rendered = await renderPageCard({
       page: {
-        id: "canvas-3",
-        title: "Canvas 3",
+        id: "doc-stable-1",
+        title: "Doc Stable 1",
         content: "# Heading",
       },
-      mode: "canvas",
       selected: true,
     });
 
     await selectText(rendered.getEditor(), "Heading");
-    expect(getBlockTypeTrigger(rendered.container).textContent).toContain(
-      "Heading 1",
-    );
+    const initialEditor = rendered.getEditor();
+    const initialEditable = getEditable(rendered.container);
 
-    await rendered.rerender({ x: 240, y: 320 });
+    await rendered.rerender({ selected: false });
 
-    expect(getBlockTypeTrigger(rendered.container).textContent).toContain(
-      "Heading 1",
-    );
+    expect(rendered.getEditor()).toBe(initialEditor);
+    expect(getEditable(rendered.container)).toBe(initialEditable);
+    expect(rendered.getEditor().getText()).toContain("Heading");
   });
 });

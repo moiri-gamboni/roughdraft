@@ -40,7 +40,7 @@ describe("document comment layout helpers", () => {
     ]);
   });
 
-  it("normalizes anchor positions when the canvas is zoomed", () => {
+  it("normalizes anchor positions with a scale factor", () => {
     const measurements = getCommentAnchorMeasurements(
       [
         {

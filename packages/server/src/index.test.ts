@@ -23,7 +23,7 @@ describe("createApp", () => {
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  it("creates a page and persists it in roughdraft.json", async () => {
+  it("creates a markdown page on disk", async () => {
     const { app } = createApp({
       homeDir,
       staticDirPath: projectDir,
@@ -39,34 +39,15 @@ describe("createApp", () => {
       title: "Draft",
       content: "# Draft\n",
     });
+    expect(response.body.version).toEqual(expect.any(String));
 
     const filePath = path.join(projectDir, "untitled-1.md");
     expect(fs.readFileSync(filePath, "utf-8")).toBe("# Draft\n");
-
-    const project = JSON.parse(
-      fs.readFileSync(path.join(projectDir, "roughdraft.json"), "utf-8"),
-    ) as {
-      pages: Record<
-        string,
-        { x: number; y: number; width: number; height: number }
-      >;
-    };
-
-    expect(project.pages["untitled-1"]).toEqual({
-      x: 20,
-      y: 0,
-      width: 400,
-      height: 500,
-    });
   });
 
   it("reads nested markdown files inside the project", async () => {
     const nestedDir = path.join(projectDir, "notes");
     fs.mkdirSync(nestedDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(projectDir, "roughdraft.json"),
-      JSON.stringify({ pages: {} }),
-    );
     fs.writeFileSync(path.join(nestedDir, "draft.md"), "# Nested draft\n");
 
     const { app } = createApp({
@@ -85,14 +66,53 @@ describe("createApp", () => {
       title: "Nested draft",
       content: "# Nested draft\n",
     });
+    expect(response.body.version).toEqual(expect.any(String));
+  });
+
+  it("rejects stale markdown-file writes", async () => {
+    const nestedDir = path.join(projectDir, "notes");
+    fs.mkdirSync(nestedDir, { recursive: true });
+    fs.writeFileSync(path.join(nestedDir, "draft.md"), "# Original\n");
+
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+    });
+
+    const readResponse = await request(app).get("/api/markdown-file").query({
+      projectPath: projectDir,
+      path: "notes/draft.md",
+    });
+
+    fs.writeFileSync(path.join(nestedDir, "draft.md"), "# External change\n");
+
+    const staleWriteResponse = await request(app)
+      .put("/api/markdown-file")
+      .query({
+        projectPath: projectDir,
+        path: "notes/draft.md",
+      })
+      .send({
+        content: "# Roughdraft change\n",
+        expectedVersion: readResponse.body.version,
+      });
+
+    expect(staleWriteResponse.status).toBe(409);
+    expect(staleWriteResponse.body).toMatchObject({
+      error: "Markdown file changed on disk",
+      current: {
+        id: "notes/draft",
+        title: "External change",
+        content: "# External change\n",
+      },
+    });
+    expect(staleWriteResponse.body.current.version).toEqual(expect.any(String));
+    expect(fs.readFileSync(path.join(nestedDir, "draft.md"), "utf-8")).toBe(
+      "# External change\n",
+    );
   });
 
   it("rejects markdown-file reads outside the project directory", async () => {
-    fs.writeFileSync(
-      path.join(projectDir, "roughdraft.json"),
-      JSON.stringify({ pages: {} }),
-    );
-
     const { app } = createApp({
       homeDir,
       staticDirPath: projectDir,

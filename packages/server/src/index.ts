@@ -14,17 +14,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const staticDir = path.resolve(__dirname, "../../app/dist");
 const defaultServerRoot = path.resolve(__dirname, "../../..");
 
-interface PageLayout {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-interface ProjectData {
-  pages: Record<string, PageLayout>;
-}
-
 interface AssetPayload {
   filename?: string;
   mimeType?: string;
@@ -76,24 +65,6 @@ interface CreateAppResult {
   port: number;
 }
 
-function readProjectFile(projectDir: string): ProjectData {
-  const filePath = path.join(projectDir, "roughdraft.json");
-  try {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    fs.mkdirSync(projectDir, { recursive: true });
-    const defaultProject: ProjectData = { pages: {} };
-    fs.writeFileSync(filePath, JSON.stringify(defaultProject, null, 2));
-    return defaultProject;
-  }
-}
-
-function writeProjectFile(projectDir: string, data: ProjectData): void {
-  const filePath = path.join(projectDir, "roughdraft.json");
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-}
-
 function listMdFiles(projectDir: string): string[] {
   try {
     return fs
@@ -108,6 +79,31 @@ function listMdFiles(projectDir: string): string[] {
 function titleFromContent(content: string, fallback: string): string {
   const firstLine = content.split("\n")[0] || "";
   return firstLine.replace(/^#*\s*/, "").trim() || fallback;
+}
+
+function fileVersionFromStats(stats: fs.Stats): string {
+  return `${stats.mtimeMs}:${stats.size}`;
+}
+
+function markdownPageFromFile(
+  relativePath: string,
+  absolutePath: string,
+): {
+  id: string;
+  title: string;
+  content: string;
+  version: string;
+} {
+  const content = fs.readFileSync(absolutePath, "utf-8");
+  const stats = fs.statSync(absolutePath);
+  const fallbackTitle = path.basename(relativePath, ".md");
+
+  return {
+    id: pageIdFromRelativePath(relativePath),
+    title: titleFromContent(content, fallbackTitle),
+    content,
+    version: fileVersionFromStats(stats),
+  };
 }
 
 function pageIdFromRelativePath(relativePath: string): string {
@@ -395,12 +391,60 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return;
     }
 
-    const content = fs.readFileSync(absolutePath, "utf-8");
-    const fallbackTitle = path.basename(relativePath, ".md");
-    res.json({
-      id: pageIdFromRelativePath(relativePath),
-      title: titleFromContent(content, fallbackTitle),
-      content,
+    res.json(markdownPageFromFile(relativePath, absolutePath));
+  });
+
+  app.get("/api/markdown-file/events", (req, res) => {
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return;
+
+    const relativePath =
+      typeof req.query.path === "string" ? req.query.path : "";
+    const absolutePath = ensureProjectPath(projectDir, relativePath);
+
+    if (!absolutePath?.toLowerCase().endsWith(".md")) {
+      res.status(404).json({ error: "Markdown file not found" });
+      return;
+    }
+
+    if (!fs.existsSync(absolutePath)) {
+      res.status(404).json({ error: "Markdown file not found" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+    res.write("retry: 1000\n\n");
+
+    const sendChange = (stats: fs.Stats) => {
+      const exists = stats.nlink > 0;
+      res.write(
+        `event: change\ndata: ${JSON.stringify({
+          path: relativePath,
+          exists,
+          version: exists ? fileVersionFromStats(stats) : null,
+        })}\n\n`,
+      );
+    };
+
+    const listener = (current: fs.Stats, previous: fs.Stats) => {
+      if (
+        current.mtimeMs === previous.mtimeMs &&
+        current.size === previous.size &&
+        current.nlink === previous.nlink
+      ) {
+        return;
+      }
+
+      sendChange(current);
+    };
+
+    fs.watchFile(absolutePath, { interval: 500 }, listener);
+
+    req.on("close", () => {
+      fs.unwatchFile(absolutePath, listener);
     });
   });
 
@@ -437,13 +481,22 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return;
     }
 
-    const { content } = req.body as { content: string };
+    const { content, expectedVersion } = req.body as {
+      content: string;
+      expectedVersion?: string;
+    };
+    const currentVersion = fileVersionFromStats(fs.statSync(absolutePath));
+
+    if (expectedVersion && expectedVersion !== currentVersion) {
+      res.status(409).json({
+        error: "Markdown file changed on disk",
+        current: markdownPageFromFile(relativePath, absolutePath),
+      });
+      return;
+    }
+
     fs.writeFileSync(absolutePath, content);
-    res.json({
-      id: pageIdFromRelativePath(relativePath),
-      title: titleFromContent(content, path.basename(relativePath, ".md")),
-      content,
-    });
+    res.json(markdownPageFromFile(relativePath, absolutePath));
   });
 
   app.post("/api/pages", (req, res) => {
@@ -459,15 +512,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     const filePath = path.join(projectDir, `${id}.md`);
     fs.writeFileSync(filePath, content);
 
-    // Add to roughdraft.json
-    const project = readProjectFile(projectDir);
-    const existing = Object.values(project.pages);
-    const maxX =
-      existing.length > 0 ? Math.max(...existing.map((p) => p.x + p.width)) : 0;
-    project.pages[id] = { x: maxX + 20, y: 0, width: 400, height: 500 };
-    writeProjectFile(projectDir, project);
-
-    res.status(201).json({ id, title: titleFromContent(content, id), content });
+    res.status(201).json(markdownPageFromFile(`${id}.md`, filePath));
   });
 
   app.delete("/api/pages/:id", (req, res) => {
@@ -482,20 +527,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     }
     fs.unlinkSync(filePath);
 
-    // Remove from roughdraft.json
-    const project = readProjectFile(projectDir);
-    delete project.pages[id];
-    writeProjectFile(projectDir, project);
-
     res.json({ ok: true });
-  });
-
-  app.get("/api/project", (req, res) => {
-    const projectDir = projectDirFromRequest(req, res);
-    if (!projectDir) return;
-
-    const project = readProjectFile(projectDir);
-    res.json(project);
   });
 
   app.get("/api/status", (_req, res) => {
@@ -585,8 +617,6 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return;
     }
 
-    readProjectFile(absolutePath);
-
     res.json({
       backend: "local-files",
       projectDir: absolutePath,
@@ -604,27 +634,12 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
 
     const absolutePath = path.resolve(requestedPath);
     ensureDirectoryExists(absolutePath);
-    readProjectFile(absolutePath);
 
     res.status(201).json({
       backend: "local-files",
       projectDir: absolutePath,
       port,
     });
-  });
-
-  app.put("/api/project", (req, res) => {
-    const projectDir = projectDirFromRequest(req, res);
-    if (!projectDir) return;
-
-    const project = (req.body as { project?: ProjectData }).project;
-    if (!project) {
-      res.status(400).json({ error: "project is required" });
-      return;
-    }
-
-    writeProjectFile(projectDir, project);
-    res.json(project);
   });
 
   app.get("/api/files", (req, res) => {

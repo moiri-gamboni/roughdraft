@@ -1,16 +1,10 @@
-import type { Page } from "./storage";
-
 export interface RequestedPathState {
   rawPath: string | null;
   projectPath: string | null;
   documentPath: string | null;
 }
 
-export type ViewMode = "canvas" | "document";
 export type DocumentEditorViewMode = "rich-text" | "code";
-
-export const CANVAS_FRAME_WIDTH = 680;
-export const CANVAS_FRAME_WIDTH_WITH_RAIL = 960;
 
 export function normalizePathSeparators(value: string) {
   return value.replace(/\\/g, "/");
@@ -30,15 +24,6 @@ export function getRawPathFromLocation(): string | null {
   }
 
   return null;
-}
-
-export function getViewModeFromLocation(fallbackMode: ViewMode): ViewMode {
-  const searchParams = new URLSearchParams(window.location.search);
-  const requestedMode = searchParams.get("mode");
-  if (requestedMode === "canvas" || requestedMode === "document") {
-    return requestedMode;
-  }
-  return fallbackMode;
 }
 
 export function getDocumentEditorViewModeFromLocation(
@@ -112,16 +97,6 @@ export function hasCriticMarkupComments(content: string) {
   return content.includes("{>>");
 }
 
-export function getCanvasFrameWidth(
-  page: Page | null | undefined,
-  fallbackWidth: number,
-) {
-  if (!page) return fallbackWidth;
-  return hasCriticMarkupComments(page.content)
-    ? CANVAS_FRAME_WIDTH_WITH_RAIL
-    : fallbackWidth;
-}
-
 export function joinPath(basePath: string, relativePath: string) {
   const separator = basePath.includes("\\") ? "\\" : "/";
   const normalizedBasePath = basePath.endsWith(separator)
@@ -135,12 +110,6 @@ export function joinPath(basePath: string, relativePath: string) {
       (result, segment) => `${result}${separator}${segment}`,
       normalizedBasePath,
     );
-}
-
-export function getCanvasPageId(relativePath: string) {
-  const normalizedPath = normalizePathSeparators(relativePath);
-  if (normalizedPath.includes("/")) return null;
-  return normalizedPath.replace(/\.md$/i, "");
 }
 
 export function getContainingPath(pathValue: string) {
@@ -210,12 +179,6 @@ export function buildLocationForPath(path?: string | null) {
     url.pathname = "/";
   }
 
-  return `${url.pathname}${url.search}${url.hash}`;
-}
-
-export function buildLocationForViewMode(mode: ViewMode) {
-  const url = new URL(window.location.href);
-  url.searchParams.set("mode", mode);
   return `${url.pathname}${url.search}${url.hash}`;
 }
 

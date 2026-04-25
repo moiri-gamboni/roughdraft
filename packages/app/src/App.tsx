@@ -1,66 +1,53 @@
-import { useEffect, useState, useCallback, useRef } from "react";
-import type { StorageBackend, Page, ProjectLayout } from "./storage";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  MarkdownFileConflictError,
+  type Page,
+  type StorageBackend,
+} from "./storage";
 import { detectBackend } from "./detect-backend";
 import { AppSidebar } from "./AppSidebar";
-import { CanvasWorkspace } from "./CanvasWorkspace";
 import { DocumentWorkspace } from "./DocumentWorkspace";
 import { HomeScreen } from "./HomeScreen";
 import { UpdateNotice } from "./UpdateNotice";
 import {
-  CANVAS_FRAME_WIDTH,
   type DocumentEditorViewMode,
   type RequestedPathState,
-  type ViewMode,
   buildLocationForDocumentEditorViewMode,
   buildLocationForPath,
-  buildLocationForViewMode,
   formatWorkspacePathForDisplay,
-  getCanvasFrameWidth,
-  getCanvasPageId,
   getDocumentEditorViewModeFromLocation,
   getDocumentNavigationState,
   getPathLeaf,
   getRequestedPathState,
-  getViewModeFromLocation,
   getWorkspaceName,
   getWorkspacePath,
   joinPath,
-  syncProjectPathInUrl,
   syncRequestedPathInUrl,
 } from "./app-navigation";
 import { LocalStorageBackend } from "./local-storage-backend";
 import { recordRecentOpen } from "./recent-items";
 import { fetchUpdateStatus, type UpdateStatus } from "./update-status";
 
-interface CanvasRevealRequest {
-  pageId: string;
-  key: string;
-}
+type DocumentDiskChangeState = "clean" | "changed" | "conflict";
 
 export function App() {
   const initialRequestedPathState = getRequestedPathState();
   const [requestedPathState, setRequestedPathState] =
     useState<RequestedPathState>(initialRequestedPathState);
-  const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    getViewModeFromLocation(
-      initialRequestedPathState.documentPath ? "document" : "canvas",
-    ),
-  );
   const [backend, setBackend] = useState<StorageBackend | null>(null);
-  const [allPages, setAllPages] = useState<Page[]>([]);
-  const [pages, setPages] = useState<Page[]>([]);
   const [documentPage, setDocumentPage] = useState<Page | null>(null);
   const [activeDocumentPath, setActiveDocumentPath] = useState<string | null>(
     requestedPathState.documentPath,
   );
-  const [layout, setLayout] = useState<ProjectLayout>({ pages: {} });
   const [pathSwitcherDismissCount, setPathSwitcherDismissCount] = useState(0);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [canvasRevealRequest, setCanvasRevealRequest] =
-    useState<CanvasRevealRequest | null>(null);
   const [, setDocumentSaveState] = useState<"idle" | "saving" | "error">(
     "idle",
   );
+  const [documentDiskChangeState, setDocumentDiskChangeState] =
+    useState<DocumentDiskChangeState>("clean");
+  const [documentForceResetKey, setDocumentForceResetKey] = useState<
+    string | null
+  >(null);
   const documentEditorViewMode =
     getDocumentEditorViewModeFromLocation("rich-text");
   const [projectTreeVersion, setProjectTreeVersion] = useState(0);
@@ -71,79 +58,43 @@ export function App() {
     () => !getRequestedPathState().documentPath,
   );
   const backendRef = useRef<StorageBackend | null>(null);
-  const layoutRef = useRef<ProjectLayout>({ pages: {} });
-  const saveLayoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const documentPageRef = useRef<Page | null>(null);
+  const activeDocumentPathRef = useRef<string | null>(activeDocumentPath);
+  const documentDirtyRef = useRef(false);
+  const documentDraftContentRef = useRef<string | null>(null);
 
   backendRef.current = backend;
-  layoutRef.current = layout;
+  documentPageRef.current = documentPage;
+  activeDocumentPathRef.current = activeDocumentPath;
 
   const loadProject = useCallback(async (nextBackend: StorageBackend) => {
-    if (saveLayoutTimer.current) {
-      clearTimeout(saveLayoutTimer.current);
-      saveLayoutTimer.current = null;
-    }
+    const pageList = await nextBackend.listPages();
+    return pageList;
+  }, []);
 
-    const [pageList, project] = await Promise.all([
-      nextBackend.listPages(),
-      nextBackend.getProject(),
-    ]);
-
-    let pg: Page[];
-    let proj = project;
-
-    if (pageList.length === 0) {
-      const page = await nextBackend.createPage(
-        "Untitled",
-        "# Welcome to Roughdraft\n\nStart writing. Your work is saved automatically.\n",
-      );
-      pg = [page];
-      proj = await nextBackend.getProject();
-    } else {
-      pg = pageList;
-    }
-
-    let layoutChanged = false;
-    for (const p of pg) {
-      if (!proj.pages[p.id]) {
-        const idx = Object.keys(proj.pages).length;
-        proj.pages[p.id] = {
-          x: idx * 720,
-          y: 0,
-          width: 680,
-          height: 500,
-        };
-        layoutChanged = true;
-      }
-    }
-    if (layoutChanged) {
-      await nextBackend.saveProject(proj);
-    }
-
-    setAllPages(pg);
-    setSelectedId(null);
-    setPages(pg);
-    setLayout(proj);
-
-    return pg;
+  const applyDocumentPage = useCallback((nextDocument: Page) => {
+    setDocumentPage(nextDocument);
+    documentDraftContentRef.current = nextDocument.content;
   }, []);
 
   const loadDocument = useCallback(
     async (nextBackend: StorageBackend, relativePath: string) => {
       const nextDocument = await nextBackend.getMarkdownFile(relativePath);
-      setDocumentPage(nextDocument);
+      applyDocumentPage(nextDocument);
       setActiveDocumentPath(relativePath);
+      documentDirtyRef.current = false;
+      setDocumentDiskChangeState("clean");
       return nextDocument;
     },
-    [],
+    [applyDocumentPage],
   );
 
   const resetProjectState = useCallback(() => {
-    setAllPages([]);
-    setPages([]);
-    setLayout({ pages: {} });
-    setSelectedId(null);
     setDocumentPage(null);
     setActiveDocumentPath(null);
+    documentDirtyRef.current = false;
+    documentDraftContentRef.current = null;
+    setDocumentDiskChangeState("clean");
   }, []);
 
   useEffect(() => {
@@ -185,12 +136,7 @@ export function App() {
         }
       }
 
-      if (requestedPathState.rawPath) {
-        syncRequestedPathInUrl(requestedPathState.rawPath);
-      } else {
-        syncRequestedPathInUrl(null);
-      }
-
+      syncRequestedPathInUrl(requestedPathState.rawPath);
       setBackend(detectedBackend);
 
       if (!requestedPathState.projectPath) {
@@ -199,19 +145,10 @@ export function App() {
         return;
       }
 
-      const loadedPages = await loadProject(detectedBackend);
-      const initialDocumentPath =
-        requestedPathState.documentPath ??
-        (viewMode === "document" && loadedPages[0]
-          ? `${loadedPages[0].id}.md`
-          : null);
+      await loadProject(detectedBackend);
 
-      if (initialDocumentPath) {
-        const nextDocument = await loadDocument(
-          detectedBackend,
-          initialDocumentPath,
-        );
-        setSelectedId(nextDocument.id);
+      if (requestedPathState.documentPath) {
+        await loadDocument(detectedBackend, requestedPathState.documentPath);
       } else {
         setDocumentPage(null);
         setActiveDocumentPath(null);
@@ -233,7 +170,6 @@ export function App() {
     requestedPathState.documentPath,
     requestedPathState.projectPath,
     requestedPathState.rawPath,
-    viewMode,
   ]);
 
   useEffect(() => {
@@ -262,83 +198,188 @@ export function App() {
     requestedPathState.rawPath,
   ]);
 
+  const openDocumentPage = useCallback(
+    (
+      page: Page,
+      relativePath: string,
+      projectPath: string | null,
+      currentRawPath: string | null,
+    ) => {
+      applyDocumentPage(page);
+      setActiveDocumentPath(relativePath);
+      setDocumentSaveState("idle");
+      documentDirtyRef.current = false;
+      setDocumentDiskChangeState("clean");
+
+      if (!projectPath) return;
+
+      const nextPathState = getDocumentNavigationState(
+        projectPath,
+        relativePath,
+        currentRawPath,
+      );
+      setRequestedPathState(nextPathState);
+      syncRequestedPathInUrl(nextPathState.rawPath);
+    },
+    [applyDocumentPage],
+  );
+
   const handleOpenDemo = useCallback(async () => {
     const nextBackend = new LocalStorageBackend();
     setLoading(true);
     setDemoModeEnabled(true);
     setSidebarVisible(true);
-    setViewMode("canvas");
     syncRequestedPathInUrl(null);
     setBackend(nextBackend);
     resetProjectState();
 
     try {
-      await loadProject(nextBackend);
+      const loadedPages = await loadProject(nextBackend);
+      const page =
+        loadedPages[0] ??
+        (await nextBackend.createPage(
+          "Untitled",
+          "# Welcome to Roughdraft\n\nStart writing. Your work is saved automatically.\n",
+        ));
+      openDocumentPage(page, `${page.id}.md`, null, null);
     } finally {
       setLoading(false);
     }
-  }, [loadProject, resetProjectState]);
-
-  const handleSavePage = useCallback(async (id: string, content: string) => {
-    await backendRef.current?.savePage(id, content);
-    const updatePage = (page: Page) => {
-      if (page.id !== id) return page;
-      const firstLine = content.split("\n")[0] || "";
-      const title = firstLine.replace(/^#*\s*/, "") || page.id;
-      return { ...page, content, title };
-    };
-    setPages((prev) => prev.map(updatePage));
-    setAllPages((prev) => prev.map(updatePage));
-  }, []);
+  }, [loadProject, openDocumentPage, resetProjectState]);
 
   const handleSaveDocument = useCallback(
     async (id: string, content: string) => {
       if (!activeDocumentPath) return;
-      await backendRef.current?.saveMarkdownFile(activeDocumentPath, content);
+      const expectedVersion =
+        documentPageRef.current?.id === id
+          ? documentPageRef.current.version
+          : undefined;
+
+      let savedDocument: Page | undefined;
+      try {
+        savedDocument = await backendRef.current?.saveMarkdownFile(
+          activeDocumentPath,
+          content,
+          expectedVersion,
+        );
+      } catch (error) {
+        if (error instanceof MarkdownFileConflictError) {
+          setDocumentDiskChangeState("conflict");
+        }
+        throw error;
+      }
 
       const firstLine = content.split("\n")[0] || "";
       const fallbackTitle = id.split("/").at(-1) || id;
       const title = firstLine.replace(/^#*\s*/, "") || fallbackTitle;
+      const nextDocument = savedDocument ?? {
+        id,
+        content,
+        title,
+        version: expectedVersion,
+      };
 
-      setDocumentPage((prev) =>
-        prev && prev.id === id
-          ? {
-              ...prev,
-              content,
-              title,
-            }
-          : prev,
-      );
-      setPages((prev) =>
-        prev.map((page) =>
-          page.id === id ? { ...page, content, title } : page,
-        ),
-      );
-      setAllPages((prev) =>
-        prev.map((page) =>
-          page.id === id ? { ...page, content, title } : page,
-        ),
-      );
+      applyDocumentPage(nextDocument);
+      documentDirtyRef.current = false;
+      setDocumentDiskChangeState("clean");
     },
-    [activeDocumentPath],
+    [activeDocumentPath, applyDocumentPage],
   );
 
-  const handleReposition = useCallback((id: string, x: number, y: number) => {
-    setLayout((prev) => {
-      const entry = prev.pages[id] || { x: 0, y: 0, width: 680, height: 500 };
-      const next = {
-        ...prev,
-        pages: { ...prev.pages, [id]: { ...entry, x, y } },
-      };
-      if (saveLayoutTimer.current) clearTimeout(saveLayoutTimer.current);
-      saveLayoutTimer.current = setTimeout(() => {
-        backendRef.current?.saveProject(layoutRef.current).catch((err) => {
-          console.error("Failed to save layout:", err);
-        });
-      }, 300);
-      return next;
-    });
+  const handleDocumentDirtyStateChange = useCallback((isDirty: boolean) => {
+    documentDirtyRef.current = isDirty;
   }, []);
+
+  const handleDocumentLocalContentChange = useCallback((markdown: string) => {
+    documentDraftContentRef.current = markdown;
+  }, []);
+
+  const handleReloadDocumentFromDisk = useCallback(async () => {
+    const currentBackend = backendRef.current;
+    const currentPath = activeDocumentPathRef.current;
+    if (!currentBackend || !currentPath) return;
+
+    const nextDocument = await currentBackend.getMarkdownFile(currentPath);
+    applyDocumentPage(nextDocument);
+    documentDirtyRef.current = false;
+    setDocumentDiskChangeState("clean");
+    setDocumentForceResetKey(
+      `${currentPath}:${nextDocument.version ?? Date.now()}`,
+    );
+  }, [applyDocumentPage]);
+
+  const handleOverwriteDocumentOnDisk = useCallback(async () => {
+    const currentBackend = backendRef.current;
+    const currentPath = activeDocumentPathRef.current;
+    const currentDocument = documentPageRef.current;
+    if (!currentBackend || !currentPath || !currentDocument) return;
+
+    const content = documentDraftContentRef.current ?? currentDocument.content;
+    const firstLine = content.split("\n")[0] || "";
+    const fallbackTitle =
+      currentDocument.id.split("/").at(-1) || currentDocument.id;
+    const title = firstLine.replace(/^#*\s*/, "") || fallbackTitle;
+    const savedDocument = (await currentBackend.saveMarkdownFile(
+      currentPath,
+      content,
+    )) ?? {
+      ...currentDocument,
+      content,
+      title,
+    };
+
+    applyDocumentPage(savedDocument);
+    documentDirtyRef.current = false;
+    setDocumentDiskChangeState("clean");
+  }, [applyDocumentPage]);
+
+  useEffect(() => {
+    if (!backend?.watchMarkdownFile || !activeDocumentPath) return;
+
+    let disposed = false;
+    const stopWatching = backend.watchMarkdownFile(
+      activeDocumentPath,
+      (event) => {
+        if (disposed || event.path !== activeDocumentPath) return;
+
+        const currentDocument = documentPageRef.current;
+        if (event.version && currentDocument?.version === event.version) {
+          return;
+        }
+
+        if (!event.exists) {
+          setDocumentDiskChangeState("changed");
+          return;
+        }
+
+        if (documentDirtyRef.current) {
+          setDocumentDiskChangeState("changed");
+          return;
+        }
+
+        void (async () => {
+          const currentBackend = backendRef.current;
+          const currentPath = activeDocumentPathRef.current;
+          if (!currentBackend || !currentPath || disposed) return;
+
+          try {
+            const nextDocument =
+              await currentBackend.getMarkdownFile(currentPath);
+            if (disposed) return;
+            applyDocumentPage(nextDocument);
+            setDocumentDiskChangeState("clean");
+          } catch (error) {
+            console.error("Failed to reload changed markdown file:", error);
+          }
+        })();
+      },
+    );
+
+    return () => {
+      disposed = true;
+      stopWatching();
+    };
+  }, [activeDocumentPath, applyDocumentPage, backend]);
 
   const handleCreatePage = useCallback(async () => {
     if (!backendRef.current) return;
@@ -346,56 +387,22 @@ export function App() {
       "Untitled",
       "# Untitled\n",
     );
-    const proj = await backendRef.current.getProject();
-    setAllPages((prev) => [...prev, page]);
-    setPages((prev) => [...prev, page]);
-    setLayout(proj);
-    setSelectedId(page.id);
-    setProjectTreeVersion((version) => version + 1);
-
-    if (viewMode !== "document") return;
-
     const projectPath =
       backendRef.current.info.projectPath ?? requestedPathState.projectPath;
     const relativePath = `${page.id}.md`;
 
-    setDocumentPage(page);
-    setActiveDocumentPath(relativePath);
-    setDocumentSaveState("idle");
-    setCanvasRevealRequest(null);
-
-    if (!projectPath) return;
-
-    const nextPathState = getDocumentNavigationState(
-      projectPath,
+    setProjectTreeVersion((version) => version + 1);
+    openDocumentPage(
+      page,
       relativePath,
+      projectPath ?? null,
       requestedPathState.rawPath,
     );
-    setRequestedPathState(nextPathState);
-    syncRequestedPathInUrl(nextPathState.rawPath);
-  }, [requestedPathState.projectPath, requestedPathState.rawPath, viewMode]);
-
-  const handleDeletePage = useCallback(
-    async (id: string) => {
-      if (!backendRef.current) return;
-      await backendRef.current.deletePage(id);
-      setAllPages((prev) => prev.filter((p) => p.id !== id));
-      setPages((prev) => prev.filter((p) => p.id !== id));
-      setLayout((prev) => {
-        const next = { ...prev, pages: { ...prev.pages } };
-        delete next.pages[id];
-        return next;
-      });
-      if (selectedId === id) setSelectedId(null);
-      setProjectTreeVersion((version) => version + 1);
-    },
-    [selectedId],
-  );
-
-  const handleCanvasPointerDown = useCallback(() => {
-    setSelectedId(null);
-    setPathSwitcherDismissCount((count) => count + 1);
-  }, []);
+  }, [
+    openDocumentPage,
+    requestedPathState.projectPath,
+    requestedPathState.rawPath,
+  ]);
 
   const openDocumentInRegularMode = useCallback(
     async (relativePath: string) => {
@@ -410,71 +417,31 @@ export function App() {
           backendRef.current,
           relativePath,
         );
-        const nextPathState = getDocumentNavigationState(
-          projectPath,
+        openDocumentPage(
+          nextDocument,
           relativePath,
+          projectPath,
           requestedPathState.rawPath,
         );
-        setRequestedPathState(nextPathState);
-        syncRequestedPathInUrl(nextPathState.rawPath);
-        setSelectedId(nextDocument.id);
-        setCanvasRevealRequest(null);
       } catch (error) {
         console.error("Failed to open markdown file:", error);
       }
 
       setPathSwitcherDismissCount((count) => count + 1);
     },
-    [loadDocument, requestedPathState.projectPath, requestedPathState.rawPath],
-  );
-
-  const revealMarkdownPageOnCanvas = useCallback(
-    (relativePath: string) => {
-      const pageId = getCanvasPageId(relativePath);
-      if (!pageId) return false;
-
-      const targetPage = allPages.find((page) => page.id === pageId);
-      if (!targetPage) return false;
-
-      const projectPath =
-        backendRef.current?.info.projectPath ?? requestedPathState.projectPath;
-      if (!projectPath) return false;
-
-      setRequestedPathState({
-        rawPath: projectPath,
-        projectPath,
-        documentPath: null,
-      });
-      syncProjectPathInUrl(projectPath);
-      setSelectedId(pageId);
-      setCanvasRevealRequest({
-        pageId,
-        key: `${pageId}:${Date.now()}`,
-      });
-      setPathSwitcherDismissCount((count) => count + 1);
-      return true;
-    },
-    [allPages, requestedPathState.projectPath],
+    [
+      loadDocument,
+      openDocumentPage,
+      requestedPathState.projectPath,
+      requestedPathState.rawPath,
+    ],
   );
 
   const handleOpenMarkdownPage = useCallback(
     async (relativePath: string) => {
-      if (viewMode === "document") {
-        await openDocumentInRegularMode(relativePath);
-        return;
-      }
-
-      revealMarkdownPageOnCanvas(relativePath);
+      await openDocumentInRegularMode(relativePath);
     },
-    [openDocumentInRegularMode, revealMarkdownPageOnCanvas, viewMode],
-  );
-
-  const handleViewModeChange = useCallback(
-    (nextMode: ViewMode) => {
-      if (nextMode === viewMode) return;
-      window.location.assign(buildLocationForViewMode(nextMode));
-    },
-    [viewMode],
+    [openDocumentInRegularMode],
   );
 
   const handleDocumentEditorViewModeChange = useCallback(
@@ -506,60 +473,17 @@ export function App() {
     activeDocumentPath && backend?.info.projectPath
       ? joinPath(backend.info.projectPath, activeDocumentPath)
       : requestedPathState.rawPath;
-  const displayPath =
-    viewMode === "document" && documentPage
-      ? documentAbsolutePath
-      : backend?.info.projectPath;
+  const displayPath = documentPage
+    ? documentAbsolutePath
+    : backend?.info.projectPath;
   const workspaceName = getWorkspaceName(displayPath ?? undefined);
-  const isDocumentMode = viewMode === "document";
   const workspacePath =
     getWorkspacePath(
       backend?.info.projectPath ?? requestedPathState.projectPath ?? undefined,
     ) ?? "Browser drafts";
   const workspacePathLabel =
     formatWorkspacePathForDisplay(workspacePath) ?? workspacePath;
-  const selectedCanvasPath =
-    selectedId && backend?.info.projectPath
-      ? joinPath(backend.info.projectPath, `${selectedId}.md`)
-      : null;
-  const treeCurrentPath = isDocumentMode
-    ? documentAbsolutePath
-    : (selectedCanvasPath ?? backend?.info.projectPath ?? displayPath);
-  const firstPage = pages[0];
-  const firstPageLayout = firstPage ? layout.pages[firstPage.id] : null;
-  const firstPageFrame = firstPage
-    ? {
-        x: firstPageLayout?.x ?? 0,
-        y: firstPageLayout?.y ?? 0,
-        width: getCanvasFrameWidth(
-          firstPage,
-          firstPageLayout?.width ?? CANVAS_FRAME_WIDTH,
-        ),
-        height: firstPageLayout?.height ?? 500,
-      }
-    : null;
-  const initialWorldCenter = firstPageFrame
-    ? {
-        x: firstPageFrame.x + firstPageFrame.width / 2,
-        y: firstPageFrame.y + firstPageFrame.height / 2,
-      }
-    : null;
-  const initialWorldCenterKey = `${displayPath ?? "browser"}:${firstPage?.id ?? "none"}`;
-  const revealedPageLayout = canvasRevealRequest
-    ? layout.pages[canvasRevealRequest.pageId]
-    : null;
-  const revealedPage = canvasRevealRequest
-    ? pages.find((page) => page.id === canvasRevealRequest.pageId)
-    : null;
-  const revealedPageFrame =
-    canvasRevealRequest && revealedPageLayout
-      ? {
-          x: revealedPageLayout.x,
-          y: revealedPageLayout.y,
-          width: getCanvasFrameWidth(revealedPage, revealedPageLayout.width),
-          height: revealedPageLayout.height,
-        }
-      : null;
+  const treeCurrentPath = documentAbsolutePath ?? backend?.info.projectPath;
   const projectLabel = getPathLeaf(backend?.info.projectPath) ?? workspaceName;
   const documentFilenameLabel =
     getPathLeaf(activeDocumentPath) ?? "Untitled.md";
@@ -569,7 +493,6 @@ export function App() {
     <div className="flex h-screen overflow-hidden bg-[#FCFCFC] text-slate-950">
       {sidebarVisible ? (
         <AppSidebar
-          isDocumentMode={isDocumentMode}
           sidebarToggleLabel={sidebarToggleLabel}
           backend={backend}
           projectLabel={projectLabel}
@@ -577,8 +500,6 @@ export function App() {
           workspacePathLabel={workspacePathLabel}
           buildLocationForPath={buildLocationForPath}
           pathSwitcherDismissCount={pathSwitcherDismissCount}
-          viewMode={viewMode}
-          onViewModeChange={handleViewModeChange}
           onCreatePage={() => void handleCreatePage()}
           onHideSidebar={() => setSidebarVisible(false)}
           treeCurrentPath={treeCurrentPath ?? null}
@@ -596,42 +517,25 @@ export function App() {
           </div>
         ) : null}
         <div className="flex h-full flex-col overflow-hidden bg-[#FCFCFC]">
-          {isDocumentMode ? (
-            <DocumentWorkspace
-              sidebarVisible={sidebarVisible}
-              sidebarToggleLabel={sidebarToggleLabel}
-              onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
-              documentPage={documentPage}
-              activeDocumentPath={activeDocumentPath}
-              documentFilenameLabel={documentFilenameLabel}
-              documentEditorViewMode={documentEditorViewMode}
-              onDocumentEditorViewModeChange={
-                handleDocumentEditorViewModeChange
-              }
-              onSaveDocument={handleSaveDocument}
-              onDocumentSaveStateChange={setDocumentSaveState}
-              backend={backend}
-            />
-          ) : (
-            <CanvasWorkspace
-              sidebarVisible={sidebarVisible}
-              sidebarToggleLabel={sidebarToggleLabel}
-              onShowSidebar={() => setSidebarVisible(true)}
-              pages={pages}
-              layout={layout}
-              backend={backend}
-              selectedId={selectedId}
-              canvasRevealRequest={canvasRevealRequest}
-              initialWorldCenter={initialWorldCenter}
-              initialWorldCenterKey={initialWorldCenterKey}
-              revealedPageFrame={revealedPageFrame}
-              onCanvasPointerDown={handleCanvasPointerDown}
-              onSelectPage={setSelectedId}
-              onSavePage={handleSavePage}
-              onReposition={handleReposition}
-              onDeletePage={handleDeletePage}
-            />
-          )}
+          <DocumentWorkspace
+            sidebarVisible={sidebarVisible}
+            sidebarToggleLabel={sidebarToggleLabel}
+            onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
+            documentPage={documentPage}
+            activeDocumentPath={activeDocumentPath}
+            documentFilenameLabel={documentFilenameLabel}
+            documentEditorViewMode={documentEditorViewMode}
+            onDocumentEditorViewModeChange={handleDocumentEditorViewModeChange}
+            onSaveDocument={handleSaveDocument}
+            onDocumentSaveStateChange={setDocumentSaveState}
+            onDocumentDirtyStateChange={handleDocumentDirtyStateChange}
+            onDocumentLocalContentChange={handleDocumentLocalContentChange}
+            documentDiskChangeState={documentDiskChangeState}
+            documentForceResetKey={documentForceResetKey}
+            onReloadDocumentFromDisk={handleReloadDocumentFromDisk}
+            onOverwriteDocumentOnDisk={handleOverwriteDocumentOnDisk}
+            backend={backend}
+          />
         </div>
       </main>
     </div>
