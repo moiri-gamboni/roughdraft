@@ -126,8 +126,8 @@
 
   .tiptap .critic-change-addition,
   .tiptap .critic-change-substitution-new {
-    @apply rounded-sm px-0.5 text-emerald-950;
-    background-color: rgb(209 250 229 / 0.9);
+    @apply rounded-sm px-0.5 text-emerald-850;
+    background-color: rgb(236 253 245 / 0.95);
     text-decoration: underline;
     text-decoration-color: rgb(16 185 129 / 0.75);
     text-underline-offset: 0.16em;
@@ -136,15 +136,65 @@
   .tiptap .critic-change-deletion,
   .tiptap .critic-change-substitution-old {
     @apply rounded-sm px-0.5 text-rose-950;
-    background-color: rgb(255 228 230 / 0.95);
+    background-color: rgb(255 241 242 / 0.95);
     text-decoration: line-through;
     text-decoration-color: rgb(225 29 72 / 0.75);
   }
 
-  .tiptap .critic-change-decoration-hovered,
-  .tiptap .critic-change-decoration-active {
-    @apply ring-2 ring-emerald-300/80;
+  .tiptap .critic-change-decoration-hovered {
     border-radius: 0.2rem;
+  }
+
+  .tiptap .critic-change-decoration-active {
+    border-radius: 0.2rem;
+  }
+
+  .tiptap .critic-change-addition.critic-change-decoration-hovered,
+  .tiptap .critic-change-substitution-new.critic-change-decoration-hovered,
+  .tiptap .critic-change-decoration-addition.critic-change-decoration-hovered,
+  .tiptap
+    .critic-change-decoration-substitution-new.critic-change-decoration-hovered,
+  .tiptap .critic-change-decoration-hovered .critic-change-addition,
+  .tiptap .critic-change-decoration-hovered .critic-change-substitution-new,
+  .tiptap .critic-change-addition .critic-change-decoration-hovered,
+  .tiptap .critic-change-substitution-new .critic-change-decoration-hovered {
+    background-color: rgb(209 250 229 / 0.95);
+  }
+
+  .tiptap .critic-change-addition.critic-change-decoration-active,
+  .tiptap .critic-change-substitution-new.critic-change-decoration-active,
+  .tiptap .critic-change-decoration-addition.critic-change-decoration-active,
+  .tiptap
+    .critic-change-decoration-substitution-new.critic-change-decoration-active,
+  .tiptap .critic-change-decoration-active .critic-change-addition,
+  .tiptap .critic-change-decoration-active .critic-change-substitution-new,
+  .tiptap .critic-change-addition .critic-change-decoration-active,
+  .tiptap .critic-change-substitution-new .critic-change-decoration-active {
+    background-color: rgb(167 243 208 / 0.95);
+  }
+
+  .tiptap .critic-change-deletion.critic-change-decoration-hovered,
+  .tiptap .critic-change-substitution-old.critic-change-decoration-hovered,
+  .tiptap .critic-change-decoration-deletion.critic-change-decoration-hovered,
+  .tiptap
+    .critic-change-decoration-substitution-old.critic-change-decoration-hovered,
+  .tiptap .critic-change-decoration-hovered .critic-change-deletion,
+  .tiptap .critic-change-decoration-hovered .critic-change-substitution-old,
+  .tiptap .critic-change-deletion .critic-change-decoration-hovered,
+  .tiptap .critic-change-substitution-old .critic-change-decoration-hovered {
+    background-color: rgb(255 228 230 / 0.95);
+  }
+
+  .tiptap .critic-change-deletion.critic-change-decoration-active,
+  .tiptap .critic-change-substitution-old.critic-change-decoration-active,
+  .tiptap .critic-change-decoration-deletion.critic-change-decoration-active,
+  .tiptap
+    .critic-change-decoration-substitution-old.critic-change-decoration-active,
+  .tiptap .critic-change-decoration-active .critic-change-deletion,
+  .tiptap .critic-change-decoration-active .critic-change-substitution-old,
+  .tiptap .critic-change-deletion .critic-change-decoration-active,
+  .tiptap .critic-change-substitution-old .critic-change-decoration-active {
+    background-color: rgb(254 205 211 / 0.95);
   }
 
   .tiptap code {
@@ -376,6 +426,7 @@
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: "Inter Variable", sans-serif;
+  --color-emerald-850: rgb(6 83 61);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);

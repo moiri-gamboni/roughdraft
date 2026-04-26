@@ -1,6 +1,7 @@
 import type { JSONContent } from "@tiptap/core";
 import type { Editor } from "@tiptap/react";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
+import type { Mark as ProseMirrorMark } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
@@ -143,6 +144,52 @@ function getSelectionCommentIds(editor: Editor | null): string[] {
   return [...commentIds];
 }
 
+function getSelectionCriticChangeIds(editor: Editor | null): string[] {
+  if (!editor) return [];
+
+  const directChangeId = editor.getAttributes("criticChange").changeId;
+
+  if (typeof directChangeId === "string" && directChangeId.length > 0) {
+    return [directChangeId];
+  }
+
+  const { from, to, empty, $from } = editor.state.selection;
+  const changeIds = new Set<string>();
+
+  if (empty) {
+    for (const mark of $from.marks()) {
+      if (mark.type.name !== "criticChange") continue;
+      if (typeof mark.attrs.changeId === "string") {
+        changeIds.add(mark.attrs.changeId);
+      }
+    }
+  } else {
+    editor.state.doc.nodesBetween(from, to, (node) => {
+      if (!node.isText) return;
+
+      for (const mark of node.marks) {
+        if (mark.type.name !== "criticChange") continue;
+        if (typeof mark.attrs.changeId === "string") {
+          changeIds.add(mark.attrs.changeId);
+        }
+      }
+    });
+  }
+
+  return [...changeIds];
+}
+
+function getPreferredCriticChangeId(
+  changeIds: string[],
+  currentChangeId: string | null,
+): string | null {
+  if (currentChangeId && changeIds.includes(currentChangeId)) {
+    return currentChangeId;
+  }
+
+  return changeIds[0] ?? null;
+}
+
 function findCommentRange(editor: Editor | null, commentId: string) {
   if (!editor) return null;
 
@@ -276,6 +323,26 @@ function getDocumentCriticChanges(
   });
 
   return [...changes.values()];
+}
+
+function getReusableSuggestionInputMark(
+  editor: Editor,
+  position: number,
+): ProseMirrorMark | null {
+  const markType = editor.state.schema.marks.criticChange;
+  if (!markType) return null;
+
+  const isReusableSuggestionMark = (mark: ProseMirrorMark) =>
+    mark.type === markType &&
+    (mark.attrs.kind === "addition" || mark.attrs.kind === "substitution-new");
+  const $position = editor.state.doc.resolve(position);
+  const previousMark = $position.nodeBefore?.marks.find(
+    isReusableSuggestionMark,
+  );
+
+  if (previousMark) return previousMark;
+
+  return $position.nodeAfter?.marks.find(isReusableSuggestionMark) ?? null;
 }
 
 function getDocumentCriticChangeRailItems(
@@ -653,30 +720,31 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
                 existingChanges: getDocumentCriticChanges(currentEditor),
               },
             );
+            const newMark = view.state.schema.marks.criticChange.create({
+              ...oldChange,
+              kind: "substitution-new",
+            });
             tr.addMark(
               from,
               to,
               view.state.schema.marks.criticChange.create(oldChange),
             );
-            tr.insert(
-              to,
-              view.state.schema.text(text, [
-                view.state.schema.marks.criticChange.create({
-                  ...oldChange,
-                  kind: "substitution-new",
-                }),
-              ]),
-            );
+            tr.insert(to, view.state.schema.text(text, [newMark]));
+            tr.setSelection(TextSelection.create(tr.doc, to + text.length));
           } else {
-            const change = createCriticChange("addition", undefined, {
-              existingChanges: getDocumentCriticChanges(currentEditor),
-            });
-            tr.insert(
+            const existingMark = getReusableSuggestionInputMark(
+              currentEditor,
               from,
-              view.state.schema.text(text, [
-                view.state.schema.marks.criticChange.create(change),
-              ]),
             );
+            const mark =
+              existingMark ??
+              view.state.schema.marks.criticChange.create(
+                createCriticChange("addition", undefined, {
+                  existingChanges: getDocumentCriticChanges(currentEditor),
+                }),
+              );
+            tr.insert(from, view.state.schema.text(text, [mark]));
+            tr.setSelection(TextSelection.create(tr.doc, from + text.length));
           }
 
           view.dispatch(tr.scrollIntoView());
@@ -747,6 +815,13 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
         getSelectionCommentIds(currentEditor),
       equalityFn: areCommentIdListsEqual,
     }) ?? [];
+  const activeChangeIds =
+    useEditorState({
+      editor,
+      selector: ({ editor: currentEditor }) =>
+        getSelectionCriticChangeIds(currentEditor),
+      equalityFn: areCommentIdListsEqual,
+    }) ?? [];
 
   const { commentGroups, contentHeight, measureLayout } =
     useCommentAnchorLayout(editor, comments.size > 0);
@@ -764,6 +839,12 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
       getPreferredCommentId(activeCommentIds, current),
     );
   }, [activeCommentIds]);
+
+  useEffect(() => {
+    setSelectedChangeId((current) =>
+      getPreferredCriticChangeId(activeChangeIds, current),
+    );
+  }, [activeChangeIds]);
 
   useEffect(() => {
     if (!editor) return;

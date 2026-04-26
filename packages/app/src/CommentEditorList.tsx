@@ -38,6 +38,33 @@ interface CommentEditorListProps {
   onReplyComment?: (commentId: string) => void;
   pendingFocusCommentId?: string | null;
   onAutoFocusComment?: (commentId: string) => void;
+  renderCommentContent?: (context: CommentContentRenderContext) => ReactNode;
+  getCommentActions?: (
+    context: CommentActionsRenderContext,
+  ) => CommentActionDefinition[];
+}
+
+export interface CommentActionDefinition {
+  key: string;
+  label: string;
+  tone?: "neutral" | "danger";
+  icon: ReactNode;
+  compact?: boolean;
+  onClick: (event: MouseEvent) => void;
+}
+
+export interface CommentContentRenderContext {
+  comment: CriticComment;
+  depth: number;
+  isEditing: boolean;
+  defaultContent: ReactNode;
+}
+
+export interface CommentActionsRenderContext {
+  comment: CriticComment;
+  depth: number;
+  isEditing: boolean;
+  defaultActions: CommentActionDefinition[];
 }
 
 function isEditableShortcutTarget(target: EventTarget | null) {
@@ -75,6 +102,8 @@ export function CommentEditorList({
   onReplyComment,
   pendingFocusCommentId = null,
   onAutoFocusComment,
+  renderCommentContent,
+  getCommentActions,
 }: CommentEditorListProps) {
   const textareaRefs = useRef(new Map<string, HTMLTextAreaElement>());
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -262,6 +291,8 @@ export function CommentEditorList({
           onStartEditingComment={startEditingComment}
           onSubmitEditingComment={submitEditingComment}
           onCancelEditingComment={cancelEditingComment}
+          renderCommentContent={renderCommentContent}
+          getCommentActions={getCommentActions}
           onChangeDraft={(commentId, nextContent) => {
             setDrafts((current) => ({
               ...current,
@@ -296,6 +327,10 @@ interface CommentThreadNodeProps {
   onStartEditingComment: (commentId: string) => void;
   onSubmitEditingComment: (commentId: string) => void;
   onCancelEditingComment: (commentId: string) => void;
+  renderCommentContent?: (context: CommentContentRenderContext) => ReactNode;
+  getCommentActions?: (
+    context: CommentActionsRenderContext,
+  ) => CommentActionDefinition[];
   onChangeDraft: (commentId: string, nextContent: string) => void;
 }
 
@@ -373,6 +408,8 @@ function CommentThreadNode({
   onStartEditingComment,
   onSubmitEditingComment,
   onCancelEditingComment,
+  renderCommentContent,
+  getCommentActions,
   onChangeDraft,
 }: CommentThreadNodeProps) {
   const { comment, replies } = thread;
@@ -407,6 +444,76 @@ function CommentThreadNode({
       : "bg-transparent";
   const treeLineTone =
     variant === "banner" ? "bg-[#DED8CE]/90" : "bg-[#DED8CE]/85";
+  const defaultContent =
+    comment.content.trim().length > 0 ? comment.content : "Empty comment";
+  const renderedContent =
+    renderCommentContent?.({
+      comment,
+      depth,
+      isEditing,
+      defaultContent,
+    }) ?? defaultContent;
+  const defaultActions: CommentActionDefinition[] = isEditing
+    ? [
+        {
+          key: "save",
+          label: "Save",
+          icon: <Check className="size-3.5" />,
+          onClick: (event) => {
+            event.stopPropagation();
+            onSubmitEditingComment(comment.id);
+          },
+        },
+        {
+          key: "cancel",
+          label: "Cancel",
+          icon: <X className="size-3.5" />,
+          onClick: (event) => {
+            event.stopPropagation();
+            onCancelEditingComment(comment.id);
+          },
+        },
+      ]
+    : [
+        {
+          key: "reply",
+          label: "Reply",
+          icon: <Reply className="size-3.5" />,
+          compact: true,
+          onClick: (event) => {
+            event.stopPropagation();
+            onReplyComment?.(comment.id);
+          },
+        },
+        {
+          key: "edit",
+          label: "Edit",
+          icon: <Pencil className="size-3.5" />,
+          compact: true,
+          onClick: (event) => {
+            event.stopPropagation();
+            onStartEditingComment(comment.id);
+          },
+        },
+        {
+          key: "delete",
+          label: "Delete",
+          tone: "danger",
+          icon: <Trash2 className="size-3.5" />,
+          compact: true,
+          onClick: (event) => {
+            event.stopPropagation();
+            onDeleteComment(comment.id);
+          },
+        },
+      ];
+  const actions =
+    getCommentActions?.({
+      comment,
+      depth,
+      isEditing,
+      defaultActions,
+    }) ?? defaultActions;
   const ancestorGuideOffsets = parentLines.reduce<number[]>(
     (offsets, showLine, guideIndex) => {
       if (showLine) {
@@ -546,11 +653,7 @@ function CommentThreadNode({
                   variant === "banner" ? "text-slate-800" : "text-slate-700",
                 )}
               >
-                {isEditing
-                  ? null
-                  : comment.content.trim().length > 0
-                    ? comment.content
-                    : "Empty comment"}
+                {isEditing ? null : renderedContent}
               </div>
               {isEditing ? (
                 <Textarea
@@ -605,57 +708,16 @@ function CommentThreadNode({
                 />
               ) : null}
               <div className="mt-2 flex flex-wrap items-center gap-1">
-                {isEditing ? (
-                  <>
-                    <CommentActionButton
-                      label="Save"
-                      icon={<Check className="size-3.5" />}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onSubmitEditingComment(comment.id);
-                      }}
-                    />
-                    <CommentActionButton
-                      label="Cancel"
-                      icon={<X className="size-3.5" />}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onCancelEditingComment(comment.id);
-                      }}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <CommentActionButton
-                      label="Reply"
-                      icon={<Reply className="size-3.5" />}
-                      compact
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onReplyComment?.(comment.id);
-                      }}
-                    />
-                    <CommentActionButton
-                      label="Edit"
-                      icon={<Pencil className="size-3.5" />}
-                      compact
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onStartEditingComment(comment.id);
-                      }}
-                    />
-                    <CommentActionButton
-                      label="Delete"
-                      tone="danger"
-                      icon={<Trash2 className="size-3.5" />}
-                      compact
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDeleteComment(comment.id);
-                      }}
-                    />
-                  </>
-                )}
+                {actions.map((action) => (
+                  <CommentActionButton
+                    key={action.key}
+                    label={action.label}
+                    tone={action.tone}
+                    icon={action.icon}
+                    compact={action.compact}
+                    onClick={action.onClick}
+                  />
+                ))}
               </div>
             </div>
           </div>
@@ -687,6 +749,8 @@ function CommentThreadNode({
               onStartEditingComment={onStartEditingComment}
               onSubmitEditingComment={onSubmitEditingComment}
               onCancelEditingComment={onCancelEditingComment}
+              renderCommentContent={renderCommentContent}
+              getCommentActions={getCommentActions}
               onChangeDraft={onChangeDraft}
             />
           ))}

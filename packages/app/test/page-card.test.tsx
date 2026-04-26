@@ -184,6 +184,24 @@ async function insertTextAtEnd(editor: Editor, text: string) {
   await flushReact();
 }
 
+async function typeTextAsBrowserInput(editor: Editor, text: string) {
+  for (const character of text) {
+    await act(async () => {
+      const { from, to } = editor.state.selection;
+      let handled = false;
+
+      editor.view.someProp("handleTextInput", (handler) => {
+        handled = handler(editor.view, from, to, character);
+        return handled;
+      });
+
+      expect(handled).toBe(true);
+    });
+  }
+
+  await flushReact();
+}
+
 function getEditable(container: HTMLElement) {
   const editable = container.querySelector(".ProseMirror");
   expect(editable).not.toBeNull();
@@ -472,6 +490,41 @@ describe("PageCard editor integration", () => {
     );
   });
 
+  it("suggesting mode groups sequential insertion keystrokes into one suggestion", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-suggesting-grouped-insertion-1",
+        title: "Doc Suggesting Grouped Insertion 1",
+        content: "Start-",
+      },
+      interactionMode: "suggesting",
+      selected: true,
+    });
+    const editor = rendered.getEditor();
+
+    vi.useFakeTimers();
+
+    await act(async () => {
+      const range = findTextRange(editor, "Start-");
+      expect(range).not.toBeNull();
+      editor.commands.focus();
+      editor.commands.setTextSelection(range?.to ?? editor.state.selection.to);
+    });
+    await typeTextAsBrowserInput(editor, "now");
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledWith(
+      "doc-suggesting-grouped-insertion-1",
+      expect.stringMatching(
+        /^Start-\{\+\+now\+\+\}\{id="s1" by="user" at="[^"]+"\}\n$/,
+      ),
+    );
+  });
+
   it("suggesting mode turns typed replacement into substitution markup", async () => {
     const rendered = await renderPageCard({
       page: {
@@ -501,6 +554,35 @@ describe("PageCard editor integration", () => {
 
     expect(rendered.onSave).toHaveBeenCalledWith(
       "doc-suggesting-2",
+      expect.stringMatching(
+        /^Use \{~~old~>new~~\}\{id="s1" by="user" at="[^"]+"\} text\n$/,
+      ),
+    );
+  });
+
+  it("suggesting mode groups sequential replacement keystrokes into one suggestion", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-suggesting-grouped-replacement-1",
+        title: "Doc Suggesting Grouped Replacement 1",
+        content: "Use old text",
+      },
+      interactionMode: "suggesting",
+      selected: true,
+    });
+    const editor = rendered.getEditor();
+
+    vi.useFakeTimers();
+    await selectText(editor, "old");
+    await typeTextAsBrowserInput(editor, "new");
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledWith(
+      "doc-suggesting-grouped-replacement-1",
       expect.stringMatching(
         /^Use \{~~old~>new~~\}\{id="s1" by="user" at="[^"]+"\} text\n$/,
       ),
@@ -924,6 +1006,53 @@ describe("PageCard editor integration", () => {
     expect(railText.split(commentText).length - 1).toBe(1);
   });
 
+  it("renders suggestions as comment-style author bubbles", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-suggestion-bubble-1",
+        title: "Doc Suggestion Bubble 1",
+        content:
+          'This sentence removes {--conversation--}{id="s1" by="AI" at="2026-04-25T23:55:00.000Z"}',
+      },
+      selected: true,
+    });
+
+    await flushAnimationFrame();
+
+    const suggestionThread = rendered.container.querySelector<HTMLElement>(
+      '[data-suggestion-thread-container="true"]',
+    );
+    const suggestionText = suggestionThread?.textContent ?? "";
+
+    expect(suggestionText).toContain("AI");
+    expect(suggestionText).toContain('Delete: "conversation"');
+    expect(suggestionText).not.toContain("Deletion");
+  });
+
+  it("renders suggestion replies through the regular comment tree", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-suggestion-tree-1",
+        title: "Doc Suggestion Tree 1",
+        content:
+          'This sentence includes {++clearer wording++}{id="s1" by="user" at="2026-04-25T23:55:00.000Z"}{>>Looks good.<<}{id="c1" by="user" at="2026-04-25T23:56:00.000Z" re="s1"}',
+      },
+      selected: true,
+    });
+
+    await flushAnimationFrame();
+
+    const suggestionThread = rendered.container.querySelector<HTMLElement>(
+      '[data-suggestion-thread-container="true"]',
+    );
+
+    expect(suggestionThread?.textContent).toContain(
+      'Insert: "clearer wording"',
+    );
+    expect(suggestionThread?.textContent).toContain("Looks good.");
+    expect(suggestionThread?.querySelector('[class*="w-px"]')).not.toBeNull();
+  });
+
   it("preserves suggestion color when comments are attached to suggestion text", async () => {
     const rendered = await renderPageCard({
       page: {
@@ -943,6 +1072,38 @@ describe("PageCard editor integration", () => {
     expect(suggestion?.textContent).toContain("clearer wording");
     expect(
       rendered.container.querySelector(".comment-decoration-on-critic-change"),
+    ).not.toBeNull();
+  });
+
+  it("activates a suggestion thread when the cursor is inside suggested text", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-suggestion-cursor-active-1",
+        title: "Doc Suggestion Cursor Active 1",
+        content:
+          'This sentence includes {++clearer wording++}{id="s1" by="user" at="2026-04-25T23:55:00.000Z"}{>>Looks good.<<}{id="c1" by="user" at="2026-04-25T23:56:00.000Z" re="s1"}',
+      },
+      selected: true,
+    });
+    const editor = rendered.getEditor();
+
+    await flushAnimationFrame();
+    const range = findTextRange(editor, "clearer wording");
+    expect(range).not.toBeNull();
+
+    await act(async () => {
+      editor.commands.focus();
+      editor.commands.setTextSelection((range?.from ?? 1) + 1);
+    });
+    await flushReact();
+    await flushReact();
+
+    const suggestionThread = rendered.container.querySelector<HTMLElement>(
+      '[data-suggestion-thread-container="true"]',
+    );
+    expect(suggestionThread?.classList.contains("-translate-x-2")).toBe(true);
+    expect(
+      rendered.container.querySelector(".critic-change-decoration-active"),
     ).not.toBeNull();
   });
 

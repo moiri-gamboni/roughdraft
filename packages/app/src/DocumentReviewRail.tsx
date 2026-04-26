@@ -1,6 +1,11 @@
 import { Check, Reply, X } from "lucide-react";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CommentEditorList } from "./CommentEditorList";
+import {
+  CommentEditorList,
+  type CommentActionDefinition,
+  type CommentActionsRenderContext,
+  type CommentContentRenderContext,
+} from "./CommentEditorList";
 import type {
   CriticChangeAttrs,
   CriticChangeKind,
@@ -54,12 +59,6 @@ interface DocumentReviewRailProps {
   onAutoFocusComment?: (commentId: string) => void;
 }
 
-function getSuggestionTypeLabel(kind: CriticChangeKind) {
-  if (kind === "addition") return "Insertion";
-  if (kind === "deletion") return "Deletion";
-  return "Replacement";
-}
-
 function getSuggestionPreview(suggestion: CriticChangeRailItem) {
   const oldText = suggestion.oldText.trim();
   const newText = suggestion.newText.trim();
@@ -70,8 +69,58 @@ function getSuggestionPreview(suggestion: CriticChangeRailItem) {
   return oldText || newText || "Changed text";
 }
 
-function getSuggestionAuthor(change: CriticChangeAttrs) {
-  return change.authorType === "ai" ? "AI" : change.authorId || "Me";
+function getSuggestionRootComment(
+  suggestion: CriticChangeRailItem,
+): CriticComment {
+  return {
+    id: suggestion.changeId,
+    content: getSuggestionPreview(suggestion),
+    createdAt: suggestion.change.createdAt,
+    authorType: suggestion.change.authorType,
+    authorId: suggestion.change.authorId,
+  };
+}
+
+function renderQuotedSuggestionText(text: string, fallback: string) {
+  return (
+    <span className="italic text-slate-600">"{text.trim() || fallback}"</span>
+  );
+}
+
+function SuggestionCommentContent({
+  suggestion,
+}: {
+  suggestion: CriticChangeRailItem;
+}) {
+  const oldText = suggestion.oldText.trim();
+  const newText = suggestion.newText.trim();
+
+  if (suggestion.kind === "addition") {
+    return (
+      <>
+        <span className="font-semibold text-slate-800">Insert:</span>{" "}
+        {renderQuotedSuggestionText(newText, "Inserted text")}
+      </>
+    );
+  }
+
+  if (suggestion.kind === "deletion") {
+    return (
+      <>
+        <span className="font-semibold text-slate-800">Delete:</span>{" "}
+        {renderQuotedSuggestionText(oldText, "Deleted text")}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <span className="font-semibold text-slate-800">Replace:</span>{" "}
+      {renderQuotedSuggestionText(oldText, "Original text")}{" "}
+      <span className="text-slate-500">with</span>{" "}
+      {renderQuotedSuggestionText(newText, "Changed text")}
+    </>
+  );
 }
 
 export function DocumentReviewRail({
@@ -333,10 +382,76 @@ export function DocumentReviewRail({
           const suggestion = layout.suggestion;
           const isSelected = selectedChangeId === suggestion.changeId;
           const isHovered = hoveredChangeId === suggestion.changeId;
-          const isExpanded = isSelected || suggestion.commentIds.length > 0;
           const suggestionComments = suggestion.commentIds
             .map((commentId) => comments.get(commentId))
             .filter((comment): comment is CriticComment => Boolean(comment));
+          const suggestionCommentIds = new Set(
+            suggestionComments.map((comment) => comment.id),
+          );
+          const normalizedSuggestionComments = suggestionComments.map(
+            (comment) =>
+              comment.parentCommentId === suggestion.changeId ||
+              (comment.parentCommentId &&
+                suggestionCommentIds.has(comment.parentCommentId))
+                ? comment
+                : {
+                    ...comment,
+                    parentCommentId: suggestion.changeId,
+                  },
+          );
+          const suggestionRootComment = getSuggestionRootComment(suggestion);
+          const suggestionThreadComments = [
+            suggestionRootComment,
+            ...normalizedSuggestionComments,
+          ];
+          const renderCommentContent = ({
+            comment,
+            defaultContent,
+          }: CommentContentRenderContext) =>
+            comment.id === suggestion.changeId ? (
+              <SuggestionCommentContent suggestion={suggestion} />
+            ) : (
+              defaultContent
+            );
+          const getCommentActions = ({
+            comment,
+            defaultActions,
+          }: CommentActionsRenderContext): CommentActionDefinition[] =>
+            comment.id === suggestion.changeId
+              ? [
+                  {
+                    key: "accept",
+                    label: "Accept suggestion",
+                    icon: <Check className="size-3.5" />,
+                    compact: true,
+                    onClick: (event) => {
+                      event.stopPropagation();
+                      onAcceptSuggestion(suggestion.changeId);
+                    },
+                  },
+                  {
+                    key: "reject",
+                    label: "Reject suggestion",
+                    tone: "danger",
+                    icon: <X className="size-3.5" />,
+                    compact: true,
+                    onClick: (event) => {
+                      event.stopPropagation();
+                      onRejectSuggestion(suggestion.changeId);
+                    },
+                  },
+                  {
+                    key: "reply",
+                    label: "Reply",
+                    icon: <Reply className="size-3.5" />,
+                    compact: true,
+                    onClick: (event) => {
+                      event.stopPropagation();
+                      onReplySuggestion(suggestion.changeId);
+                    },
+                  },
+                ]
+              : defaultActions;
 
           return (
             <div
@@ -344,7 +459,7 @@ export function DocumentReviewRail({
               ref={(node) => setItemRef(layout.key, node)}
               data-suggestion-thread-container="true"
               className={cn(
-                "absolute left-0 right-0 rounded-xl border border-transparent bg-transparent px-4 py-3 shadow-none transition-all duration-200 ease-out will-change-transform",
+                "absolute left-0 right-0 rounded-xl border border-transparent bg-transparent shadow-none transition-all duration-200 ease-out will-change-transform",
                 isSelected
                   ? "-translate-x-2 border-[#DFDFDC] bg-white shadow-[0_20px_48px_rgba(57,47,38,0.14)]"
                   : "",
@@ -359,73 +474,54 @@ export function DocumentReviewRail({
                 onFocusSuggestion(suggestion.changeId);
               }}
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-[11px] font-semibold tracking-[0.08em] text-stone-500 uppercase">
-                    {getSuggestionTypeLabel(suggestion.kind)}
-                  </div>
-                  <div className="mt-1 text-sm leading-5 text-slate-800">
-                    {getSuggestionPreview(suggestion)}
-                  </div>
-                  <div className="mt-1 truncate text-[11px] text-stone-400">
-                    {getSuggestionAuthor(suggestion.change)}
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    className="flex size-7 items-center justify-center rounded-full text-emerald-700 transition hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
-                    aria-label="Accept suggestion"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onAcceptSuggestion(suggestion.changeId);
-                    }}
-                  >
-                    <Check className="size-4" />
-                  </button>
-                  <button
-                    type="button"
-                    className="flex size-7 items-center justify-center rounded-full text-rose-700 transition hover:bg-rose-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
-                    aria-label="Reject suggestion"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onRejectSuggestion(suggestion.changeId);
-                    }}
-                  >
-                    <X className="size-4" />
-                  </button>
-                </div>
-              </div>
-              {isExpanded && suggestionComments.length > 0 ? (
-                <CommentEditorList
-                  comments={suggestionComments}
-                  variant="rail"
-                  className="mt-3 border-t border-slate-200/80 px-0 pt-3"
-                  selectedCommentId={selectedCommentId}
-                  hoveredCommentId={hoveredCommentId}
-                  onDeleteComment={onDeleteComment}
-                  onUpdateComment={onUpdateComment}
-                  onReplyComment={onReplyComment}
-                  onSelectComment={onSelectComment}
-                  onFocusComment={onFocusComment}
-                  onHoverComment={onHoverComment}
-                  pendingFocusCommentId={pendingFocusCommentId}
-                  onAutoFocusComment={onAutoFocusComment}
-                />
-              ) : null}
-              {isExpanded ? (
-                <button
-                  type="button"
-                  className="mt-3 inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-stone-500 transition hover:bg-[#DED8CE]/45 hover:text-stone-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
-                  onClick={(event) => {
-                    event.stopPropagation();
+              <CommentEditorList
+                comments={suggestionThreadComments}
+                variant="rail"
+                selectedCommentId={
+                  selectedCommentId ?? (isSelected ? suggestion.changeId : null)
+                }
+                hoveredCommentId={
+                  hoveredCommentId ?? (isHovered ? suggestion.changeId : null)
+                }
+                onDeleteComment={onDeleteComment}
+                onUpdateComment={onUpdateComment}
+                onReplyComment={(commentId) => {
+                  if (commentId === suggestion.changeId) {
                     onReplySuggestion(suggestion.changeId);
-                  }}
-                >
-                  <Reply className="size-3.5" />
-                  Reply
-                </button>
-              ) : null}
+                    return;
+                  }
+
+                  onReplyComment(commentId);
+                }}
+                onSelectComment={(commentId) => {
+                  if (commentId === suggestion.changeId) {
+                    onSelectSuggestion(suggestion.changeId);
+                    return;
+                  }
+
+                  onSelectComment(commentId);
+                }}
+                onFocusComment={(commentId) => {
+                  if (commentId === suggestion.changeId) {
+                    onFocusSuggestion(suggestion.changeId);
+                    return;
+                  }
+
+                  onFocusComment(commentId);
+                }}
+                onHoverComment={(commentId) => {
+                  if (commentId === suggestion.changeId) {
+                    onHoverSuggestion(suggestion.changeId);
+                    return;
+                  }
+
+                  onHoverComment(commentId);
+                }}
+                pendingFocusCommentId={pendingFocusCommentId}
+                onAutoFocusComment={onAutoFocusComment}
+                renderCommentContent={renderCommentContent}
+                getCommentActions={getCommentActions}
+              />
             </div>
           );
         })}

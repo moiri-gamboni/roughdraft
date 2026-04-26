@@ -525,11 +525,23 @@ function createCriticChangeHighlightDecorations(
 
     if (!isSelected && !isHovered) return;
 
+    const changeKind = node.marks.find(
+      (mark) =>
+        mark.type === changeMarkType &&
+        typeof mark.attrs.changeId === "string" &&
+        changeIds.includes(mark.attrs.changeId) &&
+        isCriticChangeKind(mark.attrs.kind),
+    )?.attrs.kind as CriticChangeKind | undefined;
     decorations.push(
       Decoration.inline(pos, pos + node.nodeSize, {
-        class: isSelected
-          ? "critic-change-decoration-active"
-          : "critic-change-decoration-hovered",
+        class: [
+          isSelected
+            ? "critic-change-decoration-active"
+            : "critic-change-decoration-hovered",
+          changeKind ? `critic-change-decoration-${changeKind}` : null,
+        ]
+          .filter(Boolean)
+          .join(" "),
       }),
     );
   });
