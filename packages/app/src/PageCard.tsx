@@ -491,6 +491,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
   const criticChangeFrameRef = useRef<number | null>(null);
   const interactionModeRef = useRef<DocumentInteractionMode>(interactionMode);
   const commentsRef = useRef<Map<string, CriticComment>>(new Map());
+  const suppressNextMarkdownUpdateRef = useRef(false);
   const lastFocusRequestKeyRef = useRef<string | null>(null);
   const selectedCommentIdRef = useRef<string | null>(null);
   const selectedChangeIdRef = useRef<string | null>(null);
@@ -718,6 +719,11 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
         },
       },
       onUpdate: ({ editor: currentEditor }) => {
+        if (suppressNextMarkdownUpdateRef.current) {
+          suppressNextMarkdownUpdateRef.current = false;
+          return;
+        }
+
         emitMarkdownChange(currentEditor.getJSON());
         refreshCriticChanges();
       },
@@ -961,19 +967,22 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     commentsRef.current = nextComments;
     setComments(nextComments);
 
+    suppressNextMarkdownUpdateRef.current = true;
     currentEditor
       .chain()
       .focus()
       .setCommentRef({ commentIds: [...existingIds, comment.id] })
       .run();
+    if (suppressNextMarkdownUpdateRef.current) {
+      suppressNextMarkdownUpdateRef.current = false;
+    }
 
     setSelectedCommentId(comment.id);
     setPendingFocusCommentId(comment.id);
-    emitMarkdownChange(currentEditor.getJSON(), nextComments);
     requestAnimationFrame(() => {
       measureLayout();
     });
-  }, [emitMarkdownChange, measureLayout]);
+  }, [measureLayout]);
 
   const handleSuggestDeletion = useCallback(() => {
     const currentEditor = editorRef.current;
@@ -1120,11 +1129,15 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
           existingComments: commentsRef.current.values(),
         },
       );
+      suppressNextMarkdownUpdateRef.current = true;
       const nextAnchorCommentIds = addCommentIdsToAnchor(
         currentEditor,
         commentId,
         [comment.id],
       );
+      if (suppressNextMarkdownUpdateRef.current) {
+        suppressNextMarkdownUpdateRef.current = false;
+      }
       if (!nextAnchorCommentIds) return;
 
       const nextComments = new Map(commentsRef.current);
@@ -1134,12 +1147,11 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
       setSelectedCommentId(comment.id);
       setHoveredCommentId(null);
       setPendingFocusCommentId(comment.id);
-      emitMarkdownChange(currentEditor.getJSON(), nextComments);
       requestAnimationFrame(() => {
         measureLayout();
       });
     },
-    [emitMarkdownChange, measureLayout],
+    [measureLayout],
   );
 
   const removeSuggestionComments = useCallback(
@@ -1217,7 +1229,16 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
           existingComments: commentsRef.current.values(),
         },
       );
-      if (!addCommentIdsToCriticChange(currentEditor, changeId, [comment.id])) {
+      suppressNextMarkdownUpdateRef.current = true;
+      const didAddCommentId = addCommentIdsToCriticChange(
+        currentEditor,
+        changeId,
+        [comment.id],
+      );
+      if (suppressNextMarkdownUpdateRef.current) {
+        suppressNextMarkdownUpdateRef.current = false;
+      }
+      if (!didAddCommentId) {
         return;
       }
 
@@ -1229,13 +1250,12 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
       setSelectedCommentId(comment.id);
       setHoveredCommentId(null);
       setPendingFocusCommentId(comment.id);
-      emitMarkdownChange(currentEditor.getJSON(), nextComments);
       refreshCriticChanges();
       requestAnimationFrame(() => {
         measureLayout();
       });
     },
-    [emitMarkdownChange, measureLayout, refreshCriticChanges],
+    [measureLayout, refreshCriticChanges],
   );
 
   const deleteComment = useCallback(
@@ -1653,6 +1673,12 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
       return;
     }
 
+    if (markdown === page.content) {
+      lastAcceptedMarkdownRef.current = page.content;
+      reportDirtyState(false);
+      return;
+    }
+
     acceptMarkdown(page.content);
   }, [acceptMarkdown, forceResetKey, markdown, page.content, reportDirtyState]);
 
@@ -1706,7 +1732,9 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
   }
 
   const effectiveRichTextSourceMarkdown =
-    !localDirtyRef.current && !recentMarkdownRef.current.has(page.content)
+    !localDirtyRef.current &&
+    !recentMarkdownRef.current.has(page.content) &&
+    markdown !== page.content
       ? page.content
       : richTextSourceMarkdown;
 

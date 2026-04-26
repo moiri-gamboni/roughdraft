@@ -139,6 +139,43 @@ async function selectText(editor: Editor, text: string) {
   await flushReact();
 }
 
+async function addCommentWithShortcut() {
+  await flushAnimationFrame();
+  const commentButton = [...document.querySelectorAll("button")].find(
+    (button) =>
+      button.getAttribute("aria-label") === "Comment" ||
+      button.textContent?.includes("Comment"),
+  );
+  if (commentButton) {
+    await act(async () => {
+      commentButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await flushReact();
+    await flushReact();
+    return;
+  }
+
+  const isApplePlatform = /mac|iphone|ipad|ipod/i.test(navigator.platform);
+
+  await act(async () => {
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "m",
+        code: "KeyM",
+        altKey: true,
+        ctrlKey: !isApplePlatform,
+        metaKey: isApplePlatform,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await Promise.resolve();
+  });
+  await flushReact();
+  await flushReact();
+}
+
 async function insertTextAtEnd(editor: Editor, text: string) {
   await act(async () => {
     editor.chain().focus("end").insertContent(text).run();
@@ -629,6 +666,52 @@ describe("PageCard editor integration", () => {
     ).toContain("Comment body");
   });
 
+  it("same-content disk echoes do not recreate the rich text editor", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-same-content-echo-1",
+        title: "Doc Same Content Echo 1",
+        content: "Start",
+      },
+      selected: true,
+    });
+
+    vi.useFakeTimers();
+
+    await insertTextAtEnd(rendered.getEditor(), " updated");
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    const savedMarkdown = rendered.onSave.mock.calls[0]?.[1];
+    expect(typeof savedMarkdown).toBe("string");
+
+    const editorAfterSave = rendered.getEditor();
+    const editableAfterSave = getEditable(rendered.container);
+
+    await rendered.rerender({
+      page: {
+        id: "doc-same-content-echo-1",
+        title: "Doc Same Content Echo 1",
+        content: savedMarkdown as string,
+      },
+    });
+    await rendered.rerender({
+      page: {
+        id: "doc-same-content-echo-1",
+        title: "Doc Same Content Echo 1",
+        content: savedMarkdown as string,
+        version: "same-content-new-version",
+      },
+    });
+
+    expect(rendered.getEditor()).toBe(editorAfterSave);
+    expect(getEditable(rendered.container)).toBe(editableAfterSave);
+    expect(rendered.getEditor().getText()).toContain("Start updated");
+  });
+
   it("comment selection still updates fallback UI", async () => {
     const rendered = await renderPageCard({
       page: {
@@ -646,6 +729,65 @@ describe("PageCard editor integration", () => {
         ?.textContent,
     ).toContain("Comment body");
     expect(rendered.container.textContent).toContain("Me");
+  });
+
+  it("does not autosave a newly-created empty comment before it is submitted", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-comment-empty-draft-1",
+        title: "Doc Comment Empty Draft 1",
+        content: "Comment target text",
+      },
+      selected: true,
+    });
+
+    await selectText(rendered.getEditor(), "target");
+    await addCommentWithShortcut();
+
+    vi.useFakeTimers();
+
+    const commentEditor = rendered.container.querySelector<HTMLTextAreaElement>(
+      'textarea[placeholder="Add your comment"]',
+    );
+    expect(commentEditor).not.toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).not.toHaveBeenCalled();
+
+    await act(async () => {
+      if (!commentEditor) return;
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(commentEditor, "Draft comment");
+      commentEditor.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    });
+
+    const saveButton = [...rendered.container.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("Save"),
+    );
+    expect(saveButton).not.toBeUndefined();
+
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledWith(
+      "doc-comment-empty-draft-1",
+      expect.stringMatching(
+        /\{==target==\}\{>>Draft comment<<\}\{id="c1" by="user" at="[^"]+"\}/,
+      ),
+    );
   });
 
   it("opens a reply to the root comment when r is pressed in a focused thread", async () => {
@@ -691,12 +833,7 @@ describe("PageCard editor integration", () => {
       await Promise.resolve();
     });
 
-    expect(rendered.onSave).toHaveBeenCalledWith(
-      "doc-comment-reply-shortcut-1",
-      expect.stringMatching(
-        /\{>><<\}\{id="c1" by="user" at="[^"]+" re="root"\}/,
-      ),
-    );
+    expect(rendered.onSave).not.toHaveBeenCalled();
   });
 
   it("renders suggestion replies only inside the suggestion card", async () => {
