@@ -1,6 +1,7 @@
 import { Bot, Check, Pencil, Reply, Trash2, User, X } from "lucide-react";
 import {
   type MouseEvent,
+  type KeyboardEvent,
   type MutableRefObject,
   type ReactNode,
   useEffect,
@@ -39,6 +40,26 @@ interface CommentEditorListProps {
   onAutoFocusComment?: (commentId: string) => void;
 }
 
+function isEditableShortcutTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+
+  return Boolean(
+    target.closest(
+      'input, textarea, select, [contenteditable="true"], [role="textbox"]',
+    ),
+  );
+}
+
+function isReplyShortcut(event: KeyboardEvent) {
+  return (
+    event.key.toLowerCase() === "r" &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey
+  );
+}
+
 export function CommentEditorList({
   comments,
   variant = "banner",
@@ -66,6 +87,24 @@ export function CommentEditorList({
   const hasActiveSelection =
     !!selectedCommentId &&
     comments.some((comment) => comment.id === selectedCommentId);
+  const handleKeyDownCapture = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!interactive || !onReplyComment) return;
+    if (!isReplyShortcut(event)) return;
+    if (isEditableShortcutTarget(event.target)) return;
+
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+
+    const rootThread = target.closest<HTMLElement>(
+      "[data-comment-thread-root-id]",
+    );
+    const rootCommentId = rootThread?.dataset.commentThreadRootId;
+    if (!rootCommentId) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    onReplyComment(rootCommentId);
+  };
 
   useEffect(() => {
     const validCommentIds = new Set(comments.map((comment) => comment.id));
@@ -197,6 +236,7 @@ export function CommentEditorList({
           : "space-y-1.5 px-4 py-3",
         className,
       )}
+      onKeyDownCapture={handleKeyDownCapture}
     >
       {threads.map((thread, index) => (
         <CommentThreadNode
@@ -375,8 +415,10 @@ function CommentThreadNode({
 
   return (
     <div
+      data-comment-thread-root-id={depth === 0 ? comment.id : undefined}
+      tabIndex={interactive && depth === 0 ? 0 : undefined}
       className={cn(
-        "relative transition-all duration-200 ease-out",
+        "relative transition-all duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300",
         variant === "rail" &&
           depth === 0 &&
           (index > 0 ? "border-t border-slate-200/80 pt-3" : "pt-0"),

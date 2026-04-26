@@ -648,6 +648,57 @@ describe("PageCard editor integration", () => {
     expect(rendered.container.textContent).toContain("Me");
   });
 
+  it("opens a reply to the root comment when r is pressed in a focused thread", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-comment-reply-shortcut-1",
+        title: "Doc Comment Reply Shortcut 1",
+        content:
+          '{==alpha==}{>>Root comment<<}{id="root" by="user" at="2026-04-25T23:56:00.000Z"}{>>Nested reply<<}{id="child" by="user" at="2026-04-25T23:57:00.000Z" re="root"}\n\nParagraph',
+      },
+      selected: true,
+    });
+
+    await selectText(rendered.getEditor(), "alpha");
+
+    const editButtons = rendered.container.querySelectorAll(
+      'button[aria-label="Edit"]',
+    );
+    expect(editButtons.length).toBeGreaterThanOrEqual(2);
+    const nestedEditButton = editButtons[1] as HTMLButtonElement;
+
+    vi.useFakeTimers();
+    await act(async () => {
+      nestedEditButton.focus();
+      nestedEditButton.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "r",
+          bubbles: true,
+        }),
+      );
+      await Promise.resolve();
+    });
+    await flushReact();
+    await flushReact();
+
+    const replyEditor = rendered.container.querySelector<HTMLTextAreaElement>(
+      'textarea[placeholder="Write a reply"]',
+    );
+    expect(replyEditor).not.toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledWith(
+      "doc-comment-reply-shortcut-1",
+      expect.stringMatching(
+        /\{>><<\}\{id="c1" by="user" at="[^"]+" re="root"\}/,
+      ),
+    );
+  });
+
   it("renders suggestion replies only inside the suggestion card", async () => {
     const commentText = "Looks good as an inserted phrase.";
     const rendered = await renderPageCard({
