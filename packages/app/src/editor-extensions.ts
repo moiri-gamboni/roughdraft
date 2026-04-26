@@ -24,7 +24,27 @@ declare module "@tiptap/core" {
       removeCommentId: (commentId: string) => ReturnType;
       unsetCommentRef: () => ReturnType;
     };
+    criticChange: {
+      setCriticChange: (attributes: CriticChangeAttrs) => ReturnType;
+      unsetCriticChange: () => ReturnType;
+      acceptCriticChange: (changeId: string) => ReturnType;
+      rejectCriticChange: (changeId: string) => ReturnType;
+    };
   }
+}
+
+export type CriticChangeKind =
+  | "addition"
+  | "deletion"
+  | "substitution-old"
+  | "substitution-new";
+
+export interface CriticChangeAttrs {
+  kind: CriticChangeKind;
+  changeId: string;
+  authorType?: "user" | "ai";
+  authorId?: string | null;
+  createdAt: string;
 }
 
 const CommentRef = Mark.create({
@@ -126,6 +146,215 @@ const CommentRef = Mark.create({
   },
 });
 
+function isCriticChangeKind(value: unknown): value is CriticChangeKind {
+  return (
+    value === "addition" ||
+    value === "deletion" ||
+    value === "substitution-old" ||
+    value === "substitution-new"
+  );
+}
+
+function readCriticChangeAttrs(element: HTMLElement): CriticChangeAttrs | null {
+  const kind = element.getAttribute("data-critic-change-kind");
+  const changeId = element.getAttribute("data-critic-change-id");
+  const createdAt = element.getAttribute("data-critic-change-at");
+
+  if (!isCriticChangeKind(kind) || !changeId || !createdAt) {
+    return null;
+  }
+
+  const rawBy = element.getAttribute("data-critic-change-by") || "user";
+  const authorType = rawBy.toUpperCase() === "AI" ? "ai" : "user";
+
+  return {
+    kind,
+    changeId,
+    authorType,
+    authorId: authorType === "ai" ? null : rawBy,
+    createdAt,
+  };
+}
+
+function collectCriticChangeRanges(doc: ProseMirrorNode, changeId: string) {
+  const markType = doc.type.schema.marks.criticChange;
+  const ranges: Array<{
+    from: number;
+    to: number;
+    kind: CriticChangeKind;
+    mark: ProseMirrorMark;
+  }> = [];
+
+  if (!markType) return ranges;
+
+  doc.descendants((node, pos) => {
+    if (!node.isText) return;
+
+    const mark = node.marks.find(
+      (candidate) =>
+        candidate.type === markType &&
+        candidate.attrs.changeId === changeId &&
+        isCriticChangeKind(candidate.attrs.kind),
+    );
+
+    if (!mark) return;
+
+    const kind = mark.attrs.kind as CriticChangeKind;
+    const previous = ranges[ranges.length - 1];
+
+    if (
+      previous &&
+      previous.to === pos &&
+      previous.kind === kind &&
+      previous.mark.eq(mark)
+    ) {
+      previous.to = pos + node.nodeSize;
+      return;
+    }
+
+    ranges.push({
+      from: pos,
+      to: pos + node.nodeSize,
+      kind,
+      mark,
+    });
+  });
+
+  return ranges;
+}
+
+const CriticChange = Mark.create({
+  name: "criticChange",
+  priority: 1090,
+  inclusive: false,
+  spanning: true,
+
+  addAttributes() {
+    return {
+      kind: {
+        default: "addition",
+        parseHTML: (element) =>
+          readCriticChangeAttrs(element as HTMLElement)?.kind ?? "addition",
+        renderHTML: (attributes) => ({
+          "data-critic-change-kind": attributes.kind,
+        }),
+      },
+      changeId: {
+        default: null,
+        parseHTML: (element) =>
+          readCriticChangeAttrs(element as HTMLElement)?.changeId ?? null,
+        renderHTML: (attributes) =>
+          attributes.changeId
+            ? { "data-critic-change-id": attributes.changeId }
+            : {},
+      },
+      authorType: {
+        default: "user",
+        parseHTML: (element) =>
+          readCriticChangeAttrs(element as HTMLElement)?.authorType ?? "user",
+        renderHTML: () => ({}),
+      },
+      authorId: {
+        default: "user",
+        parseHTML: (element) =>
+          readCriticChangeAttrs(element as HTMLElement)?.authorId ?? "user",
+        renderHTML: (attributes) => ({
+          "data-critic-change-by":
+            attributes.authorType === "ai"
+              ? "AI"
+              : attributes.authorId || "user",
+        }),
+      },
+      createdAt: {
+        default: null,
+        parseHTML: (element) =>
+          readCriticChangeAttrs(element as HTMLElement)?.createdAt ?? null,
+        renderHTML: (attributes) =>
+          attributes.createdAt
+            ? { "data-critic-change-at": attributes.createdAt }
+            : {},
+      },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: "span[data-critic-change-kind]" }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return [
+      "span",
+      mergeAttributes(HTMLAttributes, {
+        class: `critic-change critic-change-${HTMLAttributes["data-critic-change-kind"]}`,
+      }),
+      0,
+    ];
+  },
+
+  addCommands() {
+    return {
+      setCriticChange:
+        (attributes) =>
+        ({ commands }) =>
+          commands.setMark(this.name, attributes),
+      unsetCriticChange:
+        () =>
+        ({ commands }) =>
+          commands.unsetMark(this.name),
+      acceptCriticChange:
+        (changeId) =>
+        ({ state, dispatch }) => {
+          const markType = state.schema.marks.criticChange;
+          if (!markType) return false;
+
+          const ranges = collectCriticChangeRanges(state.doc, changeId);
+          if (ranges.length === 0) return false;
+
+          const tr = state.tr;
+
+          for (const range of [...ranges].reverse()) {
+            if (
+              range.kind === "deletion" ||
+              range.kind === "substitution-old"
+            ) {
+              tr.delete(range.from, range.to);
+            } else {
+              tr.removeMark(range.from, range.to, markType);
+            }
+          }
+
+          if (dispatch) dispatch(tr);
+          return true;
+        },
+      rejectCriticChange:
+        (changeId) =>
+        ({ state, dispatch }) => {
+          const markType = state.schema.marks.criticChange;
+          if (!markType) return false;
+
+          const ranges = collectCriticChangeRanges(state.doc, changeId);
+          if (ranges.length === 0) return false;
+
+          const tr = state.tr;
+
+          for (const range of [...ranges].reverse()) {
+            if (
+              range.kind === "addition" ||
+              range.kind === "substitution-new"
+            ) {
+              tr.delete(range.from, range.to);
+            } else {
+              tr.removeMark(range.from, range.to, markType);
+            }
+          }
+
+          if (dispatch) dispatch(tr);
+          return true;
+        },
+    };
+  },
+});
+
 interface CommentHighlightMeta {
   selectedCommentId: string | null;
   hoveredCommentId: string | null;
@@ -135,8 +364,19 @@ interface CommentHighlightPluginState extends CommentHighlightMeta {
   decorations: DecorationSet;
 }
 
+interface CriticChangeHighlightMeta {
+  selectedChangeId: string | null;
+  hoveredChangeId: string | null;
+}
+
+interface CriticChangeHighlightPluginState extends CriticChangeHighlightMeta {
+  decorations: DecorationSet;
+}
+
 export const commentHighlightPluginKey =
   new PluginKey<CommentHighlightPluginState>("commentHighlight");
+export const criticChangeHighlightPluginKey =
+  new PluginKey<CriticChangeHighlightPluginState>("criticChangeHighlight");
 
 function createCommentHighlightDecorations(
   doc: ProseMirrorNode,
@@ -144,6 +384,7 @@ function createCommentHighlightDecorations(
   hoveredCommentId: string | null,
 ) {
   const commentMarkType = doc.type.schema.marks.commentRef;
+  const changeMarkType = doc.type.schema.marks.criticChange;
   const decorations: Decoration[] = [];
 
   if (!commentMarkType) {
@@ -175,6 +416,13 @@ function createCommentHighlightDecorations(
       classNames.push("comment-decoration-active");
     } else if (isHovered) {
       classNames.push("comment-decoration-hovered");
+    }
+
+    if (
+      changeMarkType &&
+      node.marks.some((mark) => mark.type === changeMarkType)
+    ) {
+      classNames.push("comment-decoration-on-critic-change");
     }
 
     decorations.push(
@@ -236,6 +484,107 @@ const CommentHighlight = Extension.create({
         props: {
           decorations: (state) =>
             commentHighlightPluginKey.getState(state)?.decorations ?? null,
+        },
+      }),
+    ];
+  },
+});
+
+function createCriticChangeHighlightDecorations(
+  doc: ProseMirrorNode,
+  selectedChangeId: string | null,
+  hoveredChangeId: string | null,
+) {
+  const changeMarkType = doc.type.schema.marks.criticChange;
+  const decorations: Decoration[] = [];
+
+  if (!changeMarkType) {
+    return DecorationSet.create(doc, decorations);
+  }
+
+  doc.descendants((node: ProseMirrorNode, pos: number) => {
+    if (!node.isText) return;
+
+    const changeIds = [
+      ...new Set(
+        node.marks.flatMap((mark: ProseMirrorMark) =>
+          mark.type === changeMarkType &&
+          typeof mark.attrs.changeId === "string"
+            ? [mark.attrs.changeId]
+            : [],
+        ),
+      ),
+    ];
+
+    if (changeIds.length === 0) return;
+
+    const isSelected =
+      !!selectedChangeId && changeIds.includes(selectedChangeId);
+    const isHovered = !!hoveredChangeId && changeIds.includes(hoveredChangeId);
+
+    if (!isSelected && !isHovered) return;
+
+    decorations.push(
+      Decoration.inline(pos, pos + node.nodeSize, {
+        class: isSelected
+          ? "critic-change-decoration-active"
+          : "critic-change-decoration-hovered",
+      }),
+    );
+  });
+
+  return DecorationSet.create(doc, decorations);
+}
+
+const CriticChangeHighlight = Extension.create({
+  name: "criticChangeHighlight",
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin<CriticChangeHighlightPluginState>({
+        key: criticChangeHighlightPluginKey,
+        state: {
+          init: (_, state) => ({
+            selectedChangeId: null,
+            hoveredChangeId: null,
+            decorations: createCriticChangeHighlightDecorations(
+              state.doc,
+              null,
+              null,
+            ),
+          }),
+          apply: (tr, pluginState) => {
+            const meta = tr.getMeta(criticChangeHighlightPluginKey) as
+              | CriticChangeHighlightMeta
+              | undefined;
+
+            if (!meta && !tr.docChanged) {
+              return pluginState;
+            }
+
+            const selectedChangeId =
+              meta !== undefined
+                ? meta.selectedChangeId
+                : pluginState.selectedChangeId;
+            const hoveredChangeId =
+              meta !== undefined
+                ? meta.hoveredChangeId
+                : pluginState.hoveredChangeId;
+
+            return {
+              selectedChangeId,
+              hoveredChangeId,
+              decorations: createCriticChangeHighlightDecorations(
+                tr.doc,
+                selectedChangeId,
+                hoveredChangeId,
+              ),
+            };
+          },
+        },
+        props: {
+          decorations: (state) =>
+            criticChangeHighlightPluginKey.getState(state)?.decorations ?? null,
         },
       }),
     ];
@@ -307,7 +656,9 @@ export function createEditorExtensions(placeholder: string) {
       nested: true,
     }),
     CommentRef,
+    CriticChange,
     CommentHighlight,
+    CriticChangeHighlight,
     MarkdownImage.configure({
       allowBase64: true,
       inline: false,

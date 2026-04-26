@@ -6,6 +6,7 @@ import {
   getRootThreadIdForCommentId,
   groupCommentAnchorMeasurements,
   normalizeCommentMeasurement,
+  resolveAnchoredRailLayouts,
   resolveCommentRailLayouts,
   resolveCommentThreadRailLayouts,
 } from "../src/document-comments";
@@ -360,6 +361,62 @@ describe("document comment layout helpers", () => {
         key: "c3",
         railTop: 314,
         railBottom: 394,
+      },
+    ]);
+  });
+
+  it("pins any selected rail item to its anchor", () => {
+    const layouts = resolveAnchoredRailLayouts(
+      [
+        {
+          key: "comment-1",
+          anchorTop: 100,
+          anchorBottom: 114,
+          type: "comment",
+        },
+        {
+          key: "suggestion-1",
+          anchorTop: 140,
+          anchorBottom: 154,
+          type: "suggestion",
+        },
+        {
+          key: "comment-2",
+          anchorTop: 190,
+          anchorBottom: 204,
+          type: "comment",
+        },
+      ],
+      {
+        "comment-1": 90,
+        "suggestion-1": 120,
+        "comment-2": 70,
+      },
+      "suggestion-1",
+      16,
+    );
+
+    expect(
+      layouts.map(({ key, railTop, railBottom }) => ({
+        key,
+        railTop,
+        railBottom,
+      })),
+    ).toEqual([
+      {
+        key: "comment-1",
+        railTop: 34,
+        railBottom: 124,
+      },
+      {
+        key: "suggestion-1",
+        railTop: 140,
+        railBottom: 260,
+      },
+      {
+        key: "comment-2",
+        railTop: 276,
+        railBottom: 346,
       },
     ]);
   });

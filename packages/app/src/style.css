@@ -115,12 +115,45 @@
     background-color: #ffd000;
   }
 
+  .tiptap .comment-decoration.comment-decoration-on-critic-change {
+    background-color: transparent;
+  }
+
+  .tiptap .critic-change {
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+
+  .tiptap .critic-change-addition,
+  .tiptap .critic-change-substitution-new {
+    @apply rounded-sm px-0.5 text-emerald-950;
+    background-color: rgb(209 250 229 / 0.9);
+    text-decoration: underline;
+    text-decoration-color: rgb(16 185 129 / 0.75);
+    text-underline-offset: 0.16em;
+  }
+
+  .tiptap .critic-change-deletion,
+  .tiptap .critic-change-substitution-old {
+    @apply rounded-sm px-0.5 text-rose-950;
+    background-color: rgb(255 228 230 / 0.95);
+    text-decoration: line-through;
+    text-decoration-color: rgb(225 29 72 / 0.75);
+  }
+
+  .tiptap .critic-change-decoration-hovered,
+  .tiptap .critic-change-decoration-active {
+    @apply ring-2 ring-emerald-300/80;
+    border-radius: 0.2rem;
+  }
+
   .tiptap code {
     @apply rounded bg-slate-100 px-1.5 py-0.5 text-[0.9em] text-slate-900;
   }
 
   .tiptap .comment-decoration code,
-  .tiptap .comment-anchor code {
+  .tiptap .comment-anchor code,
+  .tiptap .critic-change code {
     @apply bg-transparent;
     box-shadow: inset 0 0 0 1px rgb(15 23 42 / 12%);
   }

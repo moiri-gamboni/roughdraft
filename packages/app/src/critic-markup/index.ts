@@ -8,7 +8,11 @@ import {
   type Tokens,
 } from "marked";
 import type TurndownService from "turndown";
-import { createEditorExtensions } from "../editor-extensions";
+import {
+  createEditorExtensions,
+  type CriticChangeAttrs,
+  type CriticChangeKind,
+} from "../editor-extensions";
 import {
   createMarkedRenderer,
   createTurndownService,
@@ -29,6 +33,8 @@ export interface CriticCommentThread {
   replies: CriticCommentThread[];
 }
 
+export type { CriticChangeAttrs, CriticChangeKind };
+
 interface CriticCommentToken {
   type: "criticCommentAnchor";
   raw: string;
@@ -36,10 +42,25 @@ interface CriticCommentToken {
   tokens: Token[];
 }
 
+interface CriticChangeToken {
+  type: "criticChange";
+  raw: string;
+  change: CriticChangeAttrs;
+  commentIds: string[];
+  tokens?: Token[];
+  oldTokens?: Token[];
+  newTokens?: Token[];
+}
+
 const extensions = createEditorExtensions("");
 const criticCommentAnchorPattern = /^\{==([\s\S]+?)==\}/;
 const criticCommentBlockPattern =
   /^\{>>([\s\S]*?)<<\}(?:(\{@([\s\S]+?)@\})|(\{(?:\s*[A-Za-z][A-Za-z0-9_-]*="(?:\\[\s\S]|[^"\\])*")+\s*\}))?/;
+const criticAdditionPattern = /^\{\+\+([\s\S]+?)\+\+\}/;
+const criticDeletionPattern = /^\{--([\s\S]+?)--\}/;
+const criticSubstitutionPattern = /^\{~~([\s\S]+?)~>([\s\S]+?)~~\}/;
+const attributeMetadataBlockPattern =
+  /^\{(?:\s*[A-Za-z][A-Za-z0-9_-]*="(?:\\[\s\S]|[^"\\])*")+\s*\}/;
 const metadataAttributePattern =
   /([A-Za-z][A-Za-z0-9_-]*)="((?:\\[\s\S]|[^"\\])*)"/g;
 
@@ -136,6 +157,16 @@ function serializeMetadata(comment: CriticComment): string {
     .join(" ")}}`;
 }
 
+function serializeChangeMetadata(change: CriticChangeAttrs): string {
+  return serializeMetadata({
+    id: change.changeId,
+    content: "",
+    createdAt: change.createdAt,
+    authorType: change.authorType,
+    authorId: change.authorId,
+  });
+}
+
 export function createNextCommentId(
   existingComments: Iterable<Pick<CriticComment, "id">>,
 ): string {
@@ -154,6 +185,24 @@ export function createNextCommentId(
   return `c${maxId + 1}`;
 }
 
+export function createNextChangeId(
+  existingChanges: Iterable<Pick<CriticChangeAttrs, "changeId">>,
+): string {
+  let maxId = 0;
+
+  for (const change of existingChanges) {
+    const match = change.changeId.match(/^s(\d+)$/);
+    if (!match) continue;
+
+    const parsed = Number.parseInt(match[1] || "0", 10);
+    if (parsed > maxId) {
+      maxId = parsed;
+    }
+  }
+
+  return `s${maxId + 1}`;
+}
+
 function createCommentWithContext(
   partial?: Partial<CriticComment>,
   existingComments: Iterable<Pick<CriticComment, "id">> = [],
@@ -167,6 +216,35 @@ function createCommentWithContext(
     authorType,
     authorId: partial?.authorId ?? (authorType === "ai" ? null : "user"),
     parentCommentId: partial?.parentCommentId ?? null,
+  };
+}
+
+function createChangeWithContext(
+  kind: CriticChangeKind,
+  partial?: Partial<CriticChangeAttrs>,
+  existingChanges: Iterable<Pick<CriticChangeAttrs, "changeId">> = [],
+): CriticChangeAttrs {
+  const authorType = partial?.authorType ?? "user";
+
+  return {
+    kind,
+    changeId: partial?.changeId ?? createNextChangeId(existingChanges),
+    createdAt: partial?.createdAt ?? new Date().toISOString(),
+    authorType,
+    authorId: partial?.authorId ?? (authorType === "ai" ? null : "user"),
+  };
+}
+
+function parseChangeMetadata(
+  metadataText?: string,
+): Partial<CriticChangeAttrs> {
+  const parsed = parseAttributeMetadata(metadataText);
+
+  return {
+    changeId: parsed.id,
+    createdAt: parsed.createdAt,
+    authorType: parsed.authorType,
+    authorId: parsed.authorId,
   };
 }
 
@@ -236,6 +314,20 @@ function getOrderedAnchorComments(
     .filter((comment): comment is CriticComment => Boolean(comment));
 
   return flattenCommentThreads(buildCommentThreads(visibleComments));
+}
+
+function serializeCommentBlocks(
+  commentIds: string[],
+  comments: ReadonlyMap<string, CriticComment>,
+): string {
+  const orderedComments = getOrderedAnchorComments(commentIds, comments);
+  let result = "";
+
+  for (const comment of orderedComments) {
+    result += `{>>${comment.content}<<}${serializeMetadata(comment)}`;
+  }
+
+  return result;
 }
 
 export function getCommentDescendantIds(
@@ -325,6 +417,179 @@ function tokenizeCriticCommentAnchor(
   };
 }
 
+function getTrailingAttributeMetadata(src: string, offset: number) {
+  const match = src.slice(offset).match(attributeMetadataBlockPattern);
+
+  if (!match) {
+    return {
+      metadataText: undefined,
+      raw: "",
+    };
+  }
+
+  return {
+    metadataText: match[0],
+    raw: match[0],
+  };
+}
+
+function tokenizeCriticCommentBlocks(
+  src: string,
+  offset: number,
+  existingComments: Iterable<Pick<CriticComment, "id">>,
+) {
+  let raw = "";
+  let nextOffset = offset;
+  const parsedComments: CriticComment[] = [];
+
+  while (nextOffset < src.length) {
+    const nextMatch = src.slice(nextOffset).match(criticCommentBlockPattern);
+    if (!nextMatch) break;
+
+    const [, commentText, , legacyMetadataText, attributeMetadataText] =
+      nextMatch;
+    const comment = createCommentWithContext(
+      {
+        ...parseMetadata(legacyMetadataText, attributeMetadataText),
+        content: commentText,
+      },
+      [...existingComments, ...parsedComments],
+    );
+    parsedComments.push(comment);
+    raw += nextMatch[0];
+    nextOffset += nextMatch[0].length;
+  }
+
+  return {
+    raw,
+    comments: parsedComments,
+  };
+}
+
+function tokenizeCriticChange(
+  lexer: TokenizerThis["lexer"],
+  src: string,
+  existingChanges: Iterable<Pick<CriticChangeAttrs, "changeId">>,
+  existingComments: Iterable<Pick<CriticComment, "id">>,
+):
+  | {
+      token: CriticChangeToken;
+      comments: CriticComment[];
+    }
+  | undefined {
+  const additionMatch = src.match(criticAdditionPattern);
+
+  if (additionMatch) {
+    const [, text] = additionMatch;
+    const metadata = getTrailingAttributeMetadata(src, additionMatch[0].length);
+    const trailingComments = tokenizeCriticCommentBlocks(
+      src,
+      additionMatch[0].length + metadata.raw.length,
+      existingComments,
+    );
+    const change = createChangeWithContext(
+      "addition",
+      parseChangeMetadata(metadata.metadataText),
+      existingChanges,
+    );
+
+    return {
+      token: {
+        type: "criticChange",
+        raw: additionMatch[0] + metadata.raw + trailingComments.raw,
+        change,
+        commentIds: trailingComments.comments.map((comment) => comment.id),
+        tokens: lexer.inlineTokens(text),
+      },
+      comments: trailingComments.comments,
+    };
+  }
+
+  const deletionMatch = src.match(criticDeletionPattern);
+
+  if (deletionMatch) {
+    const [, text] = deletionMatch;
+    const metadata = getTrailingAttributeMetadata(src, deletionMatch[0].length);
+    const trailingComments = tokenizeCriticCommentBlocks(
+      src,
+      deletionMatch[0].length + metadata.raw.length,
+      existingComments,
+    );
+    const change = createChangeWithContext(
+      "deletion",
+      parseChangeMetadata(metadata.metadataText),
+      existingChanges,
+    );
+
+    return {
+      token: {
+        type: "criticChange",
+        raw: deletionMatch[0] + metadata.raw + trailingComments.raw,
+        change,
+        commentIds: trailingComments.comments.map((comment) => comment.id),
+        tokens: lexer.inlineTokens(text),
+      },
+      comments: trailingComments.comments,
+    };
+  }
+
+  const substitutionMatch = src.match(criticSubstitutionPattern);
+
+  if (substitutionMatch) {
+    const [, oldText, newText] = substitutionMatch;
+    const metadata = getTrailingAttributeMetadata(
+      src,
+      substitutionMatch[0].length,
+    );
+    const trailingComments = tokenizeCriticCommentBlocks(
+      src,
+      substitutionMatch[0].length + metadata.raw.length,
+      existingComments,
+    );
+    const change = createChangeWithContext(
+      "substitution-old",
+      parseChangeMetadata(metadata.metadataText),
+      existingChanges,
+    );
+
+    return {
+      token: {
+        type: "criticChange",
+        raw: substitutionMatch[0] + metadata.raw + trailingComments.raw,
+        change,
+        commentIds: trailingComments.comments.map((comment) => comment.id),
+        oldTokens: lexer.inlineTokens(oldText),
+        newTokens: lexer.inlineTokens(newText),
+      },
+      comments: trailingComments.comments,
+    };
+  }
+
+  return undefined;
+}
+
+function renderCriticChangeSpan(
+  change: CriticChangeAttrs,
+  content: string,
+  kind: CriticChangeKind = change.kind,
+  commentIds: string[] = [],
+) {
+  const by = change.authorType === "ai" ? "AI" : change.authorId || "user";
+  const changeSpan = `<span data-critic-change-kind="${escapeHtml(kind)}" data-critic-change-id="${escapeHtml(
+    change.changeId,
+  )}" data-critic-change-by="${escapeHtml(by)}" data-critic-change-at="${escapeHtml(
+    change.createdAt,
+  )}">${content}</span>`;
+
+  if (commentIds.length === 0) {
+    return changeSpan;
+  }
+
+  return `<span data-comment-ids="${escapeHtml(
+    JSON.stringify(commentIds),
+  )}">${changeSpan}</span>`;
+}
+
 function addCriticCommentRule(
   service: TurndownService,
   comments: Map<string, CriticComment>,
@@ -348,23 +613,169 @@ function addCriticCommentRule(
         return content;
       }
 
-      const orderedComments = getOrderedAnchorComments(commentIds, comments);
-      if (orderedComments.length === 0) return content;
-
-      const [firstComment, ...remainingComments] = orderedComments;
-      let result = `{==${content}==}{>>${firstComment.content}<<}${serializeMetadata(firstComment)}`;
-
-      for (const comment of remainingComments) {
-        result += `{>>${comment.content}<<}${serializeMetadata(comment)}`;
+      const criticChangeElement = (node as HTMLElement).querySelector(
+        "span[data-critic-change-kind]",
+      );
+      if (criticChangeElement instanceof HTMLElement) {
+        return serializeCriticChangeElement(
+          service,
+          criticChangeElement,
+          service.turndown(criticChangeElement.innerHTML).trim(),
+          comments,
+          commentIds,
+        );
       }
 
-      return result;
+      const commentBlocks = serializeCommentBlocks(commentIds, comments);
+      if (!commentBlocks) return content;
+
+      return `{==${content}==}${commentBlocks}`;
+    },
+  });
+}
+
+function getElementChangeAttrs(element: HTMLElement): CriticChangeAttrs | null {
+  const kind = element.getAttribute("data-critic-change-kind");
+  const changeId = element.getAttribute("data-critic-change-id");
+  const createdAt = element.getAttribute("data-critic-change-at");
+
+  if (
+    kind !== "addition" &&
+    kind !== "deletion" &&
+    kind !== "substitution-old" &&
+    kind !== "substitution-new"
+  ) {
+    return null;
+  }
+
+  if (!changeId || !createdAt) return null;
+
+  const rawBy = element.getAttribute("data-critic-change-by") || "user";
+  const authorType = rawBy.toUpperCase() === "AI" ? "ai" : "user";
+
+  return {
+    kind,
+    changeId,
+    createdAt,
+    authorType,
+    authorId: authorType === "ai" ? null : rawBy,
+  };
+}
+
+function isPairedSubstitutionElement(
+  element: Element | null,
+  kind: CriticChangeKind,
+  changeId: string,
+) {
+  return (
+    element instanceof HTMLElement &&
+    element.getAttribute("data-critic-change-kind") === kind &&
+    element.getAttribute("data-critic-change-id") === changeId
+  );
+}
+
+function getElementCommentIds(element: HTMLElement): string[] {
+  const commentIdsText = element.getAttribute("data-comment-ids");
+  if (!commentIdsText) return [];
+
+  try {
+    const parsed = JSON.parse(commentIdsText) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is string => typeof id === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function getChangeCommentBlocks(
+  element: HTMLElement,
+  comments: Map<string, CriticComment>,
+  extraCommentIds: string[] = [],
+) {
+  return serializeCommentBlocks(
+    [...new Set([...getElementCommentIds(element), ...extraCommentIds])],
+    comments,
+  );
+}
+
+function serializeCriticChangeElement(
+  service: TurndownService,
+  element: HTMLElement,
+  content: string,
+  comments: Map<string, CriticComment>,
+  extraCommentIds: string[] = [],
+) {
+  const change = getElementChangeAttrs(element);
+
+  if (!change) return content;
+
+  const commentBlocks = getChangeCommentBlocks(
+    element,
+    comments,
+    extraCommentIds,
+  );
+  const metadata = serializeChangeMetadata(change);
+
+  if (change.kind === "addition") {
+    return `{++${content}++}${metadata}${commentBlocks}`;
+  }
+
+  if (change.kind === "deletion") {
+    return `{--${content}--}${metadata}${commentBlocks}`;
+  }
+
+  if (change.kind === "substitution-new") {
+    return isPairedSubstitutionElement(
+      element.previousElementSibling,
+      "substitution-old",
+      change.changeId,
+    )
+      ? ""
+      : `{++${content}++}${serializeChangeMetadata({
+          ...change,
+          kind: "addition",
+        })}${commentBlocks}`;
+  }
+
+  const nextElement = element.nextElementSibling;
+
+  if (
+    nextElement instanceof HTMLElement &&
+    isPairedSubstitutionElement(
+      nextElement,
+      "substitution-new",
+      change.changeId,
+    )
+  ) {
+    const replacement = service.turndown(nextElement.innerHTML).trim();
+    return `{~~${content}~>${replacement}~~}${metadata}${commentBlocks}`;
+  }
+
+  return `{--${content}--}${serializeChangeMetadata({
+    ...change,
+    kind: "deletion",
+  })}${commentBlocks}`;
+}
+
+function addCriticChangeRule(
+  service: TurndownService,
+  comments: Map<string, CriticComment>,
+) {
+  service.addRule("criticChange", {
+    filter: (node) =>
+      node.nodeName === "SPAN" &&
+      (node as HTMLElement).hasAttribute("data-critic-change-kind"),
+    replacement(content, node) {
+      const element = node as HTMLElement;
+      return serializeCriticChangeElement(service, element, content, comments);
     },
   });
 }
 
 function createCriticMarked(markdownOptions?: MarkdownOptions) {
   const comments = new Map<string, CriticComment>();
+  const changes = new Map<string, CriticChangeAttrs>();
   const renderer = createMarkedRenderer(markdownOptions);
   const parser = new Marked({
     gfm: true,
@@ -401,6 +812,69 @@ function createCriticMarked(markdownOptions?: MarkdownOptions) {
         },
         childTokens: ["tokens"],
       } satisfies TokenizerAndRendererExtension,
+      {
+        name: "criticChange",
+        level: "inline",
+        start(src: string) {
+          const starts = ["{++", "{--", "{~~"]
+            .map((marker) => src.indexOf(marker))
+            .filter((index) => index >= 0);
+
+          return starts.length > 0 ? Math.min(...starts) : undefined;
+        },
+        tokenizer(this: TokenizerThis, src: string) {
+          const result = tokenizeCriticChange(
+            this.lexer,
+            src,
+            changes.values(),
+            comments.values(),
+          );
+          if (!result) return undefined;
+
+          for (const comment of result.comments) {
+            comments.set(comment.id, comment);
+          }
+          changes.set(result.token.change.changeId, result.token.change);
+          return result.token;
+        },
+        renderer(this: RendererThis, token: Tokens.Generic) {
+          const criticToken = token as CriticChangeToken;
+
+          if (criticToken.change.kind === "substitution-old") {
+            const oldContent = this.parser.parseInline(
+              criticToken.oldTokens ?? [],
+            );
+            const newContent = this.parser.parseInline(
+              criticToken.newTokens ?? [],
+            );
+            const substitutionHtml = `${renderCriticChangeSpan(
+              criticToken.change,
+              oldContent,
+              "substitution-old",
+            )}${renderCriticChangeSpan(
+              criticToken.change,
+              newContent,
+              "substitution-new",
+            )}`;
+
+            if (criticToken.commentIds.length === 0) {
+              return substitutionHtml;
+            }
+
+            return `<span data-comment-ids="${escapeHtml(
+              JSON.stringify(criticToken.commentIds),
+            )}">${substitutionHtml}</span>`;
+          }
+
+          return renderCriticChangeSpan(
+            criticToken.change,
+            this.parser.parseInline(criticToken.tokens ?? []),
+            criticToken.change.kind,
+            criticToken.commentIds,
+          );
+        },
+        childTokens: ["tokens", "oldTokens", "newTokens"],
+      } satisfies TokenizerAndRendererExtension,
     ],
   });
 
@@ -425,6 +899,7 @@ export function editorStateToCriticMarkdown(
   const html = generateHTML(doc, extensions);
   const service = createTurndownService();
   addCriticCommentRule(service, comments);
+  addCriticChangeRule(service, comments);
   return `${service.turndown(html).trimEnd()}\n`;
 }
 
@@ -435,4 +910,14 @@ export function createCriticComment(
   },
 ): CriticComment {
   return createCommentWithContext(partial, options?.existingComments);
+}
+
+export function createCriticChange(
+  kind: CriticChangeKind,
+  partial?: Partial<CriticChangeAttrs>,
+  options?: {
+    existingChanges?: Iterable<Pick<CriticChangeAttrs, "changeId">>;
+  },
+): CriticChangeAttrs {
+  return createChangeWithContext(kind, partial, options?.existingChanges);
 }

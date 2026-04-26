@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Editor } from "@tiptap/core";
 import {
+  createCriticChange,
+  createNextChangeId,
   createNextCommentId,
   criticMarkdownToEditorState,
   editorStateToCriticMarkdown,
@@ -221,6 +223,215 @@ Use CriticMarkup for inline review feedback in markdown.`,
     expect(
       createNextCommentId([{ id: "c2" }, { id: "note-1" }, { id: "c7" }]),
     ).toBe("c8");
+  });
+
+  it("allocates simple document-local suggestion ids", () => {
+    expect(
+      createNextChangeId([
+        { changeId: "s2" },
+        { changeId: "suggestion-1" },
+        { changeId: "s7" },
+      ]),
+    ).toBe("s8");
+  });
+
+  it("round-trips an insertion suggestion with metadata", () => {
+    const input =
+      'Add {++new text++}{id="s1" by="user" at="2024-01-15T10:30:00.000Z"} here.\n';
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+
+    expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it("round-trips a deletion suggestion with metadata", () => {
+    const input =
+      'Remove {--old text--}{id="s2" by="AI" at="2024-01-15T10:31:00.000Z"} here.\n';
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+
+    expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it("round-trips a substitution suggestion with metadata", () => {
+    const input =
+      'Use {~~old text~>new text~~}{id="s3" by="user@example.com" at="2024-01-15T10:32:00.000Z"} here.\n';
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+
+    expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it("imports suggestions without metadata and serializes generated metadata", () => {
+    const { doc, comments } = criticMarkdownToEditorState(
+      "Add {++new text++} here.\n",
+    );
+
+    expect(editorStateToCriticMarkdown(doc, comments)).toMatch(
+      /^Add \{\+\+new text\+\+\}\{id="s1" by="user" at="[^"]+"\} here\.\n$/,
+    );
+  });
+
+  it("preserves Markdown formatting inside suggested changes", () => {
+    const input =
+      'Use {++**bold** and `code`++}{id="s1" by="user" at="2024-01-15T10:30:00.000Z"} here.\n';
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+
+    expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it("preserves suggested changes next to comments", () => {
+    const input =
+      'Add {++new text++}{id="s1" by="user" at="2024-01-15T10:30:00.000Z"} near {==this==}{>>Check it<<}{id="c1" by="AI" at="2024-01-15T10:31:00.000Z"}.\n';
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+
+    expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it("round-trips a comment whose parent points to a suggestion id", () => {
+    const input =
+      '{==New wording==}{>>Why this wording?<<}{id="c1" by="user" at="2024-01-15T10:31:00.000Z" re="s1"} follows {++new text++}{id="s1" by="AI" at="2024-01-15T10:30:00.000Z"}.\n';
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+
+    expect(comments.get("c1")).toMatchObject({
+      parentCommentId: "s1",
+    });
+    expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it("round-trips a comment attached directly to a suggestion", () => {
+    const input =
+      '{++new text++}{id="s1" by="AI" at="2024-01-15T10:30:00.000Z"}{>>Why this wording?<<}{id="c1" by="user" at="2024-01-15T10:31:00.000Z" re="s1"}\n';
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+
+    expect(comments.get("c1")).toMatchObject({
+      parentCommentId: "s1",
+    });
+    expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it("preserves suggested changes in headings and list items", () => {
+    const input = `## Use {++new title++}{id="s1" by="user" at="2024-01-15T10:30:00.000Z"}
+
+* Keep {--old item--}{id="s2" by="user" at="2024-01-15T10:31:00.000Z"}
+`;
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+    const output = editorStateToCriticMarkdown(doc, comments);
+
+    expect(output).toContain(
+      '## Use {++new title++}{id="s1" by="user" at="2024-01-15T10:30:00.000Z"}',
+    );
+    expect(output).toContain(
+      '*   Keep {--old item--}{id="s2" by="user" at="2024-01-15T10:31:00.000Z"}',
+    );
+  });
+
+  it("accepts and rejects insertion suggestions", () => {
+    const input =
+      'Add {++new text++}{id="s1" by="user" at="2024-01-15T10:30:00.000Z"} here.\n';
+    const accepted = criticMarkdownToEditorState(input);
+    const rejected = criticMarkdownToEditorState(input);
+    const acceptEditor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: accepted.doc,
+    });
+    const rejectEditor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: rejected.doc,
+    });
+
+    try {
+      acceptEditor.commands.acceptCriticChange("s1");
+      rejectEditor.commands.rejectCriticChange("s1");
+
+      expect(
+        editorStateToCriticMarkdown(acceptEditor.getJSON(), accepted.comments),
+      ).toBe("Add new text here.\n");
+      expect(
+        editorStateToCriticMarkdown(rejectEditor.getJSON(), rejected.comments),
+      ).toBe("Add here.\n");
+    } finally {
+      acceptEditor.destroy();
+      rejectEditor.destroy();
+    }
+  });
+
+  it("accepts and rejects deletion suggestions", () => {
+    const input =
+      'Remove {--old text--}{id="s1" by="user" at="2024-01-15T10:30:00.000Z"} here.\n';
+    const accepted = criticMarkdownToEditorState(input);
+    const rejected = criticMarkdownToEditorState(input);
+    const acceptEditor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: accepted.doc,
+    });
+    const rejectEditor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: rejected.doc,
+    });
+
+    try {
+      acceptEditor.commands.acceptCriticChange("s1");
+      rejectEditor.commands.rejectCriticChange("s1");
+
+      expect(
+        editorStateToCriticMarkdown(acceptEditor.getJSON(), accepted.comments),
+      ).toBe("Remove here.\n");
+      expect(
+        editorStateToCriticMarkdown(rejectEditor.getJSON(), rejected.comments),
+      ).toBe("Remove old text here.\n");
+    } finally {
+      acceptEditor.destroy();
+      rejectEditor.destroy();
+    }
+  });
+
+  it("accepts and rejects substitution suggestions", () => {
+    const input =
+      'Use {~~old~>new~~}{id="s1" by="user" at="2024-01-15T10:30:00.000Z"} here.\n';
+    const accepted = criticMarkdownToEditorState(input);
+    const rejected = criticMarkdownToEditorState(input);
+    const acceptEditor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: accepted.doc,
+    });
+    const rejectEditor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: rejected.doc,
+    });
+
+    try {
+      acceptEditor.commands.acceptCriticChange("s1");
+      rejectEditor.commands.rejectCriticChange("s1");
+
+      expect(
+        editorStateToCriticMarkdown(acceptEditor.getJSON(), accepted.comments),
+      ).toBe("Use new here.\n");
+      expect(
+        editorStateToCriticMarkdown(rejectEditor.getJSON(), rejected.comments),
+      ).toBe("Use old here.\n");
+    } finally {
+      acceptEditor.destroy();
+      rejectEditor.destroy();
+    }
+  });
+
+  it("creates critic change attrs with document-local metadata", () => {
+    expect(
+      createCriticChange("addition", undefined, {
+        existingChanges: [{ changeId: "s1" }],
+      }),
+    ).toMatchObject({
+      kind: "addition",
+      changeId: "s2",
+      authorType: "user",
+      authorId: "user",
+    });
   });
 
   it("collects descendants in nested reply order", () => {

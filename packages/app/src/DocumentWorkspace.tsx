@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import type { DocumentEditorViewMode } from "./app-navigation";
 import { Button } from "./components/ui/button";
 import { cn } from "./lib/utils";
-import { PageCard } from "./PageCard";
+import { PageCard, type DocumentInteractionMode } from "./PageCard";
 import type { Page, StorageBackend } from "./storage";
 
 type SaveState = "idle" | "saving" | "error";
@@ -42,12 +42,23 @@ export function DocumentWorkspace({
   onOverwriteDocumentOnDisk,
   backend,
 }: DocumentWorkspaceProps) {
+  const [documentInteractionMode, setDocumentInteractionMode] =
+    useState<DocumentInteractionMode>("editing");
   const [documentHasComments, setDocumentHasComments] = useState(
-    () => !!documentPage?.content.includes("{>>"),
+    () =>
+      !!documentPage?.content.includes("{>>") ||
+      !!documentPage?.content.includes("{++") ||
+      !!documentPage?.content.includes("{--") ||
+      !!documentPage?.content.includes("{~~"),
   );
 
   useEffect(() => {
-    setDocumentHasComments(!!documentPage?.content.includes("{>>"));
+    setDocumentHasComments(
+      !!documentPage?.content.includes("{>>") ||
+        !!documentPage?.content.includes("{++") ||
+        !!documentPage?.content.includes("{--") ||
+        !!documentPage?.content.includes("{~~"),
+    );
   }, [documentPage]);
 
   return (
@@ -104,8 +115,25 @@ export function DocumentWorkspace({
             >
               {documentFilenameLabel}
             </div>
+            <label className="ml-auto flex shrink-0 items-center gap-1.5 rounded-[8px] border border-[#DFDFDC] bg-[#FFFDFC] px-2 py-1 text-[0.68rem] text-stone-600">
+              <span>Mode</span>
+              <select
+                value={documentInteractionMode}
+                className="bg-transparent text-[0.68rem] font-medium text-stone-800 outline-none"
+                aria-label="Document mode"
+                onChange={(event) =>
+                  setDocumentInteractionMode(
+                    event.target.value as DocumentInteractionMode,
+                  )
+                }
+              >
+                <option value="viewing">Viewing</option>
+                <option value="suggesting">Suggesting</option>
+                <option value="editing">Editing</option>
+              </select>
+            </label>
             {documentDiskChangeState !== "clean" ? (
-              <div className="ml-auto flex max-w-full shrink-0 items-center gap-1.5 rounded-[8px] border border-amber-200 bg-amber-50 px-2 py-1 text-[0.68rem] text-amber-900">
+              <div className="flex max-w-full shrink-0 items-center gap-1.5 rounded-[8px] border border-amber-200 bg-amber-50 px-2 py-1 text-[0.68rem] text-amber-900">
                 <span className="whitespace-nowrap">
                   {documentDiskChangeState === "conflict"
                     ? "Save conflict"
@@ -144,6 +172,7 @@ export function DocumentWorkspace({
               onSave={onSaveDocument}
               onSaveStateChange={onDocumentSaveStateChange}
               editorViewMode={documentEditorViewMode}
+              interactionMode={documentInteractionMode}
               backend={backend}
               onCommentRailPresenceChange={setDocumentHasComments}
               onDirtyStateChange={onDocumentDirtyStateChange}

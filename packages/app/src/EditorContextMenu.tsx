@@ -5,14 +5,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bold,
   Code2,
+  Check,
   ExternalLink,
   Italic,
   Link2,
   List,
   ListOrdered,
   MessageSquarePlus,
+  Minus,
+  Plus,
   Quote,
+  Replace,
   Trash2,
+  X,
 } from "lucide-react";
 import {
   getAddCommentShortcutLabel,
@@ -25,6 +30,9 @@ interface EditorContextMenuProps {
   editor: Editor | null;
   backend: StorageBackend;
   onAddComment?: () => void;
+  onSuggestDeletion?: () => void;
+  onSuggestReplacement?: () => void;
+  onSuggestInsertion?: () => void;
   children: ReactNode;
 }
 
@@ -175,6 +183,9 @@ export function EditorContextMenu({
   editor,
   backend,
   onAddComment,
+  onSuggestDeletion,
+  onSuggestReplacement,
+  onSuggestInsertion,
   children,
 }: EditorContextMenuProps) {
   const [position, setPosition] = useState<MenuPosition | null>(null);
@@ -198,6 +209,10 @@ export function EditorContextMenu({
       isOrderedListActive: currentEditor?.isActive("orderedList") ?? false,
       isBlockquoteActive: currentEditor?.isActive("blockquote") ?? false,
       isLinkActive: currentEditor?.isActive("link") ?? false,
+      activeCriticChangeId:
+        (currentEditor?.getAttributes("criticChange").changeId as
+          | string
+          | null) ?? null,
       canToggleBold:
         currentEditor?.can().chain().focus().toggleBold().run() ?? false,
       canToggleItalic:
@@ -219,6 +234,7 @@ export function EditorContextMenu({
     isOrderedListActive: false,
     isBlockquoteActive: false,
     isLinkActive: false,
+    activeCriticChangeId: null,
     canToggleBold: false,
     canToggleItalic: false,
     canToggleCode: false,
@@ -237,10 +253,8 @@ export function EditorContextMenu({
 
   const updateSelectionActionPosition = useCallback(() => {
     if (
-      !editor ||
-      !onAddComment ||
-      !editor.isFocused ||
-      editor.state.selection.empty
+      !editor?.isFocused ||
+      (editor.state.selection.empty && !onSuggestInsertion)
     ) {
       setSelectionActionPosition(null);
       return;
@@ -274,7 +288,7 @@ export function EditorContextMenu({
       left: nextLeft,
       top: nextTop,
     });
-  }, [editor, onAddComment]);
+  }, [editor, onSuggestInsertion]);
 
   const updateLinkPopover = useCallback(() => {
     if (!editor || !containerRef.current || !editor.isActive("link")) {
@@ -602,11 +616,92 @@ export function EditorContextMenu({
               active={selectionMenuState.isLinkActive}
               onClick={openLinkPopover}
             />
+            <SelectionMenuButton
+              label="Suggest insertion"
+              icon={<Plus className="size-4" />}
+              disabled={!onSuggestInsertion}
+              onClick={() => {
+                onSuggestInsertion?.();
+                setSelectionActionPosition(null);
+              }}
+            />
+            <SelectionMenuButton
+              label="Suggest deletion"
+              icon={<Minus className="size-4" />}
+              disabled={!onSuggestDeletion || editor?.state.selection.empty}
+              onClick={() => {
+                onSuggestDeletion?.();
+                setSelectionActionPosition(null);
+              }}
+            />
+            <SelectionMenuButton
+              label="Suggest replacement"
+              icon={<Replace className="size-4" />}
+              disabled={!onSuggestReplacement || editor?.state.selection.empty}
+              onClick={() => {
+                onSuggestReplacement?.();
+                setSelectionActionPosition(null);
+              }}
+            />
           </div>
           <div className="my-2 h-px bg-slate-200/80" aria-hidden="true" />
+          {selectionMenuState.activeCriticChangeId ? (
+            <>
+              <div className="grid grid-cols-2 gap-1">
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onClick={() => {
+                    if (selectionMenuState.activeCriticChangeId) {
+                      editor
+                        ?.chain()
+                        .focus()
+                        .acceptCriticChange(
+                          selectionMenuState.activeCriticChangeId,
+                        )
+                        .run();
+                    }
+                    setSelectionActionPosition(null);
+                  }}
+                >
+                  <Check className="size-4" />
+                  <span>Accept</span>
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onClick={() => {
+                    if (selectionMenuState.activeCriticChangeId) {
+                      editor
+                        ?.chain()
+                        .focus()
+                        .rejectCriticChange(
+                          selectionMenuState.activeCriticChangeId,
+                        )
+                        .run();
+                    }
+                    setSelectionActionPosition(null);
+                  }}
+                >
+                  <X className="size-4" />
+                  <span>Reject</span>
+                </button>
+              </div>
+              <div className="my-2 h-px bg-slate-200/80" aria-hidden="true" />
+            </>
+          ) : null}
           <button
             type="button"
             className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+            disabled={!onAddComment || editor?.state.selection.empty}
             onMouseDown={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -726,6 +821,80 @@ export function EditorContextMenu({
               {shortcutLabel}
             </span>
           </button>
+          <button
+            type="button"
+            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!editor || !onSuggestInsertion}
+            onClick={() => {
+              onSuggestInsertion?.();
+              close();
+            }}
+          >
+            Suggest insertion
+          </button>
+          <button
+            type="button"
+            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!editor || editor.state.selection.empty}
+            onClick={() => {
+              onSuggestDeletion?.();
+              close();
+            }}
+          >
+            Suggest deletion
+          </button>
+          <button
+            type="button"
+            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!editor || editor.state.selection.empty}
+            onClick={() => {
+              onSuggestReplacement?.();
+              close();
+            }}
+          >
+            Suggest replacement
+          </button>
+          {selectionMenuState.activeCriticChangeId ? (
+            <>
+              <div className="my-1 h-px bg-slate-100" aria-hidden="true" />
+              <button
+                type="button"
+                className="block w-full rounded-xl px-3 py-2 text-left text-sm text-emerald-700 transition hover:bg-emerald-50"
+                onClick={() => {
+                  if (selectionMenuState.activeCriticChangeId) {
+                    editor
+                      ?.chain()
+                      .focus()
+                      .acceptCriticChange(
+                        selectionMenuState.activeCriticChangeId,
+                      )
+                      .run();
+                  }
+                  close();
+                }}
+              >
+                Accept suggestion
+              </button>
+              <button
+                type="button"
+                className="block w-full rounded-xl px-3 py-2 text-left text-sm text-rose-700 transition hover:bg-rose-50"
+                onClick={() => {
+                  if (selectionMenuState.activeCriticChangeId) {
+                    editor
+                      ?.chain()
+                      .focus()
+                      .rejectCriticChange(
+                        selectionMenuState.activeCriticChangeId,
+                      )
+                      .run();
+                  }
+                  close();
+                }}
+              >
+                Reject suggestion
+              </button>
+            </>
+          ) : null}
           <button
             type="button"
             className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50"

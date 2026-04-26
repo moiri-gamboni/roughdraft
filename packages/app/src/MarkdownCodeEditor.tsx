@@ -8,12 +8,14 @@ interface MarkdownCodeEditorProps {
   value: string;
   onChange: (value: string) => void;
   autoFocus?: boolean;
+  readOnly?: boolean;
 }
 
 export function MarkdownCodeEditor({
   value,
   onChange,
   autoFocus = false,
+  readOnly = false,
 }: MarkdownCodeEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const editorViewRef = useRef<EditorView | null>(null);
@@ -37,6 +39,8 @@ export function MarkdownCodeEditor({
           basicSetup,
           markdown(),
           EditorView.lineWrapping,
+          EditorState.readOnly.of(readOnly),
+          EditorView.editable.of(!readOnly),
           EditorView.updateListener.of((update) => {
             if (!update.docChanged) return;
 
@@ -107,7 +111,7 @@ export function MarkdownCodeEditor({
       editorViewRef.current = null;
       view.destroy();
     };
-  }, [autoFocus]);
+  }, [autoFocus, readOnly]);
 
   useEffect(() => {
     const view = editorViewRef.current;

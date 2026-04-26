@@ -32,7 +32,13 @@ export function useCommentAnchorLayout(editor: Editor | null, enabled = true) {
     }
 
     frameRef.current = requestAnimationFrame(() => {
-      const editorElement = editor?.view.dom as HTMLElement | undefined;
+      let editorElement: HTMLElement | undefined;
+
+      try {
+        editorElement = editor?.view.dom as HTMLElement | undefined;
+      } catch {
+        editorElement = undefined;
+      }
 
       if (!editorElement) {
         setLayoutState({

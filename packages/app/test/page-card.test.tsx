@@ -162,6 +162,7 @@ function getToolbarButton(container: HTMLElement, label: string) {
 type PageCardTestOptions = Partial<{
   page: Page;
   editorViewMode: "rich-text" | "code";
+  interactionMode: "viewing" | "suggesting" | "editing";
   selected: boolean;
   focusRequestKey: string | null;
 }>;
@@ -197,6 +198,7 @@ async function renderPageCard(
     selected: options.selected ?? true,
     focusRequestKey: options.focusRequestKey ?? null,
     editorViewMode: options.editorViewMode ?? "rich-text",
+    interactionMode: options.interactionMode ?? "editing",
     onSave,
     onSaveStateChange,
     backend,
@@ -382,6 +384,92 @@ describe("PageCard editor integration", () => {
     expect(rendered.onSaveStateChange.mock.calls.at(-1)?.[0]).toBe("idle");
   });
 
+  it("viewing mode disables rich-text editing", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-viewing-1",
+        title: "Doc Viewing 1",
+        content: "Read only",
+      },
+      interactionMode: "viewing",
+      selected: true,
+    });
+
+    expect(
+      getEditable(rendered.container).getAttribute("contenteditable"),
+    ).toBe("false");
+  });
+
+  it("suggesting mode turns typed text into insertion markup", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-suggesting-1",
+        title: "Doc Suggesting 1",
+        content: "Start",
+      },
+      interactionMode: "suggesting",
+      selected: true,
+    });
+    const editor = rendered.getEditor();
+
+    vi.useFakeTimers();
+
+    await act(async () => {
+      editor.commands.focus("end");
+      const position = editor.state.selection.from;
+      editor.view.someProp("handleTextInput", (handler) =>
+        handler(editor.view, position, position, " now"),
+      );
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledWith(
+      "doc-suggesting-1",
+      expect.stringMatching(
+        /^Start \{\+\+now\+\+\}\{id="s1" by="user" at="[^"]+"\}\n$/,
+      ),
+    );
+  });
+
+  it("suggesting mode turns typed replacement into substitution markup", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-suggesting-2",
+        title: "Doc Suggesting 2",
+        content: "Use old text",
+      },
+      interactionMode: "suggesting",
+      selected: true,
+    });
+    const editor = rendered.getEditor();
+
+    vi.useFakeTimers();
+    await selectText(editor, "old");
+
+    await act(async () => {
+      const { from, to } = editor.state.selection;
+      editor.view.someProp("handleTextInput", (handler) =>
+        handler(editor.view, from, to, "new"),
+      );
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledWith(
+      "doc-suggesting-2",
+      expect.stringMatching(
+        /^Use \{~~old~>new~~\}\{id="s1" by="user" at="[^"]+"\} text\n$/,
+      ),
+    );
+  });
+
   it("document code mode shows raw markdown and hides rich text chrome", async () => {
     const rendered = await renderPageCard({
       page: {
@@ -558,6 +646,48 @@ describe("PageCard editor integration", () => {
         ?.textContent,
     ).toContain("Comment body");
     expect(rendered.container.textContent).toContain("Me");
+  });
+
+  it("renders suggestion replies only inside the suggestion card", async () => {
+    const commentText = "Looks good as an inserted phrase.";
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-suggestion-reply-1",
+        title: "Doc Suggestion Reply 1",
+        content: `This sentence includes an insertion: {++clearer wording++}{id="s1" by="user" at="2026-04-25T23:55:00.000Z"}{>>${commentText}<<}{id="c1" by="user" at="2026-04-25T23:56:00.000Z" re="s1"}`,
+      },
+      selected: true,
+    });
+
+    await flushAnimationFrame();
+
+    const railText =
+      rendered.container.querySelector(".document-comment-rail")?.textContent ??
+      "";
+
+    expect(railText.split(commentText).length - 1).toBe(1);
+  });
+
+  it("preserves suggestion color when comments are attached to suggestion text", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-suggestion-reply-color-1",
+        title: "Doc Suggestion Reply Color 1",
+        content:
+          'This sentence includes {++clearer wording++}{id="s1" by="user" at="2026-04-25T23:55:00.000Z"}{>>Looks good.<<}{id="c1" by="user" at="2026-04-25T23:56:00.000Z" re="s1"}',
+      },
+      selected: true,
+    });
+
+    await flushAnimationFrame();
+
+    const suggestion = rendered.container.querySelector(
+      ".critic-change-addition",
+    );
+    expect(suggestion?.textContent).toContain("clearer wording");
+    expect(
+      rendered.container.querySelector(".comment-decoration-on-critic-change"),
+    ).not.toBeNull();
   });
 
   it("centers document layout when there are no comments", async () => {

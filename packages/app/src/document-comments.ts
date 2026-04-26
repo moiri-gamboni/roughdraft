@@ -38,6 +38,18 @@ interface CommentThreadRailLayout extends CommentThreadRailItem {
   height: number;
 }
 
+interface AnchoredRailItem {
+  key: string;
+  anchorTop: number;
+  anchorBottom: number;
+}
+
+export type AnchoredRailLayout<T extends AnchoredRailItem> = T & {
+  railTop: number;
+  railBottom: number;
+  height: number;
+};
+
 interface CommentAnchorElementLike {
   dataset: {
     commentIds?: string;
@@ -237,23 +249,22 @@ export function resolveCommentRailLayouts(
   });
 }
 
-export function resolveCommentThreadRailLayouts(
-  items: CommentThreadRailItem[],
+export function resolveAnchoredRailLayouts<T extends AnchoredRailItem>(
+  items: T[],
   heights: Record<string, number>,
-  selectedRootThreadId: string | null,
+  activeKey: string | null,
   gap = 16,
-): CommentThreadRailLayout[] {
+  defaultHeight = 120,
+): Array<AnchoredRailLayout<T>> {
   if (items.length === 0) return [];
 
   const activeIndex = Math.max(
     0,
-    selectedRootThreadId
-      ? items.findIndex((item) => item.rootCommentId === selectedRootThreadId)
-      : 0,
+    activeKey ? items.findIndex((item) => item.key === activeKey) : 0,
   );
 
-  const resolved = new Array<CommentThreadRailLayout>(items.length);
-  const getHeight = (item: CommentThreadRailItem) => heights[item.key] ?? 120;
+  const resolved = new Array<AnchoredRailLayout<T>>(items.length);
+  const getHeight = (item: T) => heights[item.key] ?? defaultHeight;
 
   const activeItem = items[activeIndex] ?? items[0];
   if (!activeItem) return [];
@@ -301,4 +312,24 @@ export function resolveCommentThreadRailLayouts(
   }
 
   return resolved;
+}
+
+export function resolveCommentThreadRailLayouts(
+  items: CommentThreadRailItem[],
+  heights: Record<string, number>,
+  selectedRootThreadId: string | null,
+  gap = 16,
+): CommentThreadRailLayout[] {
+  const activeItem =
+    selectedRootThreadId == null
+      ? null
+      : (items.find((item) => item.rootCommentId === selectedRootThreadId) ??
+        null);
+
+  return resolveAnchoredRailLayouts(
+    items,
+    heights,
+    activeItem?.key ?? null,
+    gap,
+  );
 }
