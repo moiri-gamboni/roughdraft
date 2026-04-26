@@ -4,6 +4,10 @@ import {
   writeDevFrontendState,
 } from "./dev-frontend-state.mjs";
 import { findAvailableLoopbackPort } from "./find-available-loopback-port.mjs";
+import {
+  ROUGHDRAFT_DEFAULT_API_PORT,
+  ROUGHDRAFT_DEFAULT_PORT,
+} from "../packages/server/defaults.mjs";
 
 function spawnPnpm(args, extraEnv = {}) {
   return spawn("pnpm", args, {
@@ -13,10 +17,10 @@ function spawnPnpm(args, extraEnv = {}) {
 }
 
 const appPort = await findAvailableLoopbackPort(
-  parseInt(process.env.APP_PORT || "3000", 10),
+  parseInt(process.env.APP_PORT || String(ROUGHDRAFT_DEFAULT_PORT), 10),
 );
 let apiPort = await findAvailableLoopbackPort(
-  parseInt(process.env.API_PORT || "3001", 10),
+  parseInt(process.env.API_PORT || String(ROUGHDRAFT_DEFAULT_API_PORT), 10),
 );
 
 if (apiPort === appPort) {
@@ -27,7 +31,7 @@ console.log(`Using app port ${appPort}.`);
 console.log(`Using API port ${apiPort}.`);
 console.log(`Open Roughdraft in dev at http://localhost:${appPort}`);
 console.log(
-  `Open files directly with http://localhost:${appPort}/absolute/path/to/file.md`,
+  `Open files directly with http://localhost:${appPort}/?path=/absolute/path/to/file.md`,
 );
 console.log(
   `API port ${apiPort} is internal; don't use it as the browser URL.`,

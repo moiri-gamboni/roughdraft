@@ -11,6 +11,7 @@ import {
   getServerStateFilePath,
   runCli,
 } from "./cli";
+import { ROUGHDRAFT_DEFAULT_PORT } from "./network";
 
 interface StartedServer {
   close: () => Promise<void>;
@@ -91,6 +92,13 @@ describe("cli", () => {
     serverByPid = new Map<number, StartedServer>();
     portByPid = new Map<number, number>();
   });
+
+  function expectedOpenUrl(baseUrl: string, documentPath: string): string {
+    const url = new URL(baseUrl);
+    url.pathname = "/";
+    url.searchParams.set("path", documentPath);
+    return url.toString();
+  }
 
   afterEach(async () => {
     await Promise.all(
@@ -214,7 +222,7 @@ describe("cli", () => {
     expect(exitCode).toBe(0);
     expect(test.getSpawnCount()).toBe(1);
     expect(test.getLastOpenedUrl()).toBe(
-      `http://localhost:${persisted.port}${documentPath}`,
+      expectedOpenUrl(`http://localhost:${persisted.port}`, documentPath),
     );
     expect(fs.existsSync(getServerStateFilePath(test.deps.env))).toBeTruthy();
   });
@@ -299,7 +307,9 @@ describe("cli", () => {
 
     expect(exitCode).toBe(0);
     expect(spawnCount).toBe(0);
-    expect(lastOpenedUrl).toBe(`http://localhost:5173${documentPath}`);
+    expect(lastOpenedUrl).toBe(
+      expectedOpenUrl("http://localhost:5173", documentPath),
+    );
   });
 
   it("falls back to the api server URL when the dev frontend hint is stale", async () => {
@@ -330,7 +340,7 @@ describe("cli", () => {
     expect(exitCode).toBe(0);
     expect(test.getSpawnCount()).toBe(1);
     expect(test.getLastOpenedUrl()).toBe(
-      `http://localhost:${persisted.port}${documentPath}`,
+      expectedOpenUrl(`http://localhost:${persisted.port}`, documentPath),
     );
   });
 
@@ -399,7 +409,9 @@ describe("cli", () => {
 
     expect(exitCode).toBe(0);
     expect(spawnCount).toBe(0);
-    expect(lastOpenedUrl).toBe(`http://localhost:5174${documentPath}`);
+    expect(lastOpenedUrl).toBe(
+      expectedOpenUrl("http://localhost:5174", documentPath),
+    );
   });
 
   it("rejects missing markdown files before opening", async () => {
@@ -458,10 +470,10 @@ describe("cli", () => {
     fs.writeFileSync(
       stateFilePath,
       JSON.stringify({
-        port: 3000,
+        port: ROUGHDRAFT_DEFAULT_PORT,
         pid: 424242,
         startedAt: new Date().toISOString(),
-        url: "http://localhost:3000",
+        url: `http://localhost:${ROUGHDRAFT_DEFAULT_PORT}`,
       }),
     );
 
@@ -480,11 +492,14 @@ describe("cli", () => {
                 "http://localhost",
               );
 
-        if (url.pathname === "/api/status" && url.port === "3000") {
+        if (
+          url.pathname === "/api/status" &&
+          url.port === String(ROUGHDRAFT_DEFAULT_PORT)
+        ) {
           return new Response(
             JSON.stringify({
               backend: "local-files",
-              port: 3000,
+              port: ROUGHDRAFT_DEFAULT_PORT,
               projectDir,
               serverRoot,
             }),
@@ -515,7 +530,9 @@ describe("cli", () => {
 
     expect(statusExitCode).toBe(0);
     expect(openExitCode).toBe(0);
-    expect(logs).toContain("Roughdraft is running at http://localhost:3000");
+    expect(logs).toContain(
+      `Roughdraft is running at http://localhost:${ROUGHDRAFT_DEFAULT_PORT}`,
+    );
     expect(logs).toContain(
       `This server is not managed by ${getServerStateFilePath(deps.env)}.`,
     );
@@ -543,10 +560,10 @@ describe("cli", () => {
     fs.writeFileSync(
       stateFilePath,
       JSON.stringify({
-        port: 3000,
+        port: ROUGHDRAFT_DEFAULT_PORT,
         pid: 424242,
         startedAt: new Date().toISOString(),
-        url: "http://localhost:3000",
+        url: `http://localhost:${ROUGHDRAFT_DEFAULT_PORT}`,
       }),
     );
 
@@ -565,11 +582,14 @@ describe("cli", () => {
                 "http://localhost",
               );
 
-        if (url.pathname === "/api/status" && url.port === "3000") {
+        if (
+          url.pathname === "/api/status" &&
+          url.port === String(ROUGHDRAFT_DEFAULT_PORT)
+        ) {
           return new Response(
             JSON.stringify({
               backend: "local-files",
-              port: 3000,
+              port: ROUGHDRAFT_DEFAULT_PORT,
               projectDir,
               serverRoot,
             }),
@@ -596,7 +616,7 @@ describe("cli", () => {
 
     expect(stopExitCode).toBe(1);
     expect(errors).toContain(
-      "Stopped tracked Roughdraft process 424242, but another Roughdraft instance is still running at http://localhost:3000.",
+      `Stopped tracked Roughdraft process 424242, but another Roughdraft instance is still running at http://localhost:${ROUGHDRAFT_DEFAULT_PORT}.`,
     );
     expect(fs.existsSync(stateFilePath)).toBeFalsy();
   });
@@ -685,10 +705,10 @@ describe("cli", () => {
     fs.writeFileSync(
       stateFilePath,
       JSON.stringify({
-        port: 3000,
+        port: ROUGHDRAFT_DEFAULT_PORT,
         pid: 424242,
         startedAt: new Date().toISOString(),
-        url: "http://localhost:3000",
+        url: `http://localhost:${ROUGHDRAFT_DEFAULT_PORT}`,
       }),
     );
 
@@ -711,11 +731,11 @@ describe("cli", () => {
           throw new Error("Unexpected request");
         }
 
-        if (url.port === "3000") {
+        if (url.port === String(ROUGHDRAFT_DEFAULT_PORT)) {
           return new Response(
             JSON.stringify({
               backend: "local-files",
-              port: 3000,
+              port: ROUGHDRAFT_DEFAULT_PORT,
               projectDir: path.join(tempDir, "other-project"),
               serverRoot: otherServerRoot,
             }),
@@ -726,11 +746,11 @@ describe("cli", () => {
           );
         }
 
-        if (url.port === "3001" && spawned) {
+        if (url.port === String(ROUGHDRAFT_DEFAULT_PORT + 1) && spawned) {
           return new Response(
             JSON.stringify({
               backend: "local-files",
-              port: 3001,
+              port: ROUGHDRAFT_DEFAULT_PORT + 1,
               projectDir,
               serverRoot,
             }),
@@ -743,7 +763,7 @@ describe("cli", () => {
 
         throw new Error("connect ECONNREFUSED");
       },
-      findAvailablePortImpl: async () => 3001,
+      findAvailablePortImpl: async () => ROUGHDRAFT_DEFAULT_PORT + 1,
       spawnServerProcess: async ({ port, projectDir: nextProjectDir }) => {
         spawned = true;
         spawnedPort = port;
@@ -760,8 +780,8 @@ describe("cli", () => {
     const result = await ensureServerRunning(deps, { projectDir });
 
     expect(result.reused).toBe(false);
-    expect(spawnedPort).toBe(3001);
+    expect(spawnedPort).toBe(ROUGHDRAFT_DEFAULT_PORT + 1);
     expect(spawnedProjectDir).toBe(projectDir);
-    expect(result.server.port).toBe(3001);
+    expect(result.server.port).toBe(ROUGHDRAFT_DEFAULT_PORT + 1);
   });
 });

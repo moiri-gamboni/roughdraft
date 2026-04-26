@@ -69,7 +69,7 @@ Roughdraft does not edit `~/CLAUDE.md`, `~/AGENTS.md`, or other user-level agent
 If the local server is already running, you can also open a file directly by URL:
 
 ```text
-http://localhost:3000/absolute/path/to/my-essay/draft.md
+http://localhost:7373/?path=/absolute/path/to/my-essay/draft.md
 ```
 
 That makes an agent-friendly workflow possible:
@@ -92,7 +92,7 @@ That makes an agent-friendly workflow possible:
 ./scripts/run.sh
 ```
 
-`./scripts/setup.sh` installs workspace dependencies and builds the app and server. `./scripts/run.sh` serves the built app at `http://localhost:3000`.
+`./scripts/setup.sh` installs workspace dependencies and builds the app and server. `./scripts/run.sh` serves the built app at `http://localhost:7373`.
 
 The two scripts coordinate through a lock file, so it's safe to start `./scripts/run.sh` while `./scripts/setup.sh` is still in progress. `run` will wait for setup to finish, or trigger setup itself if nothing has been built yet.
 

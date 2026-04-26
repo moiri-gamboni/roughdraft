@@ -29,7 +29,9 @@
   "files": [
     "packages/app/dist",
     "packages/server/dist",
-    "packages/server/bin"
+    "packages/server/bin",
+    "packages/server/defaults.mjs",
+    "packages/server/defaults.d.mts"
   ],
   "dependencies": {
     "express": "^5.1.0"

@@ -6,12 +6,12 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   ROUGHDRAFT_BIND_HOST,
+  ROUGHDRAFT_DEFAULT_PORT,
   ROUGHDRAFT_LOOPBACK_HOSTS,
   ROUGHDRAFT_PUBLIC_HOST,
 } from "./network.js";
 import { findAvailablePort } from "./ports.js";
 
-const DEFAULT_PORT = 3000;
 const AGENT_SETUP_URL = "https://roughdraft.page/setup.md";
 const AGENT_SETUP_PROMPT = `Install Roughdraft for me using \`npm i -g roughdraft\`, then read ${AGENT_SETUP_URL} and set yourself up to use it.`;
 const STATUS_PATH = "/api/status";
@@ -335,7 +335,9 @@ function printInstallDeprecation(
 
 function parsePort(value: string | undefined): number {
   const parsed = Number.parseInt(value || "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PORT;
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : ROUGHDRAFT_DEFAULT_PORT;
 }
 
 function buildPublicBaseUrl(port: number): string {
@@ -361,15 +363,8 @@ function buildLoopbackUrl(host: string, port: number, pathname = "/"): URL {
 function buildTargetUrl(baseUrl: string, openPath: string): string {
   const url = new URL(baseUrl);
 
-  if (openPath.includes("\\")) {
-    url.searchParams.set("path", openPath);
-    return url.toString();
-  }
-
-  const normalizedPath = openPath.replace(/\\/g, "/");
-  url.pathname = normalizedPath.startsWith("/")
-    ? normalizedPath
-    : `/${normalizedPath}`;
+  url.pathname = "/";
+  url.searchParams.set("path", openPath);
   return url.toString();
 }
 

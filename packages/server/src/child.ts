@@ -1,5 +1,6 @@
 import path from "node:path";
 import { createServer } from "./index.js";
+import { ROUGHDRAFT_DEFAULT_PORT } from "./network.js";
 
 interface ParsedArgs {
   port: number;
@@ -7,7 +8,7 @@ interface ParsedArgs {
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
-  let port = 3000;
+  let port = ROUGHDRAFT_DEFAULT_PORT;
   let projectDir: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {

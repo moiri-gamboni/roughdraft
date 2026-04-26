@@ -101,7 +101,7 @@ function buildLocationForPath(path?: string | null) {
   const url = new URL(window.location.href);
 
   if (nextPath) {
-    if (!nextPath.includes("\\")) {
+    if (!nextPath.startsWith("/") && !nextPath.includes("\\")) {
       url.pathname = nextPath.startsWith("/") ? nextPath : `/${nextPath}`;
       url.searchParams.delete("path");
     } else {

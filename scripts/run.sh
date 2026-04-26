@@ -14,7 +14,7 @@ if ! setup_ready; then
   "$repo_root/scripts/setup.sh"
 fi
 
-port="${PORT:-3000}"
+port="${PORT:-$(node -e "import('./packages/server/defaults.mjs').then(({ ROUGHDRAFT_DEFAULT_PORT }) => console.log(ROUGHDRAFT_DEFAULT_PORT))")}"
 project_dir="${PROJECT_DIR:-$repo_root/sandbox}"
 log "Starting Roughdraft on http://localhost:${port}"
 

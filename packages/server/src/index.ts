@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import {
+  ROUGHDRAFT_DEFAULT_PORT,
   ROUGHDRAFT_LOOPBACK_HOSTS,
   ROUGHDRAFT_PUBLIC_HOST,
 } from "./network.js";
@@ -298,7 +299,7 @@ function listProjectTree(projectDir: string): ProjectTreeListing {
 }
 
 export function createApp(options: CreateAppOptions = {}): CreateAppResult {
-  const port = options.port ?? 3000;
+  const port = options.port ?? ROUGHDRAFT_DEFAULT_PORT;
   const homeDir = options.homeDir ?? os.homedir();
   const serverRoot = path.resolve(options.serverRoot ?? defaultServerRoot);
   const staticDirPath = options.staticDirPath ?? staticDir;
@@ -698,7 +699,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
 }
 
 export async function createServer(
-  port = 3000,
+  port = ROUGHDRAFT_DEFAULT_PORT,
   projectDir?: string,
 ): Promise<void> {
   const { app } = createApp({ port, projectDir });
