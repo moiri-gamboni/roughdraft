@@ -696,11 +696,65 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
           void insertFiles(files);
           return true;
         },
-        handlePaste: (_view, event) => {
+        handlePaste: (view, event) => {
           const files = Array.from(event.clipboardData?.files ?? []);
-          if (files.length === 0) return false;
+          if (files.length > 0) {
+            event.preventDefault();
+            void insertFiles(files);
+            return true;
+          }
+
+          if (interactionModeRef.current !== "suggesting") return false;
+
+          const text = event.clipboardData?.getData("text/plain");
+          if (!text) return false;
+
+          const currentEditor = editorRef.current;
+          if (!currentEditor) return false;
+
           event.preventDefault();
-          void insertFiles(files);
+
+          const { selection } = view.state;
+          const from = selection.from;
+          const to = selection.to;
+          const tr = view.state.tr;
+
+          if (from !== to) {
+            const oldChange = createCriticChange(
+              "substitution-old",
+              undefined,
+              {
+                existingChanges: getDocumentCriticChanges(currentEditor),
+              },
+            );
+            const newMark = view.state.schema.marks.criticChange.create({
+              ...oldChange,
+              kind: "substitution-new",
+            });
+            tr.addMark(
+              from,
+              to,
+              view.state.schema.marks.criticChange.create(oldChange),
+            );
+            tr.insert(to, view.state.schema.text(text, [newMark]));
+            tr.setSelection(TextSelection.create(tr.doc, to + text.length));
+          } else {
+            const existingMark = getReusableSuggestionInputMark(
+              currentEditor,
+              from,
+            );
+            const mark =
+              existingMark ??
+              view.state.schema.marks.criticChange.create(
+                createCriticChange("addition", undefined, {
+                  existingChanges: getDocumentCriticChanges(currentEditor),
+                }),
+              );
+            tr.insert(from, view.state.schema.text(text, [mark]));
+            tr.setSelection(TextSelection.create(tr.doc, from + text.length));
+          }
+
+          view.dispatch(tr.scrollIntoView());
           return true;
         },
         handleTextInput: (view, from, to, text) => {
@@ -752,6 +806,45 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
         },
         handleKeyDown: (view, event) => {
           if (interactionModeRef.current !== "suggesting") return false;
+
+          // Block Enter in suggesting mode
+          if (event.key === "Enter") {
+            event.preventDefault();
+            return true;
+          }
+
+          // Handle Cut (Ctrl+X / Cmd+X)
+          if (
+            (event.metaKey || event.ctrlKey) &&
+            event.key.toLowerCase() === "x"
+          ) {
+            const { selection } = view.state;
+            if (selection.empty) return false;
+
+            const currentEditor = editorRef.current;
+            if (!currentEditor) return false;
+
+            event.preventDefault();
+            const from = selection.from;
+            const to = selection.to;
+            const selectedText = view.state.doc.textBetween(from, to);
+            void navigator.clipboard.writeText(selectedText);
+
+            const change = createCriticChange("deletion", undefined, {
+              existingChanges: getDocumentCriticChanges(currentEditor),
+            });
+            view.dispatch(
+              view.state.tr
+                .addMark(
+                  from,
+                  to,
+                  view.state.schema.marks.criticChange.create(change),
+                )
+                .scrollIntoView(),
+            );
+            return true;
+          }
+
           if (event.key !== "Backspace" && event.key !== "Delete") return false;
 
           const currentEditor = editorRef.current;
@@ -763,9 +856,31 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
 
           if (selection.empty) {
             if (event.key === "Backspace") {
-              from = Math.max(1, selection.from - 1);
+              if (event.ctrlKey || event.altKey) {
+                const textBefore = view.state.doc.textBetween(
+                  1,
+                  selection.from,
+                );
+                const match = textBefore.match(/\S+\s*$/);
+                from = match
+                  ? selection.from - match[0].length
+                  : Math.max(1, selection.from - 1);
+              } else {
+                from = Math.max(1, selection.from - 1);
+              }
             } else {
-              to = Math.min(view.state.doc.content.size, selection.to + 1);
+              if (event.ctrlKey || event.altKey) {
+                const textAfter = view.state.doc.textBetween(
+                  selection.to,
+                  view.state.doc.content.size,
+                );
+                const match = textAfter.match(/^\s*\S+/);
+                to = match
+                  ? selection.to + match[0].length
+                  : Math.min(view.state.doc.content.size, selection.to + 1);
+              } else {
+                to = Math.min(view.state.doc.content.size, selection.to + 1);
+              }
             }
           }
 
