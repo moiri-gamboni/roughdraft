@@ -59,6 +59,15 @@ describe("installDevCli", () => {
       `if [[ -z "\${ROUGHDRAFT_STATE_DIR:-}" ]]; then export ROUGHDRAFT_STATE_DIR="${expectedStateDir}"; fi`,
     );
     expect(wrapperContent).toContain(
+      'export ROUGHDRAFT_DEV_WRAPPER_NAME="roughdraft-dev-lyon-v2"',
+    );
+    expect(wrapperContent).toContain(
+      `export ROUGHDRAFT_DEV_WRAPPER_PATH="${result.wrapperPath}"`,
+    );
+    expect(wrapperContent).toContain(
+      `export ROUGHDRAFT_DEV_WRAPPER_REPO_ROOT="${repoRoot}"`,
+    );
+    expect(wrapperContent).toContain(
       `exec node "${path.join(repoRoot, "packages", "server", "bin", "roughdraft.mjs")}" "$@"`,
     );
     expect(mode).toBe(0o755);

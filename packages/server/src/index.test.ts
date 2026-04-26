@@ -151,6 +151,7 @@ describe("createApp", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       backend: "local-files",
+      pid: process.pid,
       port: 4312,
       serverRoot,
       stateless: true,

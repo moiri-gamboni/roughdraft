@@ -78,11 +78,20 @@ function buildDefaultStateDir(commandName, env = process.env) {
   return path.join(baseDir, commandName);
 }
 
-function buildWrapperContent({ repoRoot, cliEntryPath, stateDir }) {
+function buildWrapperContent({
+  commandName,
+  repoRoot,
+  cliEntryPath,
+  stateDir,
+  wrapperPath,
+}) {
   return [
     "#!/usr/bin/env bash",
     `# roughdraft-dev-repo-root=${repoRoot}`,
     `if [[ -z "\${ROUGHDRAFT_STATE_DIR:-}" ]]; then export ROUGHDRAFT_STATE_DIR=${shellDoubleQuote(stateDir)}; fi`,
+    `export ROUGHDRAFT_DEV_WRAPPER_NAME=${shellDoubleQuote(commandName)}`,
+    `export ROUGHDRAFT_DEV_WRAPPER_PATH=${shellDoubleQuote(wrapperPath)}`,
+    `export ROUGHDRAFT_DEV_WRAPPER_REPO_ROOT=${shellDoubleQuote(repoRoot)}`,
     `exec node ${shellDoubleQuote(cliEntryPath)} "$@"`,
     "",
   ].join("\n");
@@ -115,9 +124,11 @@ export function installDevCli(options = {}) {
   const stateDir = options.stateDir ?? buildDefaultStateDir(commandName, env);
   const wrapperPath = path.join(binDir, commandName);
   const wrapperContent = buildWrapperContent({
+    commandName,
     repoRoot,
     cliEntryPath,
     stateDir,
+    wrapperPath,
   });
   const log = options.log ?? console.log;
   const warn = options.warn ?? console.warn;

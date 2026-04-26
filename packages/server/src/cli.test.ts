@@ -100,6 +100,11 @@ describe("cli", () => {
     return url.toString();
   }
 
+  function parseOnlyJsonLog<T>(logs: string[]): T {
+    expect(logs).toHaveLength(1);
+    return JSON.parse(logs[0] ?? "{}") as T;
+  }
+
   afterEach(async () => {
     await Promise.all(
       Array.from(serverByPid.values(), (server) => server.close()),
@@ -225,6 +230,53 @@ describe("cli", () => {
       expectedOpenUrl(`http://localhost:${persisted.port}`, documentPath),
     );
     expect(fs.existsSync(getServerStateFilePath(test.deps.env))).toBeTruthy();
+  });
+
+  it("prints only the document URL from open --print-url", async () => {
+    const test = createTestDependencies();
+    const documentPath = path.join(projectDir, "draft.md");
+    fs.writeFileSync(documentPath, "# Draft\n");
+
+    const exitCode = await runCli(
+      ["open", documentPath, "--print-url"],
+      test.deps,
+    );
+    const persisted = JSON.parse(
+      fs.readFileSync(getServerStateFilePath(test.deps.env), "utf8"),
+    ) as { port: number };
+
+    expect(exitCode).toBe(0);
+    expect(test.logs).toEqual([
+      expectedOpenUrl(`http://localhost:${persisted.port}`, documentPath),
+    ]);
+    expect(test.getLastOpenedUrl()).toBeNull();
+  });
+
+  it("emits JSON from open --json without scraping human prose", async () => {
+    const test = createTestDependencies();
+    const documentPath = path.join(projectDir, "draft.md");
+    fs.writeFileSync(documentPath, "# Draft\n");
+
+    const exitCode = await runCli(["open", documentPath, "--json"], test.deps);
+    const persisted = JSON.parse(
+      fs.readFileSync(getServerStateFilePath(test.deps.env), "utf8"),
+    ) as { port: number };
+    const payload = parseOnlyJsonLog<{
+      opened: boolean;
+      url: string;
+      serverUrl: string;
+      path: string;
+      openMode: string;
+    }>(test.logs);
+
+    expect(exitCode).toBe(0);
+    expect(payload).toEqual({
+      opened: true,
+      url: expectedOpenUrl(`http://localhost:${persisted.port}`, documentPath),
+      serverUrl: `http://localhost:${persisted.port}`,
+      path: documentPath,
+      openMode: "disabled",
+    });
   });
 
   it("prefers the live dev frontend URL when it matches this checkout", async () => {
@@ -441,6 +493,49 @@ describe("cli", () => {
     );
   });
 
+  it("returns successful JSON status when Roughdraft is not running", async () => {
+    const test = createTestDependencies();
+
+    const exitCode = await runCli(["status", "--json"], test.deps);
+    const payload = parseOnlyJsonLog<{
+      running: boolean;
+      stateFile: string;
+    }>(test.logs);
+
+    expect(exitCode).toBe(0);
+    expect(payload).toEqual({
+      running: false,
+      stateFile: getServerStateFilePath(test.deps.env),
+    });
+  });
+
+  it("emits JSON from status when Roughdraft is running", async () => {
+    const test = createTestDependencies();
+    const result = await ensureServerRunning(test.deps, { projectDir });
+
+    const exitCode = await runCli(["status", "--json"], test.deps);
+    const payload = parseOnlyJsonLog<{
+      running: boolean;
+      url: string;
+      port: number;
+      pid: number;
+      startedAt: string;
+      stateFile: string;
+      managed: boolean;
+    }>(test.logs);
+
+    expect(exitCode).toBe(0);
+    expect(payload).toEqual({
+      running: true,
+      url: result.server.url,
+      port: result.server.port,
+      pid: result.server.pid,
+      startedAt: result.server.startedAt,
+      stateFile: getServerStateFilePath(test.deps.env),
+      managed: true,
+    });
+  });
+
   it("cleans stale state during status checks", async () => {
     const test = createTestDependencies();
     const stateFilePath = getServerStateFilePath(test.deps.env);
@@ -621,6 +716,70 @@ describe("cli", () => {
     expect(fs.existsSync(stateFilePath)).toBeFalsy();
   });
 
+  it("stops a confidently identified unmanaged server with stop --all", async () => {
+    const logs: string[] = [];
+    let unmanagedRunning = true;
+    let stoppedPid: number | null = null;
+
+    const deps = createCliDependencies({
+      env: {
+        ...process.env,
+        ROUGHDRAFT_STATE_DIR: stateDir,
+      },
+      cwd: projectDir,
+      fetchImpl: async (input) => {
+        const url =
+          input instanceof URL
+            ? input
+            : new URL(
+                typeof input === "string" ? input : input.url,
+                "http://localhost",
+              );
+
+        if (
+          unmanagedRunning &&
+          url.pathname === "/api/status" &&
+          url.port === String(ROUGHDRAFT_DEFAULT_PORT)
+        ) {
+          return new Response(
+            JSON.stringify({
+              backend: "local-files",
+              pid: 4242,
+              port: ROUGHDRAFT_DEFAULT_PORT,
+              projectDir,
+              serverRoot,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        throw new Error("connect ECONNREFUSED");
+      },
+      isProcessRunning: (pid) => unmanagedRunning && pid === 4242,
+      stopProcess: async (pid) => {
+        stoppedPid = pid;
+        unmanagedRunning = false;
+      },
+      spawnServerProcess: async () => {
+        throw new Error("should not spawn");
+      },
+      openUrl: () => "disabled",
+      log: (message) => logs.push(message),
+      error: () => {},
+    });
+
+    const exitCode = await runCli(["stop", "--all"], deps);
+
+    expect(exitCode).toBe(0);
+    expect(stoppedPid).toBe(4242);
+    expect(logs).toContain(
+      `Stopped unmanaged Roughdraft at http://localhost:${ROUGHDRAFT_DEFAULT_PORT}.`,
+    );
+  });
+
   it("documents reply syntax in criticmarkup help", async () => {
     const test = createTestDependencies();
 
@@ -645,7 +804,9 @@ describe("cli", () => {
     const exitCode = await runCli(["help"], test.deps);
 
     expect(exitCode).toBe(0);
-    expect(test.logs).toContain("  roughdraft help agent");
+    expect(test.logs).toContain(
+      "  help agent         Print the agent setup prompt",
+    );
     expect(test.logs).toContain(
       "Agent setup: https://roughdraft.page/setup.md",
     );
@@ -671,15 +832,45 @@ describe("cli", () => {
     );
   });
 
-  it("keeps install deprecated and points to agent setup", async () => {
+  it("treats removed install command as an unknown command", async () => {
     const test = createTestDependencies();
 
     const exitCode = await runCli(["install"], test.deps);
 
-    expect(exitCode).toBe(1);
-    expect(test.errors).toContain("`roughdraft install` has been removed.");
+    expect(exitCode).toBe(2);
+    expect(test.errors).toContain("Unknown command: install.");
+    expect(test.logs).toEqual([]);
+  });
+
+  it("prints package version only for --version", async () => {
+    const test = createTestDependencies();
+
+    const exitCode = await runCli(["--version"], test.deps);
+
+    expect(exitCode).toBe(0);
+    expect(test.logs).toHaveLength(1);
+    expect(test.logs[0]).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it("shows per-command help", async () => {
+    const test = createTestDependencies();
+
+    const exitCode = await runCli(["open", "--help"], test.deps);
+
+    expect(exitCode).toBe(0);
     expect(test.logs).toContain(
-      "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.",
+      "  roughdraft open <path> [--no-open] [--print-url] [--port <port>]",
+    );
+  });
+
+  it("rejects unknown command typos with suggestions", async () => {
+    const test = createTestDependencies();
+
+    const exitCode = await runCli(["stats"], test.deps);
+
+    expect(exitCode).toBe(2);
+    expect(test.errors).toContain(
+      "Unknown command: stats. Did you mean status?",
     );
   });
 
@@ -692,6 +883,52 @@ describe("cli", () => {
     expect(test.logs).toContain(
       "Live setup instructions: https://roughdraft.page/setup.md",
     );
+  });
+
+  it("reports dev wrapper metadata from doctor --json", async () => {
+    const logs: string[] = [];
+    const wrapperPath = path.join(tempDir, "bin", "roughdraft-dev-lyon-v2");
+    const devStateDir = path.join(
+      tempDir,
+      ".roughdraft",
+      "dev",
+      "roughdraft-dev-lyon-v2",
+    );
+    const deps = createCliDependencies({
+      env: {
+        ...process.env,
+        ROUGHDRAFT_DEV_WRAPPER_NAME: "roughdraft-dev-lyon-v2",
+        ROUGHDRAFT_DEV_WRAPPER_PATH: wrapperPath,
+        ROUGHDRAFT_DEV_WRAPPER_REPO_ROOT: serverRoot,
+        ROUGHDRAFT_STATE_DIR: devStateDir,
+      },
+      cwd: projectDir,
+      fetchImpl: async () => {
+        throw new Error("connect ECONNREFUSED");
+      },
+      log: (message) => logs.push(message),
+      error: () => {},
+    });
+
+    const exitCode = await runCli(["doctor", "--json"], deps);
+    const payload = parseOnlyJsonLog<{
+      devWrapper: {
+        commandName: string;
+        path: string;
+        repoRoot: string;
+        repoRootMatches: boolean;
+        stateDir: string;
+      };
+    }>(logs);
+
+    expect(exitCode).toBe(0);
+    expect(payload.devWrapper).toEqual({
+      commandName: "roughdraft-dev-lyon-v2",
+      path: wrapperPath,
+      repoRoot: serverRoot,
+      repoRootMatches: true,
+      stateDir: devStateDir,
+    });
   });
 
   it("starts a new server when the preferred port belongs to another checkout", async () => {

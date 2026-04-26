@@ -534,6 +534,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
   app.get("/api/status", (_req, res) => {
     res.json({
       backend: "local-files",
+      pid: process.pid,
       port,
       projectDir: options.projectDir
         ? path.resolve(options.projectDir)

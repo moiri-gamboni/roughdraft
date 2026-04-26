@@ -20,6 +20,17 @@ const SERVER_WAIT_ATTEMPTS = 40;
 const SERVER_WAIT_DELAY_MS = 150;
 const PROCESS_WAIT_ATTEMPTS = 20;
 const PROCESS_WAIT_DELAY_MS = 150;
+const USAGE_ERROR = 2;
+const KNOWN_COMMANDS = [
+  "open",
+  "start",
+  "status",
+  "stop",
+  "doctor",
+  "help",
+  "agent-setup",
+  "criticmarkup",
+] as const;
 
 export interface RoughdraftServerState {
   port: number;
@@ -30,6 +41,7 @@ export interface RoughdraftServerState {
 
 interface StatusPayload {
   backend?: string;
+  pid?: number;
   projectDir?: string;
   serverRoot?: string;
   port?: number;
@@ -92,9 +104,281 @@ interface ReusableServer {
   startedAt: string | null;
 }
 
+type KnownCommand = (typeof KNOWN_COMMANDS)[number];
+
+interface ParsedGlobalFlags {
+  help: boolean;
+  json: boolean;
+  noColor: boolean;
+  version: boolean;
+}
+
+interface ParsedCli {
+  command: string | null;
+  global: ParsedGlobalFlags;
+  rest: string[];
+}
+
+interface ParsedCommandOptions {
+  help: boolean;
+  json: boolean;
+  noOpen: boolean;
+  printUrl: boolean;
+  all: boolean;
+  port?: string;
+  stateDir?: string;
+  stateFile?: string;
+  positionals: string[];
+}
+
 const currentServerRoot = path.resolve(
   fileURLToPath(new URL("../../..", import.meta.url)),
 );
+
+function readPackageVersion(): string {
+  try {
+    const packageJsonPath = path.join(currentServerRoot, "package.json");
+    const parsed = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as {
+      version?: unknown;
+    };
+    if (typeof parsed.version === "string" && parsed.version.length > 0) {
+      return parsed.version;
+    }
+  } catch {}
+
+  return "0.0.0";
+}
+
+function emitJson(log: (message: string) => void, value: unknown) {
+  log(JSON.stringify(value, null, 2));
+}
+
+function parseGlobalArgs(args: string[]): ParsedCli {
+  const global: ParsedGlobalFlags = {
+    help: false,
+    json: false,
+    noColor: false,
+    version: false,
+  };
+  const rest = [...args];
+  const commandParts: string[] = [];
+
+  while (rest.length > 0) {
+    const arg = rest.shift();
+    if (!arg) break;
+
+    if (arg === "--") {
+      commandParts.push(...rest);
+      break;
+    }
+
+    if (arg === "-h" || arg === "--help") {
+      global.help = true;
+      continue;
+    }
+
+    if (arg === "--version") {
+      global.version = true;
+      continue;
+    }
+
+    if (arg === "--json") {
+      global.json = true;
+      continue;
+    }
+
+    if (arg === "--no-color") {
+      global.noColor = true;
+      continue;
+    }
+
+    if (arg.startsWith("-")) {
+      throw new Error(`Unknown flag: ${arg}`);
+    }
+
+    commandParts.push(arg, ...rest);
+    break;
+  }
+
+  const [command, ...commandRest] = commandParts;
+  return {
+    command: command ?? null,
+    global,
+    rest: commandRest,
+  };
+}
+
+function takeFlagValue(
+  args: string[],
+  index: number,
+  flag: string,
+): { value: string; nextIndex: number } {
+  const value = args[index + 1];
+  if (!value || value.startsWith("-")) {
+    throw new Error(`${flag} requires a value.`);
+  }
+
+  return { value, nextIndex: index + 1 };
+}
+
+function parseCommandOptions(
+  args: string[],
+  options: { allowAll?: boolean; allowOpen?: boolean; allowPort?: boolean },
+): ParsedCommandOptions {
+  const parsed: ParsedCommandOptions = {
+    all: false,
+    help: false,
+    json: false,
+    noOpen: false,
+    positionals: [],
+    printUrl: false,
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--") {
+      parsed.positionals.push(...args.slice(index + 1));
+      break;
+    }
+
+    if (arg === "-h" || arg === "--help") {
+      parsed.help = true;
+      continue;
+    }
+
+    if (arg === "--json") {
+      parsed.json = true;
+      continue;
+    }
+
+    if (arg === "--all") {
+      if (!options.allowAll) throw new Error(`Unknown flag: ${arg}`);
+      parsed.all = true;
+      continue;
+    }
+
+    if (arg === "--no-open") {
+      if (!options.allowOpen) throw new Error(`Unknown flag: ${arg}`);
+      parsed.noOpen = true;
+      continue;
+    }
+
+    if (arg === "--print-url") {
+      if (!options.allowOpen) throw new Error(`Unknown flag: ${arg}`);
+      parsed.printUrl = true;
+      parsed.noOpen = true;
+      continue;
+    }
+
+    if (arg === "--port") {
+      if (!options.allowPort) throw new Error(`Unknown flag: ${arg}`);
+      const next = takeFlagValue(args, index, arg);
+      parsed.port = next.value;
+      index = next.nextIndex;
+      continue;
+    }
+
+    if (arg.startsWith("--port=")) {
+      if (!options.allowPort) throw new Error(`Unknown flag: --port`);
+      parsed.port = arg.slice("--port=".length);
+      continue;
+    }
+
+    if (arg === "--state-file") {
+      const next = takeFlagValue(args, index, arg);
+      parsed.stateFile = next.value;
+      index = next.nextIndex;
+      continue;
+    }
+
+    if (arg.startsWith("--state-file=")) {
+      parsed.stateFile = arg.slice("--state-file=".length);
+      continue;
+    }
+
+    if (arg === "--state-dir") {
+      const next = takeFlagValue(args, index, arg);
+      parsed.stateDir = next.value;
+      index = next.nextIndex;
+      continue;
+    }
+
+    if (arg.startsWith("--state-dir=")) {
+      parsed.stateDir = arg.slice("--state-dir=".length);
+      continue;
+    }
+
+    if (arg.startsWith("-")) {
+      throw new Error(`Unknown flag: ${arg}`);
+    }
+
+    parsed.positionals.push(arg);
+  }
+
+  return parsed;
+}
+
+function applyCliEnvOverrides(
+  deps: CliDependencies,
+  options: ParsedCommandOptions,
+): CliDependencies {
+  return {
+    ...deps,
+    env: {
+      ...deps.env,
+      ...(options.port ? { ROUGHDRAFT_PORT: options.port } : {}),
+      ...(options.stateDir ? { ROUGHDRAFT_STATE_DIR: options.stateDir } : {}),
+      ...(options.stateFile
+        ? { ROUGHDRAFT_STATE_FILE: options.stateFile }
+        : {}),
+    },
+  };
+}
+
+function isKnownCommand(value: string): value is KnownCommand {
+  return (KNOWN_COMMANDS as readonly string[]).includes(value);
+}
+
+function isPathLikeInput(value: string): boolean {
+  return (
+    value.toLowerCase().endsWith(".md") ||
+    value.startsWith(".") ||
+    value.startsWith("/") ||
+    value.startsWith("~") ||
+    /^[a-zA-Z]:[\\/]/.test(value) ||
+    value.includes("/") ||
+    value.includes("\\")
+  );
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  const current = Array.from({ length: b.length + 1 }, () => 0);
+
+  for (let aIndex = 1; aIndex <= a.length; aIndex += 1) {
+    current[0] = aIndex;
+    for (let bIndex = 1; bIndex <= b.length; bIndex += 1) {
+      current[bIndex] = Math.min(
+        previous[bIndex] + 1,
+        current[bIndex - 1] + 1,
+        previous[bIndex - 1] + (a[aIndex - 1] === b[bIndex - 1] ? 0 : 1),
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+
+  return previous[b.length] ?? 0;
+}
+
+function suggestCommand(command: string): string | null {
+  const suggestion = KNOWN_COMMANDS.map((candidate) => ({
+    candidate,
+    distance: levenshteinDistance(command, candidate),
+  })).sort((left, right) => left.distance - right.distance)[0];
+
+  return suggestion && suggestion.distance <= 3 ? suggestion.candidate : null;
+}
 
 function hasChromeAppMode() {
   if (process.platform !== "darwin") return false;
@@ -239,38 +523,130 @@ export function createCliDependencies(
 }
 
 function printHelp(log: (message: string) => void) {
-  log("Roughdraft is a local markdown review app for AI-assisted workflows.");
+  log("Roughdraft is a local Markdown review app for AI-assisted workflows.");
   log("");
   log("Usage:");
-  log("  roughdraft start");
-  log("  roughdraft open <path>");
-  log("  roughdraft status");
-  log("  roughdraft stop");
-  log("  roughdraft help");
-  log("  roughdraft help agent");
-  log("  roughdraft help criticmarkup");
+  log("  roughdraft [flags] <command> [args]");
+  log("  roughdraft <path>");
   log("");
-  log("Open one markdown file:");
-  log("  roughdraft open /absolute/path/to/file.md");
-  log("  Relative paths also work; absolute paths are best for agents.");
+  log("Commands:");
+  log(
+    "  open <path>        Open a Markdown file, starting the server if needed",
+  );
+  log("  start              Start or reuse the background server");
+  log("  status             Show server status");
+  log("  stop               Stop the managed background server");
+  log("  doctor             Diagnose local setup issues");
+  log("  help agent         Print the agent setup prompt");
+  log("  help criticmarkup  Show CriticMarkup examples");
+  log("  agent-setup        Print the agent setup prompt");
+  log("  criticmarkup       Show CriticMarkup examples");
   log("");
-  log("Server:");
-  log("  `roughdraft open` starts the server if needed.");
-  log("  Use `roughdraft status` or `roughdraft stop` to manage it.");
+  log("Flags:");
+  log("  -h, --help         Show help");
+  log("  --version          Print version");
+  log("  --json             Print JSON for supported commands");
+  log("  --no-color         Disable color");
   log("");
-  log("Review loop:");
-  log("  1. Open a markdown file in Roughdraft.");
-  log("  2. Read, comment, and suggest edits with CriticMarkup.");
-  log("  3. After review, continue by reading the markdown file from disk.");
-  log("");
-  log("CriticMarkup quick reference:");
-  log("  {>>comment<<}  {++inserted++}  {--deleted--}");
-  log("  {~~old~>new~~}  {==highlighted==}");
+  log("Examples:");
+  log("  roughdraft open ./draft.md");
+  log("  roughdraft open ./draft.md --print-url");
+  log("  roughdraft status --json");
   log("");
   log(`Agent setup: ${AGENT_SETUP_URL}`);
   log("Use `roughdraft help agent` for a copyable setup prompt.");
-  log("");
-  log("Use `roughdraft help criticmarkup` for examples.");
+}
+
+function printCommandHelp(
+  command: KnownCommand,
+  log: (message: string) => void,
+) {
+  if (command === "open") {
+    log("Usage:");
+    log("  roughdraft open <path> [--no-open] [--print-url] [--port <port>]");
+    log("");
+    log("Opens one Markdown file. Starts Roughdraft if needed.");
+    log("");
+    log("Flags:");
+    log(
+      "  --no-open            Start/reuse the server without opening a browser",
+    );
+    log(
+      "  --print-url          Print only the document URL and do not open it",
+    );
+    log("  --json               Print machine-readable output");
+    log("  --port <port>        Preferred server port");
+    log("  --state-file <path>  Server state file");
+    log("  --state-dir <dir>    Directory containing server.json");
+    return;
+  }
+
+  if (command === "start") {
+    log("Usage:");
+    log("  roughdraft start [--port <port>] [--json]");
+    log("");
+    log("Starts or reuses the background Roughdraft server.");
+    log("");
+    log("Flags:");
+    log("  --json               Print machine-readable output");
+    log("  --port <port>        Preferred server port");
+    log("  --state-file <path>  Server state file");
+    log("  --state-dir <dir>    Directory containing server.json");
+    return;
+  }
+
+  if (command === "status") {
+    log("Usage:");
+    log("  roughdraft status [--json]");
+    log("");
+    log("Shows whether Roughdraft is running.");
+    log("");
+    log("Flags:");
+    log("  --json               Print machine-readable output");
+    log("  --state-file <path>  Server state file");
+    log("  --state-dir <dir>    Directory containing server.json");
+    return;
+  }
+
+  if (command === "stop") {
+    log("Usage:");
+    log("  roughdraft stop [--all]");
+    log("");
+    log("Stops the managed background Roughdraft server.");
+    log("");
+    log("Flags:");
+    log(
+      "  --all                Also stop a confidently detected unmanaged server",
+    );
+    log("  --state-file <path>  Server state file");
+    log("  --state-dir <dir>    Directory containing server.json");
+    return;
+  }
+
+  if (command === "doctor") {
+    log("Usage:");
+    log("  roughdraft doctor [--json]");
+    log("");
+    log("Diagnoses local Roughdraft setup and server state.");
+    log("");
+    log("Flags:");
+    log("  --json               Print machine-readable output");
+    log("  --state-file <path>  Server state file");
+    log("  --state-dir <dir>    Directory containing server.json");
+    return;
+  }
+
+  if (command === "help") {
+    printHelp(log);
+    return;
+  }
+
+  if (command === "agent-setup") {
+    printAgentHelp(log);
+    return;
+  }
+
+  printCriticMarkupHelp(log);
 }
 
 function printAgentHelp(log: (message: string) => void) {
@@ -319,25 +695,15 @@ function printCriticMarkupHelp(log: (message: string) => void) {
   );
 }
 
-function printInstallDeprecation(
-  log: (message: string) => void,
-  error: (message: string) => void,
-) {
-  error("`roughdraft install` has been removed.");
-  log("To set up your coding agent, paste this into it:");
-  log("");
-  log(AGENT_SETUP_PROMPT);
-  log("");
-  log(`Live setup instructions: ${AGENT_SETUP_URL}`);
-  log("");
-  log("Roughdraft no longer edits user-level agent files directly.");
-}
-
 function parsePort(value: string | undefined): number {
   const parsed = Number.parseInt(value || "", 10);
   return Number.isFinite(parsed) && parsed > 0
     ? parsed
     : ROUGHDRAFT_DEFAULT_PORT;
+}
+
+function getPreferredPort(env: NodeJS.ProcessEnv): number {
+  return parsePort(env.ROUGHDRAFT_PORT || env.PORT);
 }
 
 function buildPublicBaseUrl(port: number): string {
@@ -651,7 +1017,7 @@ async function findReusableServer(
 ): Promise<ReusableServer | null> {
   const stateFilePath = getServerStateFilePath(deps.env);
   const persistedState = readServerStateFromDisk(stateFilePath);
-  const preferredPort = parsePort(deps.env.PORT);
+  const preferredPort = getPreferredPort(deps.env);
   const expectedServerRoot = path.resolve(
     options.serverRoot ?? currentServerRoot,
   );
@@ -739,7 +1105,7 @@ export async function ensureServerRunning(
     return { server: reusableServer, reused: true, portChanged: false };
   }
 
-  const preferredPort = parsePort(deps.env.PORT);
+  const preferredPort = getPreferredPort(deps.env);
   const port = await deps.findAvailablePortImpl(preferredPort);
   const projectDir = path.resolve(options.projectDir ?? deps.cwd);
   const spawned = await deps.spawnServerProcess({
@@ -775,30 +1141,282 @@ export async function ensureServerRunning(
   };
 }
 
+function buildServerStatusJson(
+  server: ReusableServer | null,
+  stateFilePath: string,
+) {
+  if (!server) {
+    return {
+      running: false,
+      stateFile: stateFilePath,
+    };
+  }
+
+  return {
+    running: true,
+    url: server.url,
+    port: server.port,
+    pid: server.pid,
+    startedAt: server.startedAt,
+    stateFile: stateFilePath,
+    managed: server.tracked,
+  };
+}
+
+async function stopTrackedServer(deps: CliDependencies): Promise<{
+  persistedState: RoughdraftServerState | null;
+  stopped: boolean;
+  portIsQuiet: boolean;
+  failedPid: number | null;
+}> {
+  const stateFilePath = getServerStateFilePath(deps.env);
+  const persistedState = readServerStateFromDisk(stateFilePath);
+
+  if (!persistedState) {
+    return {
+      failedPid: null,
+      persistedState: null,
+      portIsQuiet: true,
+      stopped: false,
+    };
+  }
+
+  if (deps.isProcessRunning(persistedState.pid)) {
+    await deps.stopProcess(persistedState.pid);
+  }
+
+  const trackedPidStillRunning = deps.isProcessRunning(persistedState.pid);
+  const portIsQuiet = await waitForServerToStop(persistedState.port, deps);
+
+  if (trackedPidStillRunning) {
+    writeServerStateToDisk(stateFilePath, {
+      ...persistedState,
+      url: buildPublicBaseUrl(persistedState.port),
+    });
+    return {
+      failedPid: persistedState.pid,
+      persistedState,
+      portIsQuiet,
+      stopped: false,
+    };
+  }
+
+  removeServerStateFile(stateFilePath);
+  return {
+    failedPid: null,
+    persistedState,
+    portIsQuiet,
+    stopped: true,
+  };
+}
+
+async function runDoctor(
+  deps: CliDependencies,
+  json: boolean,
+): Promise<number> {
+  const stateFilePath = getServerStateFilePath(deps.env);
+  const persistedState = readServerStateFromDisk(stateFilePath);
+  const preferredPort = getPreferredPort(deps.env);
+  const preferredStatus = await getStatusPayload(preferredPort, deps);
+  const trackedStatus = persistedState
+    ? await getStatusPayload(persistedState.port, deps)
+    : null;
+  const cwdReadable = (() => {
+    try {
+      fs.accessSync(deps.cwd, fs.constants.R_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const managedPidRunning = persistedState
+    ? deps.isProcessRunning(persistedState.pid)
+    : false;
+  const serverRootMatches =
+    trackedStatus?.serverRoot !== undefined
+      ? path.resolve(trackedStatus.serverRoot) === currentServerRoot
+      : false;
+  const commandPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
+  const devStateDir = deps.env.ROUGHDRAFT_STATE_DIR?.includes(
+    `${path.sep}.roughdraft${path.sep}dev${path.sep}`,
+  )
+    ? path.resolve(deps.env.ROUGHDRAFT_STATE_DIR)
+    : null;
+  const devWrapperName = deps.env.ROUGHDRAFT_DEV_WRAPPER_NAME?.trim() || null;
+  const devWrapperPath = deps.env.ROUGHDRAFT_DEV_WRAPPER_PATH?.trim()
+    ? path.resolve(deps.env.ROUGHDRAFT_DEV_WRAPPER_PATH)
+    : null;
+  const devWrapperRepoRoot =
+    deps.env.ROUGHDRAFT_DEV_WRAPPER_REPO_ROOT?.trim() || null;
+
+  const report = {
+    packageVersion: readPackageVersion(),
+    nodeVersion: process.version,
+    commandPath,
+    stateFile: stateFilePath,
+    stateFileExists: fs.existsSync(stateFilePath),
+    managedPid: persistedState?.pid ?? null,
+    managedPidRunning,
+    recordedPort: persistedState?.port ?? null,
+    recordedPortResponds: Boolean(trackedStatus),
+    preferredPort,
+    preferredPortResponds: Boolean(preferredStatus),
+    serverRoot: trackedStatus?.serverRoot ?? null,
+    serverRootMatches,
+    browserOpeningDisabled: deps.env.ROUGHDRAFT_NO_OPEN === "1",
+    cwd: deps.cwd,
+    cwdReadable,
+    devWrapper:
+      devStateDir || devWrapperName || devWrapperPath || devWrapperRepoRoot
+        ? {
+            commandName: devWrapperName,
+            path: devWrapperPath,
+            repoRoot: devWrapperRepoRoot,
+            repoRootMatches: devWrapperRepoRoot
+              ? path.resolve(devWrapperRepoRoot) === currentServerRoot
+              : null,
+            stateDir: devStateDir,
+          }
+        : null,
+  };
+
+  if (json) {
+    emitJson(deps.log, report);
+    return 0;
+  }
+
+  deps.log(`Package version: ${report.packageVersion}`);
+  deps.log(`Node version: ${report.nodeVersion}`);
+  deps.log(`Command path: ${report.commandPath ?? "unknown"}`);
+  deps.log(`State file: ${report.stateFile}`);
+  deps.log(`State file exists: ${report.stateFileExists ? "yes" : "no"}`);
+  deps.log(
+    `Managed PID: ${
+      report.managedPid === null
+        ? "none"
+        : `${report.managedPid} (${report.managedPidRunning ? "running" : "not running"})`
+    }`,
+  );
+  deps.log(
+    `Recorded port: ${
+      report.recordedPort === null
+        ? "none"
+        : `${report.recordedPort} (${report.recordedPortResponds ? "responding" : "not responding"})`
+    }`,
+  );
+  deps.log(
+    `Preferred port: ${report.preferredPort} (${report.preferredPortResponds ? "responding" : "not responding"})`,
+  );
+  deps.log(
+    `Server root matches checkout: ${report.serverRootMatches ? "yes" : "no"}`,
+  );
+  deps.log(
+    `Browser opening disabled: ${report.browserOpeningDisabled ? "yes" : "no"}`,
+  );
+  deps.log(`Current directory readable: ${report.cwdReadable ? "yes" : "no"}`);
+  if (report.devWrapper) {
+    deps.log(
+      `Dev wrapper command: ${report.devWrapper.commandName ?? "unknown"}`,
+    );
+    deps.log(`Dev wrapper path: ${report.devWrapper.path ?? "unknown"}`);
+    deps.log(
+      `Dev wrapper repo root: ${report.devWrapper.repoRoot ?? "unknown"}`,
+    );
+    deps.log(`Dev state dir: ${report.devWrapper.stateDir ?? "unknown"}`);
+  }
+
+  return 0;
+}
+
+function getConfidentStopCandidate(
+  payload: StatusPayload | null,
+): number | null {
+  if (
+    typeof payload?.pid !== "number" ||
+    !Number.isFinite(payload.pid) ||
+    payload.pid <= 0 ||
+    !payload.serverRoot ||
+    path.resolve(payload.serverRoot) !== currentServerRoot
+  ) {
+    return null;
+  }
+
+  return payload.pid;
+}
+
 export async function runCli(
   args: string[],
   overrides: Partial<CliDependencies> = {},
 ): Promise<number> {
-  const deps = createCliDependencies(overrides);
-  const [command, ...rest] = args;
+  let deps = createCliDependencies(overrides);
+  let parsed: ParsedCli;
 
-  if (
-    !command ||
-    command === "help" ||
-    command === "--help" ||
-    command === "-h"
-  ) {
-    if (rest[0] === "agent") {
+  try {
+    parsed = parseGlobalArgs(args);
+  } catch (error) {
+    deps.error(error instanceof Error ? error.message : "Invalid usage.");
+    return USAGE_ERROR;
+  }
+
+  if (parsed.global.version) {
+    deps.log(readPackageVersion());
+    return 0;
+  }
+
+  if (!parsed.command) {
+    printHelp(deps.log);
+    return 0;
+  }
+
+  if (parsed.command === "help") {
+    const [topic, ...extra] = parsed.rest;
+    if (extra.length > 0) {
+      deps.error("Usage: roughdraft help [agent|criticmarkup|command]");
+      return USAGE_ERROR;
+    }
+
+    if (!topic) {
+      printHelp(deps.log);
+      return 0;
+    }
+
+    if (topic === "agent") {
       printAgentHelp(deps.log);
       return 0;
     }
 
-    if (rest[0] === "criticmarkup") {
+    if (topic === "criticmarkup") {
       printCriticMarkupHelp(deps.log);
       return 0;
     }
 
-    printHelp(deps.log);
+    if (isKnownCommand(topic)) {
+      printCommandHelp(topic, deps.log);
+      return 0;
+    }
+
+    deps.error(`Unknown help topic: ${topic}`);
+    return USAGE_ERROR;
+  }
+
+  let command = parsed.command;
+  let rest = parsed.rest;
+
+  if (!isKnownCommand(command)) {
+    if (isPathLikeInput(command)) {
+      rest = [command, ...rest];
+      command = "open";
+    } else {
+      const suggestion = suggestCommand(command);
+      deps.error(
+        `Unknown command: ${command}.${suggestion ? ` Did you mean ${suggestion}?` : ""}`,
+      );
+      return USAGE_ERROR;
+    }
+  }
+
+  if (parsed.global.help) {
+    printCommandHelp(command as KnownCommand, deps.log);
     return 0;
   }
 
@@ -812,13 +1430,40 @@ export async function runCli(
     return 0;
   }
 
-  if (command === "install") {
-    printInstallDeprecation(deps.log, deps.error);
-    return 1;
-  }
-
   if (command === "start") {
+    let options: ParsedCommandOptions;
+    try {
+      options = parseCommandOptions(rest, { allowPort: true });
+    } catch (error) {
+      deps.error(error instanceof Error ? error.message : "Invalid usage.");
+      return USAGE_ERROR;
+    }
+
+    if (options.help) {
+      printCommandHelp("start", deps.log);
+      return 0;
+    }
+
+    if (options.positionals.length > 0) {
+      deps.error("Usage: roughdraft start [--port <port>] [--json]");
+      return USAGE_ERROR;
+    }
+
+    deps = applyCliEnvOverrides(deps, options);
+    const json = parsed.global.json || options.json;
     const result = await ensureServerRunning(deps);
+    if (json) {
+      emitJson(deps.log, {
+        ...buildServerStatusJson(
+          result.server,
+          getServerStateFilePath(deps.env),
+        ),
+        reused: result.reused,
+        portChanged: result.portChanged,
+      });
+      return 0;
+    }
+
     if (result.reused) {
       if (result.server.tracked) {
         deps.log(`Roughdraft is already running at ${result.server.url}`);
@@ -832,7 +1477,7 @@ export async function runCli(
 
     if (result.portChanged) {
       deps.log(
-        `Preferred port ${parsePort(deps.env.PORT)} is busy, using ${result.server.port}.`,
+        `Preferred port ${getPreferredPort(deps.env)} is busy, using ${result.server.port}.`,
       );
     }
 
@@ -841,10 +1486,46 @@ export async function runCli(
   }
 
   if (command === "status") {
+    let options: ParsedCommandOptions;
+    try {
+      options = parseCommandOptions(rest, {});
+    } catch (error) {
+      deps.error(error instanceof Error ? error.message : "Invalid usage.");
+      return USAGE_ERROR;
+    }
+
+    if (options.help) {
+      printCommandHelp("status", deps.log);
+      return 0;
+    }
+
+    if (options.positionals.length > 0) {
+      deps.error("Usage: roughdraft status [--json]");
+      return USAGE_ERROR;
+    }
+
+    deps = applyCliEnvOverrides(deps, options);
+    const json = parsed.global.json || options.json;
     const server = await findReusableServer(deps);
     if (!server) {
+      if (json) {
+        emitJson(
+          deps.log,
+          buildServerStatusJson(null, getServerStateFilePath(deps.env)),
+        );
+        return 0;
+      }
+
       deps.log("Roughdraft is not running. Start it with `roughdraft start`.");
       return 1;
+    }
+
+    if (json) {
+      emitJson(
+        deps.log,
+        buildServerStatusJson(server, getServerStateFilePath(deps.env)),
+      );
+      return 0;
     }
 
     deps.log(`Roughdraft is running at ${server.url}`);
@@ -861,60 +1542,226 @@ export async function runCli(
   }
 
   if (command === "stop") {
-    const stateFilePath = getServerStateFilePath(deps.env);
-    const persistedState = readServerStateFromDisk(stateFilePath);
+    let options: ParsedCommandOptions;
+    try {
+      options = parseCommandOptions(rest, { allowAll: true });
+    } catch (error) {
+      deps.error(error instanceof Error ? error.message : "Invalid usage.");
+      return USAGE_ERROR;
+    }
 
-    if (!persistedState) {
-      const preferredPort = parsePort(deps.env.PORT);
+    if (options.help) {
+      printCommandHelp("stop", deps.log);
+      return 0;
+    }
+
+    if (options.positionals.length > 0) {
+      deps.error("Usage: roughdraft stop [--all]");
+      return USAGE_ERROR;
+    }
+
+    deps = applyCliEnvOverrides(deps, options);
+    const json = parsed.global.json || options.json;
+    const stateFilePath = getServerStateFilePath(deps.env);
+    const stopResult = await stopTrackedServer(deps);
+
+    if (!stopResult.persistedState) {
+      const preferredPort = getPreferredPort(deps.env);
       const unmanagedServer = await getStatusPayload(preferredPort, deps);
       if (unmanagedServer) {
+        const candidatePid = options.all
+          ? getConfidentStopCandidate(unmanagedServer)
+          : null;
+        if (candidatePid !== null) {
+          await deps.stopProcess(candidatePid);
+          const stopped = await waitForServerToStop(preferredPort, deps);
+          if (stopped) {
+            if (json) {
+              emitJson(deps.log, {
+                stopped: true,
+                managed: false,
+                pid: candidatePid,
+                url: buildPublicBaseUrl(preferredPort),
+                stateFile: stateFilePath,
+              });
+              return 0;
+            }
+
+            deps.log(
+              `Stopped unmanaged Roughdraft at ${buildPublicBaseUrl(preferredPort)}.`,
+            );
+            return 0;
+          }
+        }
+
+        if (json) {
+          emitJson(deps.log, {
+            stopped: false,
+            managed: false,
+            url: buildPublicBaseUrl(preferredPort),
+            ...(options.all
+              ? { reason: "No confident unmanaged process candidate." }
+              : {}),
+            stateFile: stateFilePath,
+          });
+          return 1;
+        }
+
         deps.error(
-          `Roughdraft is still running at ${buildPublicBaseUrl(preferredPort)}, but it is not managed by ${stateFilePath}. Stop it manually.`,
+          options.all
+            ? `Roughdraft is still running at ${buildPublicBaseUrl(preferredPort)}, but it could not be matched to a safe process candidate. Stop it manually.`
+            : `Roughdraft is still running at ${buildPublicBaseUrl(preferredPort)}, but it is not managed by ${stateFilePath}. Stop it manually.`,
         );
         return 1;
+      }
+
+      if (json) {
+        emitJson(deps.log, {
+          stopped: false,
+          running: false,
+          stateFile: stateFilePath,
+        });
+        return 0;
       }
 
       deps.log("Roughdraft is not running.");
       return 0;
     }
 
-    if (deps.isProcessRunning(persistedState.pid)) {
-      await deps.stopProcess(persistedState.pid);
-    }
+    if (stopResult.failedPid !== null) {
+      if (json) {
+        emitJson(deps.log, {
+          stopped: false,
+          pid: stopResult.failedPid,
+          stateFile: stateFilePath,
+        });
+        return 1;
+      }
 
-    const trackedPidStillRunning = deps.isProcessRunning(persistedState.pid);
-    const portIsQuiet = await waitForServerToStop(persistedState.port, deps);
-
-    if (trackedPidStillRunning) {
-      deps.error(`Failed to stop Roughdraft process ${persistedState.pid}.`);
-      writeServerStateToDisk(stateFilePath, {
-        ...persistedState,
-        url: buildPublicBaseUrl(persistedState.port),
-      });
+      deps.error(`Failed to stop Roughdraft process ${stopResult.failedPid}.`);
       return 1;
     }
 
-    removeServerStateFile(stateFilePath);
-    if (!portIsQuiet) {
+    if (!stopResult.portIsQuiet) {
+      if (options.all) {
+        const unmanagedServer = await getStatusPayload(
+          stopResult.persistedState.port,
+          deps,
+        );
+        const candidatePid = getConfidentStopCandidate(unmanagedServer);
+        if (candidatePid !== null) {
+          await deps.stopProcess(candidatePid);
+          const stopped = await waitForServerToStop(
+            stopResult.persistedState.port,
+            deps,
+          );
+          if (stopped) {
+            if (json) {
+              emitJson(deps.log, {
+                stopped: true,
+                pid: stopResult.persistedState.pid,
+                unmanagedPid: candidatePid,
+                url: buildPublicBaseUrl(stopResult.persistedState.port),
+                stateFile: stateFilePath,
+              });
+              return 0;
+            }
+
+            deps.log(
+              `Stopped Roughdraft at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
+            );
+            deps.log(`Stopped unmanaged Roughdraft process ${candidatePid}.`);
+            return 0;
+          }
+        }
+      }
+
+      if (json) {
+        emitJson(deps.log, {
+          stopped: true,
+          pid: stopResult.persistedState.pid,
+          url: buildPublicBaseUrl(stopResult.persistedState.port),
+          anotherInstanceRunning: true,
+          ...(options.all
+            ? { reason: "No confident unmanaged process candidate." }
+            : {}),
+          stateFile: stateFilePath,
+        });
+        return 1;
+      }
+
       deps.error(
-        `Stopped tracked Roughdraft process ${persistedState.pid}, but another Roughdraft instance is still running at ${buildPublicBaseUrl(persistedState.port)}.`,
+        `Stopped tracked Roughdraft process ${stopResult.persistedState.pid}, but another Roughdraft instance is still running at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
       );
       return 1;
     }
 
+    if (json) {
+      emitJson(deps.log, {
+        stopped: true,
+        pid: stopResult.persistedState.pid,
+        url: buildPublicBaseUrl(stopResult.persistedState.port),
+        stateFile: stateFilePath,
+      });
+      return 0;
+    }
+
     deps.log(
-      `Stopped Roughdraft at ${buildPublicBaseUrl(persistedState.port)}.`,
+      `Stopped Roughdraft at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
     );
     return 0;
   }
 
-  if (command === "open") {
-    const target = rest[0];
-    if (!target) {
-      deps.error("Usage: roughdraft open <path>");
-      return 1;
+  if (command === "doctor") {
+    let options: ParsedCommandOptions;
+    try {
+      options = parseCommandOptions(rest, {});
+    } catch (error) {
+      deps.error(error instanceof Error ? error.message : "Invalid usage.");
+      return USAGE_ERROR;
     }
 
+    if (options.help) {
+      printCommandHelp("doctor", deps.log);
+      return 0;
+    }
+
+    if (options.positionals.length > 0) {
+      deps.error("Usage: roughdraft doctor [--json]");
+      return USAGE_ERROR;
+    }
+
+    deps = applyCliEnvOverrides(deps, options);
+    return runDoctor(deps, parsed.global.json || options.json);
+  }
+
+  if (command === "open") {
+    let options: ParsedCommandOptions;
+    try {
+      options = parseCommandOptions(rest, { allowOpen: true, allowPort: true });
+    } catch (error) {
+      deps.error(error instanceof Error ? error.message : "Invalid usage.");
+      return USAGE_ERROR;
+    }
+
+    if (options.help) {
+      printCommandHelp("open", deps.log);
+      return 0;
+    }
+
+    const target = options.positionals[0];
+    if (!target) {
+      deps.error("Usage: roughdraft open <path>");
+      return USAGE_ERROR;
+    }
+
+    if (options.positionals.length > 1) {
+      deps.error("Usage: roughdraft open <path>");
+      return USAGE_ERROR;
+    }
+
+    deps = applyCliEnvOverrides(deps, options);
+    const json = parsed.global.json || options.json;
     let resolvedTarget: ResolvedTargetPath;
     try {
       resolvedTarget = resolveTargetPath(target);
@@ -936,12 +1783,34 @@ export async function runCli(
     }
 
     const targetUrl = buildTargetUrl(baseUrl, openPath);
-    const openMode = deps.openUrl(targetUrl);
+    const openMode =
+      options.noOpen || deps.env.ROUGHDRAFT_NO_OPEN === "1"
+        ? "disabled"
+        : deps.openUrl(targetUrl);
 
     if (result?.portChanged) {
-      deps.log(
-        `Preferred port ${parsePort(deps.env.PORT)} is busy, using ${result.server.port}.`,
-      );
+      const message = `Preferred port ${getPreferredPort(deps.env)} is busy, using ${result.server.port}.`;
+      if (options.printUrl) {
+        deps.error(message);
+      } else if (!json) {
+        deps.log(message);
+      }
+    }
+
+    if (options.printUrl) {
+      deps.log(targetUrl);
+      return 0;
+    }
+
+    if (json) {
+      emitJson(deps.log, {
+        opened: true,
+        url: targetUrl,
+        serverUrl: baseUrl,
+        path: openPath,
+        openMode,
+      });
+      return 0;
     }
 
     if (openMode === "chrome-app") {
@@ -958,5 +1827,5 @@ export async function runCli(
     return 0;
   }
 
-  return runCli(["open", command, ...rest], overrides);
+  return USAGE_ERROR;
 }

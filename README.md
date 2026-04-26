@@ -55,6 +55,13 @@ Open a specific markdown file:
 roughdraft open ./path/to/my-essay/draft.md
 ```
 
+For scripts and agents that need a URL without launching a browser:
+
+```bash
+roughdraft open ./path/to/my-essay/draft.md --print-url
+roughdraft status --json
+```
+
 Check or stop the background server:
 
 ```bash
@@ -63,6 +70,7 @@ roughdraft stop
 ```
 
 `roughdraft open` will reuse the running server and auto-start it if needed.
+You can also use `roughdraft ./path/to/file.md` as a shortcut when the input clearly looks like a path.
 
 Roughdraft does not edit `~/CLAUDE.md`, `~/AGENTS.md`, or other user-level agent files. The setup prompt asks your agent to update its own guidance.
 
@@ -161,6 +169,80 @@ Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdr
 ```
 
 Use `roughdraft help`, `roughdraft help agent`, or `roughdraft help criticmarkup` if you need a local refresher.
+
+## CLI reference
+
+```text
+roughdraft [flags] <command> [args]
+roughdraft <path>
+```
+
+Commands:
+
+```text
+open <path>        Open one Markdown file, starting the server if needed
+start              Start or reuse the background server
+status             Show server status
+stop               Stop the managed background server
+doctor             Diagnose local setup issues
+help agent         Print the agent setup prompt
+help criticmarkup  Show CriticMarkup examples
+agent-setup        Print the agent setup prompt
+criticmarkup       Show CriticMarkup examples
+```
+
+Global flags:
+
+```text
+-h, --help         Show help
+--version          Print version
+--json             Print JSON for supported commands
+--no-color         Disable color
+```
+
+Useful command flags:
+
+```text
+roughdraft open <path> --no-open
+roughdraft open <path> --print-url
+roughdraft open <path> --json
+roughdraft start --port <port>
+roughdraft status --json
+roughdraft stop --all
+roughdraft doctor --json
+```
+
+Usage errors return exit code `2`. Runtime failures return exit code `1`. `roughdraft status --json` returns exit code `0` even when the JSON says `"running": false`.
+
+Supported environment variables:
+
+```text
+ROUGHDRAFT_PORT
+  Preferred server port.
+
+PORT
+  Legacy preferred server port. Used only when ROUGHDRAFT_PORT is unset.
+
+ROUGHDRAFT_NO_OPEN=1
+  Disable browser/app opening.
+
+ROUGHDRAFT_STATE_FILE
+  Exact path to the server state JSON file.
+
+ROUGHDRAFT_STATE_DIR
+  Directory containing server.json.
+```
+
+Development-only environment variables:
+
+```text
+ROUGHDRAFT_DEV_FRONTEND_STATE_FILE
+ROUGHDRAFT_DEV_BIN_DIR
+ROUGHDRAFT_DEV_STATE_BASE_DIR
+ROUGHDRAFT_DEV_WRAPPER_NAME
+ROUGHDRAFT_DEV_WRAPPER_PATH
+ROUGHDRAFT_DEV_WRAPPER_REPO_ROOT
+```
 
 ## CriticMarkup
 
