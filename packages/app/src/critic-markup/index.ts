@@ -981,7 +981,16 @@ function createCriticMarked(markdownOptions?: MarkdownOptions) {
     ],
   });
 
-  return { parser, comments };
+  return { parser, comments, changes };
+}
+
+export function criticMarkdownHasReviewRail(
+  markdown: string,
+  options?: MarkdownOptions,
+): boolean {
+  const { parser, comments, changes } = createCriticMarked(options);
+  parser.parse(markdown);
+  return comments.size > 0 || changes.size > 0;
 }
 
 export function criticMarkdownToEditorState(

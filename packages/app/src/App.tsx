@@ -225,9 +225,7 @@ export function App() {
         )
       : null;
 
-    document.title = workspaceTitlePath
-      ? `Roughdraft of ${workspaceTitlePath}`
-      : "Roughdraft";
+    document.title = workspaceTitlePath ?? "Roughdraft";
   }, [activeDocumentPath, backend, requestedPathState.rawPath]);
 
   const handleSaveDocument = useCallback(

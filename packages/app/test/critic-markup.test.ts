@@ -4,6 +4,7 @@ import {
   createCriticChange,
   createNextChangeId,
   createNextCommentId,
+  criticMarkdownHasReviewRail,
   criticMarkdownToEditorState,
   editorStateToCriticMarkdown,
   getCommentDescendantIds,
@@ -11,6 +12,30 @@ import {
 import { createEditorExtensions } from "../src/editor-extensions";
 
 describe("CriticMarkup comments", () => {
+  it("detects review rail content without counting fenced examples", () => {
+    expect(
+      criticMarkdownHasReviewRail(
+        [
+          "```md",
+          "This is {--deleted--} text.",
+          "This is {++inserted++} text.",
+          "This is {~~old~>new~~} substituted text.",
+          "This is {>>a comment<<} in the margin.",
+          "```",
+        ].join("\n"),
+      ),
+    ).toBe(false);
+
+    expect(
+      criticMarkdownHasReviewRail(
+        'This is {==anchored text==}{>>a threaded comment<<}{id="c1" by="user" at="2026-04-23T18:00:00.000Z"}.\n',
+      ),
+    ).toBe(true);
+    expect(criticMarkdownHasReviewRail("This is {++inserted++} text.\n")).toBe(
+      true,
+    );
+  });
+
   it("round-trips a highlighted comment anchor", () => {
     const input =
       'This is {==highlighted==}{>>comment text<<}{id="cmt1" by="AI" at="2024-01-15T10:30:00.000Z"} text.\n';

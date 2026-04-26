@@ -12,6 +12,7 @@ import {
 import {
   createCriticChange,
   createCriticComment,
+  criticMarkdownHasReviewRail,
   criticMarkdownToEditorState,
   editorStateToCriticMarkdown,
   getCommentDescendantIds,
@@ -1709,11 +1710,10 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     };
   }, []);
 
-  const hasCommentRailSpace =
-    markdown.includes("{>>") ||
-    markdown.includes("{++") ||
-    markdown.includes("{--") ||
-    markdown.includes("{~~");
+  const hasCommentRailSpace = useMemo(
+    () => criticMarkdownHasReviewRail(markdown),
+    [markdown],
+  );
 
   useEffect(() => {
     if (editorViewMode !== "code") return;

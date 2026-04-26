@@ -69,8 +69,7 @@ roughdraft status
 roughdraft stop
 ```
 
-`roughdraft open` will reuse the running server and auto-start it if needed.
-You can also use `roughdraft ./path/to/file.md` as a shortcut when the input clearly looks like a path.
+`roughdraft open` will reuse the running server and auto-start it if needed. You can also use `roughdraft ./path/to/file.md` as a shortcut when the input clearly looks like a path.
 
 Roughdraft does not edit `~/CLAUDE.md`, `~/AGENTS.md`, or other user-level agent files. The setup prompt asks your agent to update its own guidance.
 
@@ -254,7 +253,7 @@ This is {++inserted++} text.
 This is {~~old~>new~~} substituted text.
 This is {>>a comment<<} in the margin.
 This is {==highlighted==} text.
-This is {==anchored text==}{>>a threaded comment<<}{id="c1" by="user" at="2026-04-23T18:00:00.000Z"}.
+This is anchored text.
 ```
 
 This matters because the main workflow is often:

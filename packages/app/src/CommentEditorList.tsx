@@ -1,7 +1,7 @@
 import { Bot, Check, Pencil, Reply, Trash2, User, X } from "lucide-react";
 import {
-  type MouseEvent,
   type KeyboardEvent,
+  type MouseEvent,
   type MutableRefObject,
   type ReactNode,
   useEffect,
@@ -310,12 +310,14 @@ function CommentActionButton({
   tone = "neutral",
   icon,
   compact = false,
+  className,
   onClick,
 }: {
   label: string;
   tone?: "neutral" | "danger";
   icon: ReactNode;
   compact?: boolean;
+  className?: string;
   onClick: (event: MouseEvent) => void;
 }) {
   return (
@@ -333,6 +335,7 @@ function CommentActionButton({
               tone === "danger"
                 ? "text-stone-400 hover:bg-rose-100 hover:text-rose-700"
                 : "text-stone-400 hover:bg-[#DED8CE]/45 hover:text-stone-600",
+              className,
             )}
           >
             {icon}
@@ -374,6 +377,7 @@ function CommentThreadNode({
 }: CommentThreadNodeProps) {
   const { comment, replies } = thread;
   const hasReplies = replies.length > 0;
+  const isRootThread = depth === 0;
   const isSelected = comment.id === selectedCommentId;
   const isHovered = comment.id === hoveredCommentId;
   const isEditing = interactive && editingCommentIds.includes(comment.id);
@@ -415,12 +419,12 @@ function CommentThreadNode({
 
   return (
     <div
-      data-comment-thread-root-id={depth === 0 ? comment.id : undefined}
-      tabIndex={interactive && depth === 0 ? 0 : undefined}
+      data-comment-thread-root-id={isRootThread ? comment.id : undefined}
+      tabIndex={interactive && isRootThread ? 0 : undefined}
       className={cn(
         "relative transition-all duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300",
         variant === "rail" &&
-          depth === 0 &&
+          isRootThread &&
           (index > 0 ? "border-t border-slate-200/80 pt-3" : "pt-0"),
       )}
       onClick={() => {
@@ -488,6 +492,19 @@ function CommentThreadNode({
         ) : null}
         <div className="min-w-0 flex-1">
           <div className="relative grid grid-cols-[2rem_minmax(0,1fr)] gap-x-2">
+            {interactive && isRootThread ? (
+              <CommentActionButton
+                label="Delete thread"
+                tone="danger"
+                icon={<Trash2 className="size-3.5" />}
+                compact
+                className="absolute top-0 right-0 z-20 bg-white/80"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDeleteComment(comment.id);
+                }}
+              />
+            ) : null}
             {hasReplies ? (
               <div
                 aria-hidden="true"
@@ -513,7 +530,13 @@ function CommentThreadNode({
                 <AuthorIcon className="size-3.5 shrink-0" />
               </div>
             </div>
-            <div className={cn("min-w-0 rounded-xl px-0.5", bodyTone)}>
+            <div
+              className={cn(
+                "min-w-0 rounded-xl px-0.5",
+                isRootThread && interactive && "pr-7",
+                bodyTone,
+              )}
+            >
               <div className="truncate text-[13px] font-semibold text-slate-900">
                 {authorLabel}
               </div>

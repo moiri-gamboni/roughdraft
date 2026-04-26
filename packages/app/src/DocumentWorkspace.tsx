@@ -2,6 +2,7 @@ import { CodeXml, Eye, RefreshCcw, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DocumentEditorViewMode } from "./app-navigation";
 import { Button } from "./components/ui/button";
+import { criticMarkdownHasReviewRail } from "./critic-markup";
 import { cn } from "./lib/utils";
 import { PageCard, type DocumentInteractionMode } from "./PageCard";
 import type { Page, StorageBackend } from "./storage";
@@ -46,18 +47,14 @@ export function DocumentWorkspace({
     useState<DocumentInteractionMode>("editing");
   const [documentHasComments, setDocumentHasComments] = useState(
     () =>
-      !!documentPage?.content.includes("{>>") ||
-      !!documentPage?.content.includes("{++") ||
-      !!documentPage?.content.includes("{--") ||
-      !!documentPage?.content.includes("{~~"),
+      !!documentPage?.content &&
+      criticMarkdownHasReviewRail(documentPage.content),
   );
 
   useEffect(() => {
     setDocumentHasComments(
-      !!documentPage?.content.includes("{>>") ||
-        !!documentPage?.content.includes("{++") ||
-        !!documentPage?.content.includes("{--") ||
-        !!documentPage?.content.includes("{~~"),
+      !!documentPage?.content &&
+        criticMarkdownHasReviewRail(documentPage.content),
     );
   }, [documentPage]);
 

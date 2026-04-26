@@ -551,6 +551,34 @@ describe("PageCard editor integration", () => {
     ).not.toBeNull();
   });
 
+  it("document code mode does not keep rail space for fenced CriticMarkup examples", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-code-examples",
+        title: "Doc Code Examples",
+        content: [
+          "```md",
+          "This is {--deleted--} text.",
+          "This is {++inserted++} text.",
+          "This is {~~old~>new~~} substituted text.",
+          "This is {>>a comment<<} in the margin.",
+          "```",
+        ].join("\n"),
+      },
+      editorViewMode: "code",
+      selected: true,
+    });
+
+    expect(
+      rendered.container
+        .querySelector(".document-page-shell")
+        ?.classList.contains("document-page-shell-no-comments"),
+    ).toBe(true);
+    expect(
+      rendered.container.querySelector(".document-comment-rail"),
+    ).toBeNull();
+  });
+
   it("document code mode shows line numbers without the default dotted focus outline", async () => {
     const rendered = await renderPageCard({
       page: {
@@ -834,6 +862,46 @@ describe("PageCard editor integration", () => {
     });
 
     expect(rendered.onSave).not.toHaveBeenCalled();
+  });
+
+  it("deletes a whole root comment thread from the thread action", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-delete-comment-thread-1",
+        title: "Doc Delete Comment Thread 1",
+        content:
+          '{==alpha==}{>>Root comment<<}{id="root" by="user" at="2026-04-25T23:56:00.000Z"}{>>Nested reply<<}{id="child" by="user" at="2026-04-25T23:57:00.000Z" re="root"}\n\nParagraph',
+      },
+      selected: true,
+    });
+
+    await selectText(rendered.getEditor(), "alpha");
+
+    const deleteThreadButton =
+      rendered.container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Delete thread"]',
+      );
+    expect(deleteThreadButton).not.toBeNull();
+
+    vi.useFakeTimers();
+    await act(async () => {
+      deleteThreadButton?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    const savedMarkdown = rendered.onSave.mock.calls[0]?.[1];
+    expect(savedMarkdown).toContain("alpha");
+    expect(savedMarkdown).not.toContain("Root comment");
+    expect(savedMarkdown).not.toContain("Nested reply");
+    expect(savedMarkdown).not.toContain('id="root"');
+    expect(savedMarkdown).not.toContain('id="child"');
   });
 
   it("renders suggestion replies only inside the suggestion card", async () => {
