@@ -163,6 +163,116 @@ Use CriticMarkup for inline review feedback in markdown.`,
     expect(editorStateToCriticMarkdown(doc, new Map())).toBe(input);
   });
 
+  it("creates a comment anchor when a selection is inside a fenced code block", () => {
+    const input = `\`\`\`ts
+const command = "roughdraft open";
+\`\`\`
+`;
+    const { doc } = criticMarkdownToEditorState(input);
+    const editor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: doc,
+    });
+
+    try {
+      const text = editor.state.doc.textBetween(
+        0,
+        editor.state.doc.content.size,
+        "\n",
+      );
+      const start = text.indexOf("roughdraft open");
+      const end = start + "roughdraft open".length;
+
+      editor.commands.setTextSelection({ from: start + 1, to: end + 1 });
+      const added = editor.commands.setCommentRef({ commentIds: ["c1"] });
+
+      expect(added).toBe(true);
+      expect(editor.getJSON().content?.[0]).toMatchObject({
+        type: "codeBlock",
+        attrs: { language: "ts" },
+        content: [
+          {
+            type: "text",
+            text: 'const command = "',
+          },
+          {
+            type: "text",
+            text: "roughdraft open",
+            marks: [
+              {
+                type: "commentRef",
+                attrs: { commentIds: ["c1"] },
+              },
+            ],
+          },
+          {
+            type: "text",
+            text: '";',
+          },
+        ],
+      });
+      expect(
+        editorStateToCriticMarkdown(
+          editor.getJSON(),
+          new Map([
+            [
+              "c1",
+              {
+                id: "c1",
+                content: "test",
+                createdAt: "2026-04-25T22:14:08.827Z",
+              },
+            ],
+          ]),
+        ),
+      ).toBe(`\`\`\`ts
+const command = "{==roughdraft open==}{>>test<<}{id="c1" by="user" at="2026-04-25T22:14:08.827Z"}";
+\`\`\`
+`);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("round-trips comment anchors inside fenced code blocks", () => {
+    const input = `\`\`\`ts
+const command = "{==roughdraft open==}{>>test<<}{id="c1" by="user" at="2026-04-25T22:14:08.827Z"}";
+\`\`\`
+`;
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+
+    expect(doc.content?.[0]).toMatchObject({
+      type: "codeBlock",
+      attrs: { language: "ts" },
+      content: [
+        {
+          type: "text",
+          text: 'const command = "',
+        },
+        {
+          type: "text",
+          text: "roughdraft open",
+          marks: [
+            {
+              type: "commentRef",
+              attrs: { commentIds: ["c1"] },
+            },
+          ],
+        },
+        {
+          type: "text",
+          text: '";',
+        },
+      ],
+    });
+    expect(comments.get("c1")).toMatchObject({
+      id: "c1",
+      content: "test",
+    });
+    expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
   it("round-trips an anchored reply thread", () => {
     const input =
       'Please revisit {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2024-01-15T10:30:00.000Z"}{>>I can add one from the intro.<<}{id="c2" by="AI" at="2024-01-15T10:31:00.000Z" re="c1"}.\n';

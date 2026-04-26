@@ -1,5 +1,6 @@
 import { Extension, Mark, mergeAttributes } from "@tiptap/core";
 import Code from "@tiptap/extension-code";
+import CodeBlock from "@tiptap/extension-code-block";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -611,6 +612,10 @@ const MarkdownCode = Code.extend({
   excludes: "bold italic strike link",
 });
 
+const MarkdownCodeBlock = CodeBlock.extend({
+  marks: "commentRef criticChange",
+});
+
 const MarkdownImage = Image.extend({
   addAttributes() {
     return {
@@ -634,6 +639,7 @@ export function createEditorExtensions(placeholder: string) {
         levels: [1, 2, 3],
       },
       code: false,
+      codeBlock: false,
       link: false,
     }),
     Placeholder.configure({
@@ -657,6 +663,7 @@ export function createEditorExtensions(placeholder: string) {
     }),
     CommentRef,
     CriticChange,
+    MarkdownCodeBlock,
     CommentHighlight,
     CriticChangeHighlight,
     MarkdownImage.configure({

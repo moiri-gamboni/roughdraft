@@ -590,6 +590,77 @@ function renderCriticChangeSpan(
   )}">${changeSpan}</span>`;
 }
 
+function renderCriticCodeText(
+  text: string,
+  comments: Map<string, CriticComment>,
+) {
+  let result = "";
+  let offset = 0;
+
+  while (offset < text.length) {
+    const anchorMatch = text.slice(offset).match(criticCommentAnchorPattern);
+
+    if (!anchorMatch || anchorMatch.index !== 0) {
+      result += escapeHtml(text[offset] ?? "");
+      offset += 1;
+      continue;
+    }
+
+    const [, anchor] = anchorMatch;
+    let nextOffset = offset + anchorMatch[0].length;
+    const parsedComments: CriticComment[] = [];
+
+    while (nextOffset < text.length) {
+      const commentMatch = text
+        .slice(nextOffset)
+        .match(criticCommentBlockPattern);
+      if (!commentMatch) break;
+
+      const [, commentText, , legacyMetadataText, attributeMetadataText] =
+        commentMatch;
+      const comment = createCommentWithContext(
+        {
+          ...parseMetadata(legacyMetadataText, attributeMetadataText),
+          content: commentText,
+        },
+        [...comments.values(), ...parsedComments],
+      );
+      parsedComments.push(comment);
+      nextOffset += commentMatch[0].length;
+    }
+
+    if (parsedComments.length === 0) {
+      result += escapeHtml(anchorMatch[0]);
+      offset += anchorMatch[0].length;
+      continue;
+    }
+
+    for (const comment of parsedComments) {
+      comments.set(comment.id, comment);
+    }
+
+    result += `<span data-comment-ids="${escapeHtml(
+      JSON.stringify(parsedComments.map((comment) => comment.id)),
+    )}">${escapeHtml(anchor)}</span>`;
+    offset = nextOffset;
+  }
+
+  return result;
+}
+
+function renderCriticCodeBlock(
+  token: Tokens.Code,
+  comments: Map<string, CriticComment>,
+) {
+  const language = (token.lang || "").match(/\S+/)?.[0];
+  const classAttr = language ? ` class="language-${escapeHtml(language)}"` : "";
+  const content = token.escaped
+    ? token.text
+    : renderCriticCodeText(token.text, comments);
+
+  return `<pre><code${classAttr}>${content}</code></pre>\n`;
+}
+
 function addCriticCommentRule(
   service: TurndownService,
   comments: Map<string, CriticComment>,
@@ -630,6 +701,37 @@ function addCriticCommentRule(
       if (!commentBlocks) return content;
 
       return `{==${content}==}${commentBlocks}`;
+    },
+  });
+}
+
+function addCriticCodeBlockRule(service: TurndownService) {
+  service.addRule("criticCodeBlock", {
+    filter: (node) => {
+      if (node.nodeName !== "PRE") return false;
+      const codeElement = (node as HTMLElement).firstElementChild;
+      return (
+        codeElement?.nodeName === "CODE" &&
+        Boolean(
+          codeElement.querySelector(
+            "span[data-comment-ids], span[data-critic-change-kind]",
+          ),
+        )
+      );
+    },
+    replacement(_content, node) {
+      const codeElement = (node as HTMLElement)
+        .firstElementChild as HTMLElement | null;
+
+      if (!codeElement) return "";
+
+      const language =
+        [...codeElement.classList]
+          .find((className) => className.startsWith("language-"))
+          ?.slice("language-".length) ?? "";
+      const content = service.turndown(codeElement.innerHTML).trimEnd();
+
+      return `\n\n\`\`\`${language}\n${content}\n\`\`\`\n\n`;
     },
   });
 }
@@ -777,6 +879,7 @@ function createCriticMarked(markdownOptions?: MarkdownOptions) {
   const comments = new Map<string, CriticComment>();
   const changes = new Map<string, CriticChangeAttrs>();
   const renderer = createMarkedRenderer(markdownOptions);
+  renderer.code = (token) => renderCriticCodeBlock(token, comments);
   const parser = new Marked({
     gfm: true,
     async: false,
@@ -900,6 +1003,7 @@ export function editorStateToCriticMarkdown(
   const service = createTurndownService();
   addCriticCommentRule(service, comments);
   addCriticChangeRule(service, comments);
+  addCriticCodeBlockRule(service);
   return `${service.turndown(html).trimEnd()}\n`;
 }
 
