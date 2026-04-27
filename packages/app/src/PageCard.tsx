@@ -4,7 +4,7 @@ import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import type { Mark as ProseMirrorMark } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, X } from "lucide-react";
+
 import { CommentEditorList } from "./CommentEditorList";
 import {
   DocumentReviewRail,
@@ -90,7 +90,7 @@ interface CodeEditorSurfaceProps {
   onMarkdownChange: (markdown: string) => void;
 }
 
-interface DraftSuggestionState {
+export interface DraftSuggestionState {
   type: "insertion" | "replacement";
   from: number;
   to: number;
@@ -1585,80 +1585,6 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
             />
           ) : null}
           <div className="pb-24">
-            {draftSuggestion ? (
-              <div
-                data-suggestion-thread-container="true"
-                className="mb-3 rounded-[0.75rem] border border-[#DFDFDC] bg-white px-4 py-3 shadow-[0_16px_40px_rgba(57,47,38,0.08)]"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-[11px] font-semibold tracking-[0.08em] text-stone-500 uppercase">
-                      {draftSuggestion.type === "replacement"
-                        ? "Replacement"
-                        : "Insertion"}
-                    </div>
-                    <div className="mt-1 text-sm leading-5 text-slate-700">
-                      {draftSuggestion.sourceText || "Current cursor position"}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="flex size-7 shrink-0 items-center justify-center rounded-full text-stone-500 transition hover:bg-stone-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
-                    aria-label="Cancel suggestion"
-                    onClick={() => setDraftSuggestion(null)}
-                  >
-                    <X className="size-4" />
-                  </button>
-                </div>
-                <textarea
-                  value={draftSuggestion.text}
-                  rows={2}
-                  className="mt-3 min-h-16 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-800 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100"
-                  placeholder={
-                    draftSuggestion.type === "replacement"
-                      ? "Replacement text"
-                      : "Inserted text"
-                  }
-                  onChange={(event) => {
-                    setDraftSuggestion((current) =>
-                      current
-                        ? {
-                            ...current,
-                            text: event.target.value,
-                          }
-                        : current,
-                    );
-                  }}
-                  onKeyDown={(event) => {
-                    if (
-                      (event.metaKey || event.ctrlKey) &&
-                      event.key.toLowerCase() === "enter"
-                    ) {
-                      event.preventDefault();
-                      applyDraftSuggestion();
-                    }
-                  }}
-                />
-                <div className="mt-3 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    className="inline-flex h-8 items-center gap-1 rounded-lg px-3 text-sm font-medium text-stone-600 transition hover:bg-stone-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
-                    onClick={() => setDraftSuggestion(null)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex h-8 items-center gap-1 rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white transition hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={!draftSuggestion.text}
-                    onClick={applyDraftSuggestion}
-                  >
-                    <Check className="size-4" />
-                    Suggest
-                  </button>
-                </div>
-              </div>
-            ) : null}
             <div
               className={cn(contentCardClass, "px-10 py-10 sm:px-14 sm:py-14")}
             >
@@ -1722,6 +1648,15 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
               current === commentId ? null : current,
             );
           }}
+          draftSuggestion={draftSuggestion}
+          onDraftSuggestionTextChange={(text) => {
+            setDraftSuggestion((current) =>
+              current ? { ...current, text } : current,
+            );
+          }}
+          onApplyDraftSuggestion={applyDraftSuggestion}
+          onCancelDraftSuggestion={() => setDraftSuggestion(null)}
+          editor={editor}
         />
       </div>
     </div>
