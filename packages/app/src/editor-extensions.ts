@@ -1,4 +1,4 @@
-import { Extension, Mark, mergeAttributes } from "@tiptap/core";
+import { Extension, Mark, Node, mergeAttributes } from "@tiptap/core";
 import Code from "@tiptap/extension-code";
 import CodeBlock from "@tiptap/extension-code-block";
 import Image from "@tiptap/extension-image";
@@ -17,6 +17,7 @@ import type {
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
+import { rawMarkdownBlockAttribute } from "./markdown";
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
@@ -608,12 +609,26 @@ const MarkdownLink = Link.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
+      title: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("title"),
+        renderHTML: (attributes) =>
+          attributes.title ? { title: attributes.title } : {},
+      },
       dataMarkdownSrc: {
         default: null,
         parseHTML: (element) => element.getAttribute("data-markdown-src"),
         renderHTML: (attributes) =>
           attributes.dataMarkdownSrc
             ? { "data-markdown-src": attributes.dataMarkdownSrc }
+            : {},
+      },
+      dataMarkdownAutolink: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-markdown-autolink"),
+        renderHTML: (attributes) =>
+          attributes.dataMarkdownAutolink
+            ? { "data-markdown-autolink": attributes.dataMarkdownAutolink }
             : {},
       },
     };
@@ -632,6 +647,12 @@ const MarkdownImage = Image.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
+      title: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("title"),
+        renderHTML: (attributes) =>
+          attributes.title ? { title: attributes.title } : {},
+      },
       dataMarkdownSrc: {
         default: null,
         parseHTML: (element) => element.getAttribute("data-markdown-src"),
@@ -641,6 +662,34 @@ const MarkdownImage = Image.extend({
             : {},
       },
     };
+  },
+});
+
+const RawMarkdownBlock = Node.create({
+  name: "rawMarkdownBlock",
+  group: "block",
+  atom: true,
+  selectable: true,
+
+  addAttributes() {
+    return {
+      rawMarkdown: {
+        default: "",
+        parseHTML: (element) =>
+          element.getAttribute(rawMarkdownBlockAttribute) ?? "",
+        renderHTML: (attributes) => ({
+          [rawMarkdownBlockAttribute]: attributes.rawMarkdown ?? "",
+        }),
+      },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: `div[${rawMarkdownBlockAttribute}]`, priority: 1000 }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ["div", mergeAttributes(HTMLAttributes)];
   },
 });
 
@@ -675,6 +724,7 @@ export function createEditorExtensions(placeholder: string) {
     }),
     CommentRef,
     CriticChange,
+    RawMarkdownBlock,
     MarkdownCodeBlock,
     CommentHighlight,
     CriticChangeHighlight,

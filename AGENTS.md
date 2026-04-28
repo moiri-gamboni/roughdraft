@@ -123,6 +123,10 @@ Useful commands:
 "$roughdraft_cmd" help
 ```
 
+## PR Workflow
+
+When creating a PR, rebase the current branch on the latest `origin/main` before pushing and opening the PR.
+
 ## CriticMarkup
 
 Use CriticMarkup when reading or writing inline review feedback in markdown:

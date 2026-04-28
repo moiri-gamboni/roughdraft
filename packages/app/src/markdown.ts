@@ -2,6 +2,8 @@ import { tables, taskListItems } from "@joplin/turndown-plugin-gfm";
 import { marked } from "marked";
 import TurndownService from "turndown";
 
+export const rawMarkdownBlockAttribute = "data-markdown-raw-block";
+
 export interface MarkdownOptions {
   resolveFileUrl?: (path: string) => string | null;
 }
@@ -12,7 +14,7 @@ export interface YamlFrontmatterSplit {
 }
 
 function isExternalUrl(path: string): boolean {
-  return /^(?:[a-z]+:)?\/\//i.test(path) || path.startsWith("data:");
+  return /^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith("//");
 }
 
 function isInPageAnchor(path: string): boolean {
@@ -25,6 +27,87 @@ function escapeHtml(value: string): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+export function encodeRawMarkdownBlock(markdown: string): string {
+  return encodeURIComponent(markdown);
+}
+
+export function decodeRawMarkdownBlock(encoded: string): string {
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return encoded;
+  }
+}
+
+function createRawMarkdownBlock(markdown: string): string {
+  return `<div ${rawMarkdownBlockAttribute}="${escapeHtml(
+    encodeRawMarkdownBlock(markdown),
+  )}"></div>\n`;
+}
+
+function protectRawHtmlBlocks(markdown: string): string {
+  return markdown
+    .replace(
+      /^[ \t]*<details\b[\s\S]*?<\/details>[ \t]*(?:\r?\n|$)/gim,
+      (raw) => createRawMarkdownBlock(raw),
+    )
+    .replace(/^[ \t]*<!--[\s\S]*?-->[ \t]*(?:\r?\n|$)/gm, (raw) =>
+      createRawMarkdownBlock(raw),
+    );
+}
+
+function protectIndentedCodeAfterLists(markdown: string): string {
+  return markdown.replace(
+    /^(?:[-*+]|\d+[.)]) [^\r\n]*(?:\r?\n)[ \t]*(?:\r?\n)(?:(?: {4}|\t)[^\r\n]*(?:\r?\n|$))+/gm,
+    (raw) => createRawMarkdownBlock(raw),
+  );
+}
+
+function codeSpanContainsPipe(value: string): boolean {
+  return /`[^`\n]*\|[^`\n]*`/.test(value);
+}
+
+function protectPipeSensitiveTables(markdown: string): string {
+  const lines = markdown.match(/[^\r\n]*(?:\r?\n|$)/g) ?? [];
+  const output: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const nextLine = lines[index + 1] ?? "";
+
+    if (
+      !line.includes("|") ||
+      !/^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(nextLine)
+    ) {
+      output.push(line);
+      continue;
+    }
+
+    const tableLines = [line, nextLine];
+    index += 2;
+
+    while (index < lines.length) {
+      const row = lines[index] ?? "";
+      if (!row.trim() || !row.includes("|")) break;
+      tableLines.push(row);
+      index += 1;
+    }
+
+    const raw = tableLines.join("");
+    const needsProtection = raw.includes("\\|") || codeSpanContainsPipe(raw);
+    output.push(needsProtection ? createRawMarkdownBlock(raw) : raw);
+    index -= 1;
+  }
+
+  return output.join("");
+}
+
+export function protectRichTextRoundTripMarkdown(markdown: string): string {
+  return protectPipeSensitiveTables(
+    protectIndentedCodeAfterLists(protectRawHtmlBlocks(markdown)),
+  );
 }
 
 function normalizeMarkdownPath(path: string): string {
@@ -149,18 +232,22 @@ export function createMarkedRenderer(options?: MarkdownOptions) {
     return `<pre><code${classAttr}>${content}</code></pre>\n`;
   };
 
-  renderer.link = function ({ href, title, tokens }) {
+  renderer.link = function ({ href, title, tokens, raw }) {
     const rawHref = href || "";
     const renderedHref = resolveRenderedUrl(rawHref, resolveFileUrl);
     const text = this.parser.parseInline(tokens);
     const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
     const markdownSrcAttr = ` data-markdown-src="${escapeHtml(rawHref)}"`;
+    const autolinkAttr =
+      !title && raw?.startsWith("<") && raw.endsWith(">")
+        ? ' data-markdown-autolink="true"'
+        : "";
     const externalAttr =
       isExternalUrl(rawHref) && !rawHref.startsWith("mailto:")
         ? ' target="_blank" rel="noreferrer noopener"'
         : "";
 
-    return `<a href="${escapeHtml(renderedHref)}"${titleAttr}${markdownSrcAttr}${externalAttr}>${text}</a>`;
+    return `<a href="${escapeHtml(renderedHref)}"${titleAttr}${markdownSrcAttr}${autolinkAttr}${externalAttr}>${text}</a>`;
   };
 
   renderer.image = ({ href, title, text }) => {
@@ -199,6 +286,17 @@ export function createTurndownService(): TurndownService {
   const service = new TurndownService({
     headingStyle: "atx",
     codeBlockStyle: "fenced",
+    blankReplacement(_content, node) {
+      if (node.hasAttribute(rawMarkdownBlockAttribute)) {
+        return `\n\n${decodeRawMarkdownBlock(
+          node.getAttribute(rawMarkdownBlockAttribute) ?? "",
+        ).trimEnd()}\n\n`;
+      }
+
+      return (node as HTMLElement & { isBlock?: boolean }).isBlock
+        ? "\n\n"
+        : "";
+    },
   });
 
   service.use(tables as Parameters<TurndownService["use"]>[0]);
@@ -248,7 +346,21 @@ export function createTurndownService(): TurndownService {
         isExternalUrl(href) || isInPageAnchor(href)
           ? href
           : normalizeMarkdownPath(href);
-      return `[${content}](${normalizedHref})`;
+      const title = element.getAttribute("title");
+      const titleMarkdown = title
+        ? ` "${title.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
+        : "";
+
+      if (
+        element.getAttribute("data-markdown-autolink") === "true" &&
+        !titleMarkdown
+      ) {
+        return href.startsWith("mailto:")
+          ? `<${href.slice("mailto:".length)}>`
+          : `<${normalizedHref}>`;
+      }
+
+      return `[${content}](${normalizedHref}${titleMarkdown})`;
     },
   });
 
@@ -264,7 +376,32 @@ export function createTurndownService(): TurndownService {
         ? src
         : normalizeMarkdownPath(src);
       const alt = element.getAttribute("alt") || "";
-      return `![${alt}](${normalizedSrc})`;
+      const title = element.getAttribute("title");
+      const titleMarkdown = title
+        ? ` "${title.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
+        : "";
+      return `![${alt}](${normalizedSrc}${titleMarkdown})`;
+    },
+  });
+
+  service.addRule("markdownStrikethrough", {
+    filter: (node) =>
+      node.nodeName === "DEL" ||
+      node.nodeName === "S" ||
+      node.nodeName === "STRIKE",
+    replacement(content) {
+      return `~~${content}~~`;
+    },
+  });
+
+  service.addRule("rawMarkdownBlock", {
+    filter: (node) =>
+      node.nodeType === 1 &&
+      (node as HTMLElement).hasAttribute(rawMarkdownBlockAttribute),
+    replacement(_content, node) {
+      const encoded =
+        (node as HTMLElement).getAttribute(rawMarkdownBlockAttribute) ?? "";
+      return `\n\n${decodeRawMarkdownBlock(encoded).trimEnd()}\n\n`;
     },
   });
 

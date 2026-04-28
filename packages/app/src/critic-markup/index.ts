@@ -17,6 +17,7 @@ import {
   createMarkedRenderer,
   createTurndownService,
   prependYamlFrontmatter,
+  protectRichTextRoundTripMarkdown,
   splitYamlFrontmatter,
   type MarkdownOptions,
 } from "../markdown";
@@ -1005,7 +1006,7 @@ export function criticMarkdownToEditorState(
 } {
   const { frontmatter, body } = splitYamlFrontmatter(markdown);
   const { parser, comments } = createCriticMarked(options);
-  const html = parser.parse(body) as string;
+  const html = parser.parse(protectRichTextRoundTripMarkdown(body)) as string;
   const doc = generateJSON(html, extensions) as JSONContent & {
     yamlFrontmatter?: string;
   };

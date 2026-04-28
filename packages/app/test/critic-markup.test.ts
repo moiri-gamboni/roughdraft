@@ -634,3 +634,86 @@ const command = "{==roughdraft open==}{>>test<<}{id="c1" by="user" at="2026-04-2
     expect(getCommentDescendantIds("c1", comments)).toEqual(["c2", "c3", "c4"]);
   });
 });
+
+function richTextRoundTrip(markdown: string): string {
+  const { doc, comments, frontmatter } = criticMarkdownToEditorState(markdown);
+  return editorStateToCriticMarkdown(doc, comments, { frontmatter });
+}
+
+describe("Markdown rich-text round-trip regressions", () => {
+  it("preserves GFM strikethrough markup", () => {
+    const input = "Keep ~~removed~~ and **bold** text.\n";
+
+    expect(richTextRoundTrip(input)).toBe(input);
+  });
+
+  it("preserves inline link titles", () => {
+    const input = '[Roughdraft](./README.md "Local title")\n';
+
+    expect(richTextRoundTrip(input)).toBe(input);
+  });
+
+  it("preserves image titles", () => {
+    const input = '![Alt text](./image.png "Image title")\n';
+
+    expect(richTextRoundTrip(input)).toBe(input);
+  });
+
+  it("preserves mailto autolinks as mailto URLs", () => {
+    const input = "Visit <https://example.com/a?b=c> or <me@example.com>.\n";
+
+    expect(richTextRoundTrip(input)).toBe(input);
+  });
+
+  it("preserves source-only HTML comments", () => {
+    const input = [
+      "Before",
+      "",
+      "<!-- keep this source note -->",
+      "",
+      "After",
+      "",
+    ].join("\n");
+
+    expect(richTextRoundTrip(input)).toBe(input);
+  });
+
+  it("preserves raw details HTML blocks", () => {
+    const input = [
+      "<details>",
+      "<summary>More</summary>",
+      "",
+      "Hidden **markdown** body.",
+      "",
+      "</details>",
+      "",
+    ].join("\n");
+
+    expect(richTextRoundTrip(input)).toBe(input);
+  });
+
+  it("preserves multi-line indented code blocks after lists", () => {
+    const input = [
+      "- Item before",
+      "",
+      "    code block",
+      "    second line",
+      "",
+      "After",
+      "",
+    ].join("\n");
+
+    expect(richTextRoundTrip(input)).toBe(input);
+  });
+
+  it("preserves table cells containing escaped pipes and inline code pipes", () => {
+    const input = [
+      "| Column | Value |",
+      "| --- | --- |",
+      "| Escaped | `a | b` and plain a \\| b |",
+      "",
+    ].join("\n");
+
+    expect(richTextRoundTrip(input)).toBe(input);
+  });
+});
