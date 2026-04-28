@@ -45,6 +45,10 @@ bun .codex/skills/slog/scripts/slog.ts new <label>
 bun .codex/skills/slog/scripts/slog.ts latest file
 ```
 
+## UI Components
+
+Always use shadcn for UI work in this repo. Prefer existing components in `packages/app/src/components/ui/`; when a needed primitive is missing, add it there in the same shadcn style before wiring it into product code.
+
 ## Worktree-Specific CLI
 
 This repo installs a worktree-specific Roughdraft CLI wrapper during setup.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, ExternalLink } from "lucide-react";
 import {
   type DocumentEditorViewMode,
   buildLocationForDocumentEditorViewMode,
@@ -10,6 +10,16 @@ import {
   joinPath,
   syncRequestedPathInUrl,
 } from "./app-navigation";
+import { Button } from "./components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./components/ui/dialog";
 import { detectBackend } from "./detect-backend";
 import { DocumentWorkspace } from "./DocumentWorkspace";
 import {
@@ -25,7 +35,7 @@ type DocumentDiskChangeState = "clean" | "changed" | "conflict" | "paused";
 const AGENT_SETUP_PROMPT =
   "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.";
 
-function EmptyState({
+export function Homepage({
   message,
   updateStatus,
 }: {
@@ -53,42 +63,108 @@ function EmptyState({
           <UpdateNotice updateStatus={updateStatus} />
         </div>
       ) : null}
-      <div className="w-full max-w-xl">
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-          Copy this into your coding agent
-        </h1>
-        {message ? (
-          <p className="mt-3 text-sm leading-6 text-slate-500">{message}</p>
-        ) : null}
-
-        <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-          <p className="break-words text-base leading-7 text-slate-800">
-            {AGENT_SETUP_PROMPT}
+      <div className="w-full max-w-6xl text-center">
+        <div className="mx-auto max-w-2xl">
+          <p className="mb-3 text-xs font-medium tracking-[0.16em] text-slate-500 uppercase">
+            Roughdraft
           </p>
-          {copyState === "error" ? (
-            <p className="mt-3 text-sm text-red-600">
-              Copy failed. Select the instruction text and copy it manually.
-            </p>
-          ) : null}
+          <h1 className="text-4xl leading-tight font-semibold tracking-[-0.025em] text-balance text-slate-950 sm:text-5xl">
+            Easier collaboration with your coding agent
+          </h1>
+          <p className="mx-auto mt-4 max-w-2xl text-lg leading-8 text-balance text-slate-600">
+            {message}
+          </p>
+
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-2.5 text-xs font-medium leading-none text-stone-500">
+            {["Free", "Open-source", "Runs locally"].map((item) => (
+              <div
+                className="inline-flex h-7 items-center gap-1.5 rounded-full border border-[#DCD6CC]/70 bg-transparent px-2.5"
+                key={item}
+              >
+                <span className="inline-flex size-3.5 items-center justify-center rounded-full bg-transparent text-stone-500">
+                  <Check className="size-2.5 stroke-[2.5]" aria-hidden="true" />
+                </span>
+                <span>{item}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <Dialog>
+              <DialogTrigger
+                render={
+                  <Button className="h-10 gap-2 px-4 text-sm" size="lg">
+                    Install Now
+                  </Button>
+                }
+              />
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Copy this into your coding agent</DialogTitle>
+                  <DialogDescription>
+                    This prompt tells the agent how to install Roughdraft and
+                    set up the review workflow.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <p className="break-words text-sm leading-6 text-slate-800">
+                    {AGENT_SETUP_PROMPT}
+                  </p>
+                  {copyState === "error" ? (
+                    <p className="mt-3 text-sm text-red-600">
+                      Copy failed. Select the instruction text and copy it
+                      manually.
+                    </p>
+                  ) : null}
+                </div>
+
+                <DialogFooter>
+                  <Button
+                    className="h-9 gap-2 px-3 text-sm"
+                    type="button"
+                    onClick={handleCopySetupPrompt}
+                  >
+                    {copyState === "copied" ? (
+                      <Check className="size-4" aria-hidden="true" />
+                    ) : (
+                      <Copy className="size-4" aria-hidden="true" />
+                    )}
+                    {copyState === "copied" ? "Copied" : "Copy prompt"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <Button
+              className="h-10 gap-2 px-4 text-sm"
+              size="lg"
+              variant="outline"
+              render={
+                <a
+                  href="https://github.com/Lex-Inc/roughdraft"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink className="size-4" aria-hidden="true" />
+                  View on GitHub
+                </a>
+              }
+            />
+          </div>
         </div>
 
-        <button
-          className="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:outline-none"
-          type="button"
-          onClick={handleCopySetupPrompt}
-        >
-          {copyState === "copied" ? (
-            <Check className="size-4" aria-hidden="true" />
-          ) : (
-            <Copy className="size-4" aria-hidden="true" />
-          )}
-          {copyState === "copied" ? "Copied" : "Copy prompt"}
-        </button>
+        <div className="mx-auto mt-10 w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.12)]">
+          <img
+            src="/sneak-peek.png"
+            alt="Roughdraft markdown review workspace"
+            className="block aspect-[1728/1117] w-full object-cover"
+          />
+        </div>
       </div>
     </div>
   );
 }
-
 export function App() {
   const initialRequestedPathState = getRequestedPathState();
   const [requestedPathState] = useState(initialRequestedPathState);
@@ -416,10 +492,10 @@ export function App() {
 
   if (!requestedPathState.rawPath || loadError) {
     return (
-      <EmptyState
+      <Homepage
         message={
           loadError ??
-          "Install Roughdraft and set up the review workflow in one step."
+          "Roughdraft is a markdown editor with commenting and suggest changes mode, making it easier to align with AI on complex ideas."
         }
         updateStatus={updateStatus}
       />
