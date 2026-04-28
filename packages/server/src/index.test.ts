@@ -69,6 +69,87 @@ describe("createApp", () => {
     expect(response.body.version).toEqual(expect.any(String));
   });
 
+  it("lists, updates, and deletes page-backed markdown files", async () => {
+    fs.writeFileSync(path.join(projectDir, "alpha.md"), "# Alpha\n");
+
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+    });
+
+    const listResponse = await request(app).get("/api/pages").query({
+      projectPath: projectDir,
+    });
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body).toEqual([
+      { id: "alpha", title: "Alpha", content: "# Alpha\n" },
+    ]);
+
+    const readResponse = await request(app).get("/api/pages/alpha").query({
+      projectPath: projectDir,
+    });
+    expect(readResponse.status).toBe(200);
+    expect(readResponse.body).toEqual({
+      id: "alpha",
+      title: "Alpha",
+      content: "# Alpha\n",
+    });
+
+    const updateResponse = await request(app)
+      .put("/api/pages/alpha")
+      .query({ projectPath: projectDir })
+      .send({ content: "# Beta\n" });
+    expect(updateResponse.status).toBe(200);
+    expect(updateResponse.body).toEqual({
+      id: "alpha",
+      title: "Beta",
+      content: "# Beta\n",
+    });
+    expect(fs.readFileSync(path.join(projectDir, "alpha.md"), "utf-8")).toBe(
+      "# Beta\n",
+    );
+
+    const deleteResponse = await request(app).delete("/api/pages/alpha").query({
+      projectPath: projectDir,
+    });
+    expect(deleteResponse.status).toBe(200);
+    expect(deleteResponse.body).toEqual({ ok: true });
+    expect(fs.existsSync(path.join(projectDir, "alpha.md"))).toBe(false);
+  });
+
+  it("saves a markdown file when the expected version matches", async () => {
+    fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+    });
+
+    const readResponse = await request(app).get("/api/markdown-file").query({
+      projectPath: projectDir,
+      path: "draft.md",
+    });
+
+    const saveResponse = await request(app)
+      .put("/api/markdown-file")
+      .query({ projectPath: projectDir, path: "draft.md" })
+      .send({
+        content: "# Saved\n",
+        expectedVersion: readResponse.body.version,
+      });
+
+    expect(saveResponse.status).toBe(200);
+    expect(saveResponse.body).toMatchObject({
+      id: "draft",
+      title: "Saved",
+      content: "# Saved\n",
+    });
+    expect(saveResponse.body.version).toEqual(expect.any(String));
+    expect(fs.readFileSync(path.join(projectDir, "draft.md"), "utf-8")).toBe(
+      "# Saved\n",
+    );
+  });
+
   it("rejects stale markdown-file writes", async () => {
     const nestedDir = path.join(projectDir, "notes");
     fs.mkdirSync(nestedDir, { recursive: true });
@@ -213,5 +294,130 @@ describe("createApp", () => {
         }),
       ]),
     );
+  });
+
+  it("lists markdown files and directories for the file picker", async () => {
+    fs.mkdirSync(path.join(homeDir, "docs"));
+    fs.writeFileSync(path.join(homeDir, "draft.md"), "# Draft\n");
+    fs.writeFileSync(path.join(homeDir, "ignored.txt"), "Nope\n");
+
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+    });
+
+    const response = await request(app).get("/api/fs/list");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      path: homeDir,
+      displayPath: "~",
+      parentPath: null,
+    });
+    expect(response.body.directories).toEqual([
+      {
+        name: "docs",
+        path: path.join(homeDir, "docs"),
+        kind: "directory",
+      },
+    ]);
+    expect(response.body.files).toEqual([
+      {
+        name: "draft.md",
+        path: path.join(homeDir, "draft.md"),
+        kind: "file",
+      },
+    ]);
+  });
+
+  it("returns project tree paths with directories before files", async () => {
+    fs.mkdirSync(path.join(projectDir, "notes", "nested"), {
+      recursive: true,
+    });
+    fs.writeFileSync(path.join(projectDir, "zeta.md"), "# Zeta\n");
+    fs.writeFileSync(path.join(projectDir, "notes", "alpha.md"), "# Alpha\n");
+
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+    });
+
+    const response = await request(app).get("/api/file-tree").query({
+      projectPath: projectDir,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      paths: ["notes/", "notes/nested/", "notes/alpha.md", "zeta.md"],
+    });
+  });
+
+  it("opens and creates project directories", async () => {
+    const createdDir = path.join(projectDir, "created", "workspace");
+
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+      port: 4321,
+    });
+
+    const openResponse = await request(app)
+      .post("/api/project/open")
+      .send({ path: projectDir });
+    expect(openResponse.status).toBe(200);
+    expect(openResponse.body).toEqual({
+      backend: "local-files",
+      projectDir,
+      port: 4321,
+    });
+
+    const createResponse = await request(app)
+      .post("/api/project/create")
+      .send({ path: createdDir });
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body).toEqual({
+      backend: "local-files",
+      projectDir: createdDir,
+      port: 4321,
+    });
+    expect(fs.statSync(createdDir).isDirectory()).toBe(true);
+  });
+
+  it("serves local files and stores uploaded assets inside the project", async () => {
+    fs.writeFileSync(path.join(projectDir, "image.txt"), "asset text\n");
+
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+    });
+
+    const fileResponse = await request(app).get("/api/files").query({
+      projectPath: projectDir,
+      path: "image.txt",
+    });
+    expect(fileResponse.status).toBe(200);
+    expect(fileResponse.text).toBe("asset text\n");
+
+    const assetResponse = await request(app)
+      .post("/api/assets")
+      .send({
+        projectPath: projectDir,
+        filename: "My Sketch.png",
+        mimeType: "image/png",
+        dataBase64: Buffer.from("png bytes").toString("base64"),
+      });
+
+    expect(assetResponse.status).toBe(201);
+    expect(assetResponse.body).toMatchObject({
+      markdownPath: "./.roughdraft-assets/My-Sketch.png",
+      mimeType: "image/png",
+    });
+    expect(assetResponse.body.previewUrl).toContain("/api/files?");
+    expect(
+      fs.readFileSync(
+        path.join(projectDir, ".roughdraft-assets", "My-Sketch.png"),
+        "utf-8",
+      ),
+    ).toBe("png bytes");
   });
 });

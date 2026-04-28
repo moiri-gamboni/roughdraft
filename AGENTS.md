@@ -65,7 +65,7 @@ roughdraft_cmd="roughdraft-dev-$worktree_name"
 Example in this checkout:
 
 ```bash
-roughdraft-dev-lyon-v2 start
+roughdraft-dev-shanghai-v4 start
 ```
 
 Do not use the global `roughdraft` command for repo-local development in this repo unless the user explicitly asks for the published package.
@@ -88,9 +88,39 @@ Before creating or updating a PR:
 1. Run `pnpm check`.
 2. Fix any lint, format, test, or build failures.
 3. Confirm `git status --short` only shows intended changes.
-4. Commit and push.
-5. Create the PR with `gh pr create --base main`.
-6. If the PR resolves GitHub issues, include closing keywords such as `Fixes #123` in the PR body.
+4. Rebase the current branch on the latest `origin/main`.
+5. Commit and push.
+6. Create the PR with `gh pr create --base main`.
+7. If the PR resolves GitHub issues, include closing keywords such as `Fixes #123` in the PR body.
+
+## Plan Writing Workflow
+
+When the user asks for a plan, write the plan as a Markdown file in `.context/` so it is easy to review, revise, and keep out of commits.
+
+Before writing the plan:
+
+1. Read every ADR in `docs/adr/` if that directory exists.
+2. Read the code, tests, and docs needed to ground the plan in the current implementation.
+3. Use `slog` if runtime behavior needs verification before the plan can be accurate.
+
+Plan file guidelines:
+
+- Use a concrete, task-specific filename such as `.context/markdown-smoke-tests-plan.md`.
+- Include goals, non-goals, proposed file changes, test strategy, risks, and suggested implementation order.
+- Keep product-boundary decisions aligned with the ADRs; if the plan needs to change a recorded decision, call that out explicitly.
+- Use CriticMarkup for inline review notes when helpful.
+
+After writing the plan, open it in Roughdraft for review:
+
+```bash
+worktree_root="$(git rev-parse --show-toplevel)"
+worktree_name="$(basename "$worktree_root")"
+roughdraft_cmd="roughdraft-dev-$worktree_name"
+"$roughdraft_cmd" start
+"$roughdraft_cmd" open "$worktree_root/.context/<plan-file>.md"
+```
+
+After the user finishes reviewing in Roughdraft, read the plan file from disk and address any CriticMarkup feedback before implementing.
 
 ## Roughdraft Workflow
 
@@ -122,10 +152,6 @@ Useful commands:
 "$roughdraft_cmd" stop
 "$roughdraft_cmd" help
 ```
-
-## PR Workflow
-
-When creating a PR, rebase the current branch on the latest `origin/main` before pushing and opening the PR.
 
 ## CriticMarkup
 

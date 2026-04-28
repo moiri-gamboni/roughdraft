@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { Editor } from "@tiptap/core";
 import {
@@ -10,6 +12,15 @@ import {
   getCommentDescendantIds,
 } from "../src/critic-markup";
 import { createEditorExtensions } from "../src/editor-extensions";
+
+function readMarkdownFixture(name: string): string {
+  return `${fs
+    .readFileSync(
+      path.join(process.cwd(), "test", "fixtures", "markdown", name),
+      "utf8",
+    )
+    .trimEnd()}\n`;
+}
 
 describe("CriticMarkup comments", () => {
   it("preserves YAML frontmatter delimiters and raw table-like YAML text", () => {
@@ -375,6 +386,30 @@ const command = "{==roughdraft open==}{>>test<<}{id="c1" by="user" at="2026-04-2
       authorId: 'user\\"name',
     });
     expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it.each([
+    "criticmarkup-basic.md",
+    "criticmarkup-code-fences.md",
+    "frontmatter-table-yaml.md",
+    "mixed-roundtrip.md",
+  ])("round-trips markdown fixture %s", (fixtureName) => {
+    const input = readMarkdownFixture(fixtureName);
+    const { doc, comments, frontmatter } = criticMarkdownToEditorState(input);
+
+    expect(editorStateToCriticMarkdown(doc, comments, { frontmatter })).toBe(
+      input,
+    );
+  });
+
+  it("keeps unanchored CriticMarkup examples literal in code spans and fenced code", () => {
+    const input = readMarkdownFixture("criticmarkup-code-fences.md");
+    const { doc, comments, frontmatter } = criticMarkdownToEditorState(input);
+
+    expect(comments.size).toBe(0);
+    expect(editorStateToCriticMarkdown(doc, comments, { frontmatter })).toBe(
+      input,
+    );
   });
 
   it("allocates simple document-local ids", () => {

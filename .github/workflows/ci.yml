@@ -27,3 +27,12 @@ jobs:
 
       - name: Run repo checks
         run: pnpm check
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run browser smoke tests
+        run: pnpm test:smoke
+
+      - name: Run coverage thresholds
+        run: pnpm test:coverage
