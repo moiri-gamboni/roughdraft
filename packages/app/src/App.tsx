@@ -21,7 +21,7 @@ import { fetchUpdateStatus, type UpdateStatus } from "./update-status";
 import { UpdateNotice } from "./UpdateNotice";
 
 type SaveState = "idle" | "saving" | "error";
-type DocumentDiskChangeState = "clean" | "changed" | "conflict";
+type DocumentDiskChangeState = "clean" | "changed" | "conflict" | "paused";
 const AGENT_SETUP_PROMPT =
   "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.";
 
@@ -289,6 +289,10 @@ export function App() {
     );
   }, [applyDocumentPage]);
 
+  const handleKeepEditingWithoutAutosave = useCallback(() => {
+    setDocumentDiskChangeState("paused");
+  }, []);
+
   const handleOverwriteDocumentOnDisk = useCallback(async () => {
     const currentBackend = backendRef.current;
     const currentPath = activeDocumentPathRef.current;
@@ -333,6 +337,10 @@ export function App() {
           return;
         }
 
+        if (documentDiskChangeState === "paused") {
+          return;
+        }
+
         if (documentDirtyRef.current) {
           setDocumentDiskChangeState("changed");
           return;
@@ -360,7 +368,7 @@ export function App() {
       disposed = true;
       stopWatching();
     };
-  }, [activeDocumentPath, applyDocumentPage, backend]);
+  }, [activeDocumentPath, applyDocumentPage, backend, documentDiskChangeState]);
 
   const handleDocumentEditorViewModeChange = useCallback(
     (nextMode: DocumentEditorViewMode) => {
@@ -415,6 +423,7 @@ export function App() {
         documentDiskChangeState={documentDiskChangeState}
         documentForceResetKey={documentForceResetKey}
         onReloadDocumentFromDisk={handleReloadDocumentFromDisk}
+        onKeepEditingWithoutAutosave={handleKeepEditingWithoutAutosave}
         onOverwriteDocumentOnDisk={handleOverwriteDocumentOnDisk}
         backend={backend}
       />

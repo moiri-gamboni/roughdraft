@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   CodeXml,
   Eye,
   MessageSquarePlus,
@@ -28,7 +29,7 @@ import { PageCard, type DocumentInteractionMode } from "./PageCard";
 import type { Page, StorageBackend } from "./storage";
 
 type SaveState = "idle" | "saving" | "error";
-type DiskChangeState = "clean" | "changed" | "conflict";
+type DiskChangeState = "clean" | "changed" | "conflict" | "paused";
 
 const documentInteractionModeOptions = [
   { value: "editing", label: "editing", Icon: PencilLine },
@@ -39,6 +40,27 @@ const documentInteractionModeOptions = [
   label: string;
   Icon: typeof Eye;
 }[];
+
+const conflictNoticeCopy: Record<
+  Exclude<DiskChangeState, "clean">,
+  {
+    title: string;
+    body: string;
+  }
+> = {
+  changed: {
+    title: "File changed on disk",
+    body: "Roughdraft found a newer version of this file on disk. Reload to use that version, or overwrite it with your current draft.",
+  },
+  conflict: {
+    title: "Save conflict",
+    body: "This file changed on disk while you have unsaved edits. Autosave is paused so your draft will not overwrite those changes.",
+  },
+  paused: {
+    title: "Autosave paused",
+    body: "Keep editing locally, then reload from disk to discard your draft or overwrite the disk file when you are ready.",
+  },
+};
 
 interface DocumentWorkspaceProps {
   documentPage: Page | null;
@@ -53,6 +75,7 @@ interface DocumentWorkspaceProps {
   documentDiskChangeState: DiskChangeState;
   documentForceResetKey: string | null;
   onReloadDocumentFromDisk: () => void | Promise<void>;
+  onKeepEditingWithoutAutosave: () => void;
   onOverwriteDocumentOnDisk: () => void | Promise<void>;
   backend: StorageBackend | null;
 }
@@ -70,6 +93,7 @@ export function DocumentWorkspace({
   documentDiskChangeState,
   documentForceResetKey,
   onReloadDocumentFromDisk,
+  onKeepEditingWithoutAutosave,
   onOverwriteDocumentOnDisk,
   backend,
 }: DocumentWorkspaceProps) {
@@ -97,9 +121,74 @@ export function DocumentWorkspace({
   );
   const ActiveDocumentInteractionModeIcon =
     activeDocumentInteractionMode?.Icon ?? PencilLine;
+  const conflictNotice =
+    documentDiskChangeState === "clean"
+      ? null
+      : conflictNoticeCopy[documentDiskChangeState];
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-8 pt-10 pb-8 sm:px-12">
+    <div
+      className={cn(
+        "min-h-0 flex-1 overflow-y-auto px-8 pb-8 sm:px-12",
+        conflictNotice ? "pt-40 sm:pt-28" : "pt-10",
+      )}
+    >
+      {conflictNotice ? (
+        <div
+          role="status"
+          aria-label="File conflict"
+          className="fixed top-3 left-1/2 z-50 flex w-[min(calc(100vw-1rem),52rem)] -translate-x-1/2 flex-col gap-3 rounded-[8px] border border-amber-300 bg-amber-50 px-3 py-3 text-amber-950 shadow-[0_14px_40px_rgba(120,53,15,0.18)] sm:flex-row sm:items-center sm:justify-between sm:px-4"
+        >
+          <div className="flex min-w-0 items-start gap-2.5">
+            <AlertTriangle
+              className="mt-0.5 size-4 shrink-0 text-amber-700"
+              aria-hidden="true"
+            />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold leading-5">
+                {conflictNotice.title}
+              </div>
+              <div className="mt-0.5 text-xs leading-5 text-amber-900">
+                {conflictNotice.body}
+              </div>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-[7px] bg-white/55 px-2 text-xs text-amber-950 hover:bg-white"
+              onClick={() => void onReloadDocumentFromDisk()}
+            >
+              <RefreshCcw className="size-3.5" />
+              Reload from disk
+            </Button>
+            {documentDiskChangeState !== "paused" ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 rounded-[7px] bg-white/55 px-2 text-xs text-amber-950 hover:bg-white"
+                onClick={onKeepEditingWithoutAutosave}
+              >
+                <PencilLine className="size-3.5" />
+                Keep editing with autosave paused
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-[7px] bg-amber-900 px-2 text-xs text-white hover:bg-amber-800"
+              onClick={() => void onOverwriteDocumentOnDisk()}
+            >
+              <Upload className="size-3.5" />
+              Overwrite disk file
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <div className="mx-auto min-h-full max-w-[1080px]">
         {documentPage ? (
           <div
@@ -180,35 +269,6 @@ export function DocumentWorkspace({
                     </SelectContent>
                   </Select>
                 </div>
-                {documentDiskChangeState !== "clean" ? (
-                  <div className="flex max-w-full shrink-0 items-center gap-1.5 rounded-[8px] border border-amber-200 bg-amber-50 px-2 py-1 text-[0.68rem] text-amber-900">
-                    <span className="whitespace-nowrap">
-                      {documentDiskChangeState === "conflict"
-                        ? "Save conflict"
-                        : "Changed on disk"}
-                    </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 rounded-[7px] px-1.5 text-[0.68rem] text-amber-950 hover:bg-amber-100"
-                      onClick={() => void onReloadDocumentFromDisk()}
-                    >
-                      <RefreshCcw className="size-3" />
-                      Reload
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 rounded-[7px] px-1.5 text-[0.68rem] text-amber-950 hover:bg-amber-100"
-                      onClick={() => void onOverwriteDocumentOnDisk()}
-                    >
-                      <Upload className="size-3" />
-                      Overwrite
-                    </Button>
-                  </div>
-                ) : null}
               </div>
             </div>
             {documentHasComments ? (
