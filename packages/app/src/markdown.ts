@@ -32,6 +32,47 @@ function normalizeMarkdownPath(path: string): string {
   return `./${path.replace(/^\/+/, "")}`;
 }
 
+function tableHasUnsupportedMarkdownContent(table: HTMLTableElement): boolean {
+  return Boolean(
+    table.querySelector(
+      "blockquote, h1, h2, h3, h4, h5, h6, hr, ol, pre, table, ul",
+    ),
+  );
+}
+
+function getFirstTableRow(table: HTMLTableElement): HTMLTableRowElement | null {
+  return table.rows.length > 0 ? table.rows[0] : null;
+}
+
+function isHeaderTableRow(row: HTMLTableRowElement | null): boolean {
+  if (!row || row.cells.length === 0) return false;
+
+  return Array.from(row.cells).every((cell) => cell.tagName === "TH");
+}
+
+function isMarkdownTableDivider(line: string | undefined): boolean {
+  return Boolean(line && /^\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(line));
+}
+
+function markdownTableDividerForCell(cell: HTMLTableCellElement): string {
+  const alignment = (
+    cell.getAttribute("align") ||
+    cell.style.textAlign ||
+    ""
+  ).toLowerCase();
+
+  if (alignment === "left") return ":---";
+  if (alignment === "right") return "---:";
+  if (alignment === "center") return ":---:";
+
+  return "---";
+}
+
+function markdownTableDividerForRow(row: HTMLTableRowElement): string {
+  const dividers = Array.from(row.cells).map(markdownTableDividerForCell);
+  return `| ${dividers.join(" | ")} |`;
+}
+
 function resolveRenderedUrl(
   path: string,
   resolveFileUrl?: MarkdownOptions["resolveFileUrl"],
@@ -162,6 +203,35 @@ export function createTurndownService(): TurndownService {
 
   service.use(tables as Parameters<TurndownService["use"]>[0]);
   service.use(taskListItems as Parameters<TurndownService["use"]>[0]);
+
+  service.addRule("tiptapHeaderTable", {
+    filter(node) {
+      if (node.tagName !== "TABLE") return false;
+
+      const table = node as HTMLTableElement;
+      return (
+        !tableHasUnsupportedMarkdownContent(table) &&
+        isHeaderTableRow(getFirstTableRow(table))
+      );
+    },
+    replacement(content, node) {
+      const table = node as HTMLTableElement;
+      const headerRow = getFirstTableRow(table);
+      if (!headerRow) return content;
+
+      const lines = content.replace(/\n+/g, "\n").trim().split("\n");
+      if (lines.length === 0) return content;
+
+      if (!isMarkdownTableDivider(lines[1])) {
+        lines.splice(1, 0, markdownTableDividerForRow(headerRow));
+      }
+
+      const captionContent = table.caption?.textContent || "";
+      const caption = captionContent ? `${captionContent}\n\n` : "";
+
+      return `\n\n${caption}${lines.join("\n")}\n\n`;
+    },
+  });
 
   // We own the markdown parser and want stable round-trips without doubled escapes.
   service.escape = (value: string) => value;

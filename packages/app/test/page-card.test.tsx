@@ -476,6 +476,97 @@ describe("PageCard editor integration", () => {
     );
   });
 
+  it("rich-text edits preserve normal markdown table headers on autosave", async () => {
+    const content = [
+      "# Body",
+      "",
+      "| Column | Value |",
+      "| --- | --- |",
+      "| Body table | This table should remain editable as Markdown content. |",
+      "",
+    ].join("\n");
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-table-autosave-1",
+        title: "Doc Table Autosave 1",
+        content,
+      },
+      selected: true,
+    });
+
+    vi.useFakeTimers();
+
+    await insertTextAtEnd(rendered.getEditor(), " updated");
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledTimes(1);
+    expect(rendered.onSave.mock.calls[0]?.[1]).toBe(
+      [
+        "# Body",
+        "",
+        "| Column | Value |",
+        "| --- | --- |",
+        "| Body table | This table should remain editable as Markdown content. |",
+        "",
+        "updated",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it.each([
+    {
+      label: "as first body block",
+      bodyLines: [
+        "| Column | Value |",
+        "| --- | --- |",
+        "| Body table | This table is the first body block. |",
+      ],
+    },
+    {
+      label: "after a heading",
+      bodyLines: [
+        "# Body",
+        "",
+        "| Column | Value |",
+        "| --- | --- |",
+        "| Body table | This table follows a heading. |",
+      ],
+    },
+  ])("rich-text edits preserve table headers after frontmatter $label", async ({
+    label,
+    bodyLines,
+  }) => {
+    const frontmatter = ["---", "title: Table body", "---", ""].join("\n");
+    const body = [...bodyLines, ""].join("\n");
+    const rendered = await renderPageCard({
+      page: {
+        id: `doc-frontmatter-table-autosave-${label.replaceAll(" ", "-")}`,
+        title: "Doc Frontmatter Table Autosave",
+        content: `${frontmatter}${body}`,
+      },
+      selected: true,
+    });
+
+    vi.useFakeTimers();
+
+    await insertTextAtEnd(rendered.getEditor(), " updated");
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledTimes(1);
+    expect(rendered.onSave.mock.calls[0]?.[1]).toBe(
+      `${frontmatter}${[...bodyLines, "", "updated", ""].join("\n")}`,
+    );
+  });
+
   it("viewing mode disables rich-text editing", async () => {
     const rendered = await renderPageCard({
       page: {

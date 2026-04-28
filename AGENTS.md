@@ -81,6 +81,17 @@ pnpm dev:install-cli
 
 Then recompute `roughdraft_cmd` and use it.
 
+## Pull Request Workflow
+
+Before creating or updating a PR:
+
+1. Run `pnpm check`.
+2. Fix any lint, format, test, or build failures.
+3. Confirm `git status --short` only shows intended changes.
+4. Commit and push.
+5. Create the PR with `gh pr create --base main`.
+6. If the PR resolves GitHub issues, include closing keywords such as `Fixes #123` in the PR body.
+
 ## Roughdraft Workflow
 
 Use Roughdraft when the user wants to open, review, or comment on a Markdown file.
