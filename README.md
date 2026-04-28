@@ -243,9 +243,9 @@ ROUGHDRAFT_DEV_WRAPPER_PATH
 ROUGHDRAFT_DEV_WRAPPER_REPO_ROOT
 ```
 
-## CriticMarkup
+## Roughdraft-flavored CriticMarkup
 
-Roughdraft uses [CriticMarkup](https://criticmarkup.com) for inline annotations and revision workflows:
+Roughdraft uses [CriticMarkup](https://criticmarkup.com) as the readable review layer inside normal Markdown files. It supports the standard markers for comments, highlights, insertions, deletions, and substitutions:
 
 ```markdown
 This is {--deleted--} text.
@@ -253,8 +253,48 @@ This is {++inserted++} text.
 This is {~~old~>new~~} substituted text.
 This is {>>a comment<<} in the margin.
 This is {==highlighted==} text.
-This is anchored text.
 ```
+
+Roughdraft extends those markers with compact attribute blocks so review state can round-trip through the file. Attribute blocks are written immediately after the comment or suggestion:
+
+```markdown
+Please revisit {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}.
+```
+
+Supported attributes:
+
+*   `id` gives the comment or suggested change a stable document-local id.
+    
+*   `by` records the reviewer or agent that created it.
+    
+*   `at` records an ISO timestamp.
+    
+*   `re` links a reply to another comment or suggestion id.
+    
+
+Replies are stored as additional comment blocks that point at the parent id:
+
+```markdown
+Please revisit {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}{>>I can add one from the intro.<<}{id="c2" by="AI" at="2026-04-28T12:05:00.000Z" re="c1"}.
+```
+
+Suggested changes can also carry ids and discussion:
+
+```markdown
+Add {++one concrete example++}{id="s1" by="AI" at="2026-04-28T12:10:00.000Z"}{>>Use the customer story here.<<}{id="c3" by="user" at="2026-04-28T12:12:00.000Z" re="s1"}.
+Remove {--vague phrasing--}{id="s2" by="user" at="2026-04-28T12:13:00.000Z"}.
+Use {~~rough~>specific~~}{id="s3" by="AI" at="2026-04-28T12:14:00.000Z"} wording.
+```
+
+CriticMarkup inside inline code and fenced code blocks is treated as literal example text, not live review feedback:
+
+````markdown
+Inline code stays literal: `{==not a comment==}`.
+
+```text
+{++not a suggestion++}
+```
+````
 
 This matters because the main workflow is often:
 

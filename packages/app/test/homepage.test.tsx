@@ -65,8 +65,9 @@ describe("Homepage", () => {
       "blends CriticMarkup with Notion-style review affordances",
     );
     expect(container.textContent).toContain(
-      "{~~rough notes~>clear next steps~~}",
+      '{==this claim==}{>>Can we source this?<<}{id="c1"',
     );
+    expect(container.textContent).toContain('re="s1"');
     expect(
       container.querySelectorAll('[contenteditable="plaintext-only"]'),
     ).toHaveLength(0);
@@ -126,7 +127,25 @@ describe("Homepage", () => {
     expect(container.textContent).toContain(
       "regular Markdown plus portable review markup",
     );
+    expect(container.textContent).toContain("CriticMarkup");
+    expect(container.textContent).toContain("Notion-flavored Markdown");
+    expect(container.textContent).toContain("Format contract");
+    expect(container.textContent).toContain(
+      "Review data lives where agents can inspect it",
+    );
+    expect(container.textContent).toContain("document-local");
+    expect(
+      container.querySelector('a[href="https://criticmarkup.com/"]')
+        ?.textContent,
+    ).toContain("CriticMarkup");
+    expect(
+      container.querySelector(
+        'a[href="https://developers.notion.com/guides/data-apis/enhanced-markdown"]',
+      )?.textContent,
+    ).toContain("Notion-flavored Markdown");
     expect(container.textContent).toContain("Threaded review");
+    expect(container.textContent).toContain("Roughdraft extensions");
+    expect(container.textContent).toContain("Attribute metadata");
     expect(container.textContent).toContain("Substitution");
     expect(container.textContent).toContain("{~~old text~>new text~~}");
     expect(container.querySelector('a[href="/"]')?.textContent).toContain(

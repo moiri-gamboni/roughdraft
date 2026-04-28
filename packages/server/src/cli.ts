@@ -696,14 +696,33 @@ function printCriticMarkupHelp(log: (message: string) => void) {
   log("  The intro {~~is vague~>needs a tighter claim~~}.");
   log("  Add {>>one concrete example here<<} before the conclusion.");
   log("");
+  log("When adding new review feedback:");
+  log(
+    '  Prefer the extended Roughdraft format with `id`, `by`, and `at` metadata, for example {>>Comment<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}.',
+  );
+  log(
+    "  Use `c1`, `c2`, etc. for comment ids and `s1`, `s2`, etc. for suggested-change ids.",
+  );
+  log(
+    "  Set `by` to your agent or author label and `at` to the current ISO timestamp.",
+  );
+  log("");
   log("Anchored comment with id:");
   log(
-    '  Review {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2026-04-23T18:00:00.000Z"}.',
+    '  Review {==this sentence==}{>>Needs a source<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}.',
+  );
+  log("");
+  log("Suggested changes with ids:");
+  log(
+    '  Add {++one concrete example++}{id="s1" by="AI" at="2026-04-28T12:05:00.000Z"}.',
+  );
+  log(
+    '  Replace {~~vague phrasing~>specific wording~~}{id="s2" by="AI" at="2026-04-28T12:06:00.000Z"}.',
   );
   log("");
   log("Reply to an existing comment:");
   log(
-    '  Review {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2026-04-23T18:00:00.000Z"}{>>I can add one from the intro.<<}{id="c2" by="AI" at="2026-04-23T18:05:00.000Z" re="c1"}.',
+    '  Review {==this sentence==}{>>Needs a source<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}{>>I can add one from the intro.<<}{id="c2" by="AI" at="2026-04-28T12:10:00.000Z" re="c1"}.',
   );
   log("");
   log("Reply guidance:");

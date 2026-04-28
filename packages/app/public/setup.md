@@ -49,16 +49,30 @@ If Roughdraft is not running, `roughdraft open` will start it automatically.
 
 After the user finishes reviewing in Roughdraft, read the Markdown file from disk and respond to any CriticMarkup comments or suggested changes.
 
-Use CriticMarkup when reading or writing inline review feedback in Markdown.
+Use Roughdraft-flavored CriticMarkup when reading or writing inline review feedback in Markdown. The base markers are:
+
+Comment: `{>>comment<<}`
+Insertion: `{++new text++}`
+Deletion: `{--old text--}`
+Substitution: `{~~old~>new~~}`
+Highlight: `{==text==}`
+
+When you add a new comment or suggested change, use the extended Roughdraft format with an attribute block, such as `{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}`. Generate a stable document-local id (`c1`, `c2`, etc. for comments; `s1`, `s2`, etc. for suggestions), set `by` to your agent or author label, set `at` to the current ISO timestamp, and set `re` when replying to an existing comment or suggestion.
+
+Roughdraft may already have attribute blocks after comments and suggestions. Preserve these attributes unless you are intentionally removing the associated comment or suggestion. The common attributes are `id` for a stable document-local id, `by` for the author, `at` for an ISO timestamp, and `re` for the parent comment or suggestion id in a reply thread.
+
+Anchored comments usually look like `{==selected text==}{>>Comment text<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}`. Suggested changes usually look like `{++new text++}{id="s1" by="AI" at="2026-04-28T12:10:00.000Z"}` or `{~~old text~>new text~~}{id="s2" by="AI" at="2026-04-28T12:11:00.000Z"}`. Replies usually look like `{>>Reply text<<}{id="c2" by="AI" at="2026-04-28T12:05:00.000Z" re="c1"}`.
 
 Use `roughdraft help` and `roughdraft help criticmarkup` for local command and syntax details.
 ```
 
 After updating your instructions, briefly tell the user which file you changed.
 
-## CriticMarkup Reference
+## Roughdraft-flavored CriticMarkup Reference
 
-Roughdraft uses CriticMarkup for inline comments and suggested changes:
+Roughdraft uses CriticMarkup for inline comments and suggested changes while keeping all review state in the Markdown file.
+
+Base markers:
 
 ```text
 Comment: `{>>comment<<}`
@@ -66,6 +80,39 @@ Insertion: `{++new text++}`
 Deletion: `{--old text--}`
 Substitution: `{~~old~>new~~}`
 Highlight: `{==text==}`
+```
+
+When adding review feedback, prefer the extended Roughdraft format so comments and suggested changes keep ids, authors, timestamps, and thread relationships.
+
+Roughdraft extensions:
+
+```text
+Anchored comment:
+{==selected text==}{>>Comment text<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}
+
+Reply:
+{>>I can make that edit.<<}{id="c2" by="AI" at="2026-04-28T12:05:00.000Z" re="c1"}
+
+Insertion suggestion:
+{++new text++}{id="s1" by="AI" at="2026-04-28T12:10:00.000Z"}
+
+Deletion suggestion:
+{--old text--}{id="s2" by="user" at="2026-04-28T12:11:00.000Z"}
+
+Substitution suggestion:
+{~~old text~>new text~~}{id="s3" by="AI" at="2026-04-28T12:12:00.000Z"}
+
+Comment on a suggestion:
+{++new text++}{id="s1" by="AI" at="2026-04-28T12:10:00.000Z"}{>>Use the customer example here.<<}{id="c3" by="user" at="2026-04-28T12:13:00.000Z" re="s1"}
+```
+
+Attribute blocks are written immediately after the markup they describe:
+
+```text
+id  Stable document-local id for a comment or suggested change
+by  Author or agent label
+at  ISO timestamp
+re  Parent comment or suggestion id for replies
 ```
 
 CriticMarkup inside fenced code blocks is literal example text. Do not treat it as review feedback.

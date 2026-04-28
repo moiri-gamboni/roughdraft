@@ -51,21 +51,24 @@ const ROUGHDRAFT_MARKDOWN_FEATURES = [
     title: "Comment in the margins",
     description:
       "Leave review notes inline, then let your agent read and respond to the same `.md` file.",
-    example: "{>>Can we tighten this claim?<<}",
+    example:
+      '{==this claim==}{>>Can we source this?<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}',
     icon: MessageSquare,
   },
   {
     title: "Suggest changes",
     description:
       "Mark insertions, deletions, and substitutions without turning Markdown into a proprietary document.",
-    example: "{~~rough notes~>clear next steps~~}",
+    example:
+      '{++clear next step++}{id="s1" by="AI" at="2026-04-28T12:05:00.000Z"}{>>Use the launch example.<<}{id="c2" by="user" at="2026-04-28T12:06:00.000Z" re="s1"}',
     icon: PencilLine,
   },
   {
     title: "Keep Markdown portable",
     description:
       "Roughdraft flavored Markdown blends CriticMarkup with Notion-style review affordances for people and agents.",
-    example: "regular.md + review markup",
+    example:
+      'regular.md + {>>Review note<<}{id="c3" by="AI" at="2026-04-28T12:07:00.000Z"}',
     icon: FileText,
   },
 ] as const;
@@ -99,6 +102,60 @@ const ROUGHDRAFT_MARKDOWN_SYNTAX = [
     syntax:
       '{~~old text~>new text~~}{id="s3" by="AI" at="2026-04-28T12:04:00.000Z"}',
     description: "Suggests replacing one span with another.",
+  },
+] as const;
+const ROUGHDRAFT_MARKDOWN_REFERENCES = [
+  {
+    title: "CriticMarkup",
+    href: "https://criticmarkup.com/",
+    description:
+      "The plain-text review syntax Roughdraft builds on for comments, highlights, insertions, deletions, and substitutions.",
+  },
+  {
+    title: "Notion-flavored Markdown",
+    href: "https://developers.notion.com/guides/data-apis/enhanced-markdown",
+    description:
+      "The product precedent for rich document affordances that still serialize to inspectable Markdown-like text.",
+  },
+] as const;
+const ROUGHDRAFT_MARKDOWN_CONTRACT = [
+  {
+    title: "Metadata",
+    description:
+      "Attribute blocks come immediately after review markup. `id` is document-local, `by` is a human or agent label, `at` is an ISO timestamp, and `re` points to the parent comment for replies.",
+  },
+  {
+    title: "Anchors",
+    description:
+      "Comments attach to highlighted text when a highlight precedes the comment. A bare comment is allowed when the feedback applies to the surrounding paragraph or document.",
+  },
+  {
+    title: "Pending changes",
+    description:
+      "Insertions, deletions, and substitutions stay visible until accepted or rejected. Roughdraft should not silently collapse suggested edits into normal prose.",
+  },
+  {
+    title: "Round trips",
+    description:
+      "Normal Markdown should remain normal Markdown. Frontmatter, tables, task lists, links, image paths, code spans, and fenced code blocks should survive review edits with minimal serialization churn.",
+  },
+] as const;
+const ROUGHDRAFT_MARKDOWN_EXTENSION_DETAILS = [
+  {
+    title: "Attribute metadata",
+    body: 'Roughdraft stores ids, authors, timestamps, and reply links in an attribute block after review markup, such as {>>Looks right.<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z" re="c0"}.',
+  },
+  {
+    title: "Threaded comments",
+    body: "A comment can stand alone, attach to a highlighted span, or reply to another comment by setting `re` to the parent comment id.",
+  },
+  {
+    title: "Reviewable suggestions",
+    body: "Insertions, deletions, and substitutions can carry their own ids, then comments can reply to those ids to discuss a proposed edit before accepting it.",
+  },
+  {
+    title: "Literal examples stay literal",
+    body: "CriticMarkup inside inline code and fenced code blocks is preserved as example text instead of becoming live review feedback.",
   },
 ] as const;
 
@@ -317,10 +374,55 @@ export function RoughdraftFlavoredMarkdownPage() {
           </h1>
           <p className="mt-5 text-lg leading-8 text-slate-600">
             Roughdraft Flavored Markdown is regular Markdown plus portable
-            review markup. It blends CriticMarkup syntax with Notion-style
-            comment threads, so a person and a coding agent can review the same
-            file without a sidecar database or hosted document format.
+            review markup. It builds on{" "}
+            <a
+              className="font-medium text-slate-950 underline decoration-slate-300 underline-offset-4 hover:decoration-slate-950"
+              href="https://criticmarkup.com/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              CriticMarkup
+            </a>{" "}
+            syntax and the text-first model behind{" "}
+            <a
+              className="font-medium text-slate-950 underline decoration-slate-300 underline-offset-4 hover:decoration-slate-950"
+              href="https://developers.notion.com/guides/data-apis/enhanced-markdown"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Notion-flavored Markdown
+            </a>
+            {", "}
+            so a person and a coding agent can review the same file without a
+            sidecar database or hosted document format.
           </p>
+        </section>
+
+        <section className="mt-10 grid gap-3 md:grid-cols-2">
+          {ROUGHDRAFT_MARKDOWN_REFERENCES.map(
+            ({ description, href, title }) => (
+              <a
+                className="group rounded-lg border border-slate-200 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:border-slate-300 hover:shadow-[0_14px_34px_rgba(15,23,42,0.08)]"
+                href={href}
+                key={title}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-base font-semibold text-slate-950">
+                    {title}
+                  </h2>
+                  <ExternalLink
+                    className="size-4 text-slate-400 transition group-hover:text-slate-700"
+                    aria-hidden="true"
+                  />
+                </div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {description}
+                </p>
+              </a>
+            ),
+          )}
         </section>
 
         <section className="mt-12 grid gap-4 md:grid-cols-3">
@@ -361,6 +463,40 @@ export function RoughdraftFlavoredMarkdownPage() {
           ))}
         </section>
 
+        <section className="mt-14 grid gap-8 lg:grid-cols-[0.75fr_1.25fr]">
+          <div>
+            <p className="text-xs font-medium tracking-[0.16em] text-stone-500 uppercase">
+              Format contract
+            </p>
+            <h2 className="mt-3 text-3xl leading-tight font-semibold text-slate-950">
+              Review data lives where agents can inspect it
+            </h2>
+            <p className="mt-4 text-base leading-7 text-slate-600">
+              Roughdraft treats the Markdown file as the durable source of
+              truth. The rich editor can add affordances around the text, but
+              the saved representation needs to be readable in a terminal,
+              reviewable in git, and understandable to another agent without
+              loading Roughdraft.
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {ROUGHDRAFT_MARKDOWN_CONTRACT.map(({ description, title }) => (
+              <div
+                className="rounded-lg border border-slate-200 bg-white p-4"
+                key={title}
+              >
+                <h3 className="text-sm font-semibold text-slate-950">
+                  {title}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {description}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section className="mt-14 grid gap-8 lg:grid-cols-[0.8fr_1.2fr]">
           <div>
             <p className="text-xs font-medium tracking-[0.16em] text-stone-500 uppercase">
@@ -371,8 +507,10 @@ export function RoughdraftFlavoredMarkdownPage() {
             </h2>
             <p className="mt-4 text-base leading-7 text-slate-600">
               Roughdraft uses CriticMarkup-compatible markers for comments,
-              highlights, insertions, deletions, and substitutions. Metadata is
-              stored in a compact attribute block after the markup.
+              highlights, insertions, deletions, and substitutions. Roughdraft
+              extends those markers with document-local metadata so review
+              threads, authorship, timestamps, and suggested-change discussions
+              can survive in the Markdown file itself.
             </p>
           </div>
 
@@ -401,6 +539,36 @@ export function RoughdraftFlavoredMarkdownPage() {
                 </div>
               ),
             )}
+          </div>
+        </section>
+
+        <section className="mt-14 grid gap-8 border-t border-slate-200 pt-10 lg:grid-cols-[0.8fr_1.2fr]">
+          <div>
+            <p className="text-xs font-medium tracking-[0.16em] text-stone-500 uppercase">
+              Roughdraft extensions
+            </p>
+            <h2 className="mt-3 text-3xl leading-tight font-semibold text-slate-950">
+              The extra fields make review state portable
+            </h2>
+            <p className="mt-4 text-base leading-7 text-slate-600">
+              Standard CriticMarkup captures the visible annotation. Roughdraft
+              keeps the same readable markers and adds a small attribute block
+              after comments and suggestions when it needs stable review state.
+            </p>
+          </div>
+
+          <div className="grid gap-3">
+            {ROUGHDRAFT_MARKDOWN_EXTENSION_DETAILS.map(({ body, title }) => (
+              <div
+                className="rounded-lg border border-slate-200 bg-white p-4"
+                key={title}
+              >
+                <h3 className="text-sm font-semibold text-slate-950">
+                  {title}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">{body}</p>
+              </div>
+            ))}
           </div>
         </section>
 

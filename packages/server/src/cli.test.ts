@@ -925,12 +925,26 @@ describe("cli", () => {
     );
   });
 
-  it("documents reply syntax in criticmarkup help", async () => {
+  it("documents extended review syntax in criticmarkup help", async () => {
     const test = createTestDependencies();
 
     const exitCode = await runCli(["help", "criticmarkup"], test.deps);
 
     expect(exitCode).toBe(0);
+    expect(test.logs).toContain("When adding new review feedback:");
+    expect(test.logs).toContain(
+      '  Prefer the extended Roughdraft format with `id`, `by`, and `at` metadata, for example {>>Comment<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}.',
+    );
+    expect(test.logs).toContain(
+      "  Use `c1`, `c2`, etc. for comment ids and `s1`, `s2`, etc. for suggested-change ids.",
+    );
+    expect(test.logs).toContain("Suggested changes with ids:");
+    expect(test.logs).toContain(
+      '  Add {++one concrete example++}{id="s1" by="AI" at="2026-04-28T12:05:00.000Z"}.',
+    );
+    expect(test.logs).toContain(
+      '  Replace {~~vague phrasing~>specific wording~~}{id="s2" by="AI" at="2026-04-28T12:06:00.000Z"}.',
+    );
     expect(test.logs).toContain("Reply to an existing comment:");
     expect(test.logs).toContain(
       '  Use explicit `id="..."` and `re="..."` metadata for replies.',
