@@ -88,10 +88,11 @@ Before creating or updating a PR:
 1. Run `pnpm check`.
 2. Fix any lint, format, test, or build failures.
 3. Confirm `git status --short` only shows intended changes.
-4. Rebase the current branch on the latest `origin/main`.
-5. Commit and push.
-6. Create the PR with `gh pr create --base main`.
-7. If the PR resolves GitHub issues, include closing keywords such as `Fixes #123` in the PR body.
+4. Make sure the current branch name is descriptive. If it is random or unclear, rename it before pushing.
+5. Rebase the current branch on the latest `origin/main`.
+6. Commit and push.
+7. Create the PR with `gh pr create --base main`.
+8. If the PR resolves GitHub issues, include closing keywords such as `Fixes #123` in the PR body.
 
 ## Plan Writing Workflow
 

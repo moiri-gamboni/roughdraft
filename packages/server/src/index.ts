@@ -1,4 +1,5 @@
 import express, { type Express, type Request, type Response } from "express";
+import crypto from "node:crypto";
 import os from "node:os";
 import { createServer as createHttpServer } from "node:http";
 import { fileURLToPath } from "node:url";
@@ -82,8 +83,18 @@ function titleFromContent(content: string, fallback: string): string {
   return firstLine.replace(/^#*\s*/, "").trim() || fallback;
 }
 
-function fileVersionFromStats(stats: fs.Stats): string {
-  return `${stats.mtimeMs}:${stats.size}`;
+function fileVersionFromContent(
+  stats: fs.Stats,
+  content: string | Buffer,
+): string {
+  const contentHash = crypto.createHash("sha256").update(content).digest("hex");
+  return `${stats.mtimeMs}:${stats.size}:${contentHash}`;
+}
+
+function fileVersionFromFile(filePath: string): string {
+  const content = fs.readFileSync(filePath);
+  const stats = fs.statSync(filePath);
+  return fileVersionFromContent(stats, content);
 }
 
 function markdownPageFromFile(
@@ -103,7 +114,7 @@ function markdownPageFromFile(
     id: pageIdFromRelativePath(relativePath),
     title: titleFromContent(content, fallbackTitle),
     content,
-    version: fileVersionFromStats(stats),
+    version: fileVersionFromContent(stats, content),
   };
 }
 
@@ -425,7 +436,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
         `event: change\ndata: ${JSON.stringify({
           path: relativePath,
           exists,
-          version: exists ? fileVersionFromStats(stats) : null,
+          version: exists ? fileVersionFromFile(absolutePath) : null,
         })}\n\n`,
       );
     };
@@ -486,7 +497,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       content: string;
       expectedVersion?: string;
     };
-    const currentVersion = fileVersionFromStats(fs.statSync(absolutePath));
+    const currentVersion = fileVersionFromFile(absolutePath);
 
     if (expectedVersion && expectedVersion !== currentVersion) {
       res.status(409).json({

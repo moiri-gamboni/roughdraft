@@ -193,6 +193,48 @@ describe("createApp", () => {
     );
   });
 
+  it("rejects stale markdown-file writes when file metadata is unchanged", async () => {
+    const filePath = path.join(projectDir, "draft.md");
+    const fixedTimestamp = new Date("2026-01-01T00:00:00.000Z");
+    fs.writeFileSync(filePath, "# Original\n");
+    fs.utimesSync(filePath, fixedTimestamp, fixedTimestamp);
+
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+    });
+
+    const readResponse = await request(app).get("/api/markdown-file").query({
+      projectPath: projectDir,
+      path: "draft.md",
+    });
+
+    fs.writeFileSync(filePath, "# External\n");
+    fs.utimesSync(filePath, fixedTimestamp, fixedTimestamp);
+
+    const staleWriteResponse = await request(app)
+      .put("/api/markdown-file")
+      .query({
+        projectPath: projectDir,
+        path: "draft.md",
+      })
+      .send({
+        content: "# Roughdraft\n",
+        expectedVersion: readResponse.body.version,
+      });
+
+    expect(staleWriteResponse.status).toBe(409);
+    expect(staleWriteResponse.body).toMatchObject({
+      error: "Markdown file changed on disk",
+      current: {
+        id: "draft",
+        title: "External",
+        content: "# External\n",
+      },
+    });
+    expect(fs.readFileSync(filePath, "utf-8")).toBe("# External\n");
+  });
+
   it("rejects markdown-file reads outside the project directory", async () => {
     const { app } = createApp({
       homeDir,
