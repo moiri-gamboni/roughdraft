@@ -202,6 +202,28 @@ async function typeTextAsBrowserInput(editor: Editor, text: string) {
   await flushReact();
 }
 
+async function pressEditorKey(editor: Editor, key: string) {
+  await act(async () => {
+    let handled = false;
+
+    editor.view.someProp("handleKeyDown", (handler) => {
+      handled = handler(
+        editor.view,
+        new KeyboardEvent("keydown", {
+          key,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      return handled;
+    });
+
+    expect(handled).toBe(true);
+  });
+
+  await flushReact();
+}
+
 function getEditable(container: HTMLElement) {
   const editable = container.querySelector(".ProseMirror");
   expect(editable).not.toBeNull();
@@ -713,6 +735,44 @@ describe("PageCard editor integration", () => {
       "doc-suggesting-grouped-replacement-1",
       expect.stringMatching(
         /^Use \{~~old~>new~~\}\{id="s1" by="user" at="[^"]+"\} text\n$/,
+      ),
+    );
+  });
+
+  it("suggesting mode advances repeated Delete keypresses from a cursor", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-suggesting-repeated-delete-1",
+        title: "Doc Suggesting Repeated Delete 1",
+        content: "Start",
+      },
+      interactionMode: "suggesting",
+      selected: true,
+    });
+    const editor = rendered.getEditor();
+
+    vi.useFakeTimers();
+
+    await act(async () => {
+      const range = findTextRange(editor, "Start");
+      expect(range).not.toBeNull();
+      editor.commands.focus();
+      editor.commands.setTextSelection((range?.from ?? 1) + 1);
+    });
+
+    await pressEditorKey(editor, "Delete");
+    await pressEditorKey(editor, "Delete");
+    await pressEditorKey(editor, "Delete");
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledWith(
+      "doc-suggesting-repeated-delete-1",
+      expect.stringMatching(
+        /^S\{--tar--\}\{id="s1" by="user" at="[^"]+"\}t\n$/,
       ),
     );
   });

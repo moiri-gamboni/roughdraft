@@ -345,6 +345,29 @@ function getReusableSuggestionInputMark(
   return $position.nodeAfter?.marks.find(isReusableSuggestionMark) ?? null;
 }
 
+function getReusableSuggestionDeletionMark(
+  editor: Editor,
+  from: number,
+  to: number,
+): ProseMirrorMark | null {
+  const markType = editor.state.schema.marks.criticChange;
+  if (!markType) return null;
+
+  const isReusableDeletionMark = (mark: ProseMirrorMark) =>
+    mark.type === markType && mark.attrs.kind === "deletion";
+  const beforeRange = editor.state.doc
+    .resolve(from)
+    .nodeBefore?.marks.find(isReusableDeletionMark);
+
+  if (beforeRange) return beforeRange;
+
+  return (
+    editor.state.doc
+      .resolve(to)
+      .nodeAfter?.marks.find(isReusableDeletionMark) ?? null
+  );
+}
+
 function getDocumentCriticChangeRailItems(
   editor: Editor | null,
   comments: ReadonlyMap<string, CriticComment>,
@@ -889,18 +912,19 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
           if (from === to) return false;
 
           event.preventDefault();
-          const change = createCriticChange("deletion", undefined, {
-            existingChanges: getDocumentCriticChanges(currentEditor),
-          });
-          view.dispatch(
-            view.state.tr
-              .addMark(
-                from,
-                to,
-                view.state.schema.marks.criticChange.create(change),
-              )
-              .scrollIntoView(),
-          );
+          const mark =
+            getReusableSuggestionDeletionMark(currentEditor, from, to) ??
+            view.state.schema.marks.criticChange.create(
+              createCriticChange("deletion", undefined, {
+                existingChanges: getDocumentCriticChanges(currentEditor),
+              }),
+            );
+          const nextSelectionPosition = event.key === "Backspace" ? from : to;
+          const tr = view.state.tr.addMark(from, to, mark);
+          tr.setSelection(TextSelection.create(tr.doc, nextSelectionPosition));
+          tr.scrollIntoView();
+
+          view.dispatch(tr);
           return true;
         },
       },
