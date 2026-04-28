@@ -11,6 +11,7 @@ import {
   ROUGHDRAFT_PUBLIC_HOST,
 } from "./network.js";
 import { findAvailablePort } from "./ports.js";
+import { resolveUpdateStatus, type UpdateStatus } from "./update-status.js";
 
 const AGENT_SETUP_URL = "https://roughdraft.page/setup.md";
 const AGENT_SETUP_PROMPT = `Install Roughdraft for me using \`npm i -g roughdraft\`, then read ${AGENT_SETUP_URL} and set yourself up to use it.`;
@@ -73,6 +74,7 @@ export interface CliDependencies {
   isProcessRunning: (pid: number) => boolean;
   stopProcess: (pid: number) => Promise<void>;
   openUrl: (url: string) => OpenMode;
+  resolveUpdateStatus: () => Promise<UpdateStatus>;
   log: (message: string) => void;
   error: (message: string) => void;
 }
@@ -511,10 +513,12 @@ function defaultSpawnServerProcess(options: {
 export function createCliDependencies(
   overrides: Partial<CliDependencies> = {},
 ): CliDependencies {
+  const fetchImpl = overrides.fetchImpl ?? fetch;
+
   return {
     env: overrides.env ?? process.env,
     cwd: overrides.cwd ?? process.cwd(),
-    fetchImpl: overrides.fetchImpl ?? fetch,
+    fetchImpl,
     findAvailablePortImpl: overrides.findAvailablePortImpl ?? findAvailablePort,
     sleepImpl: overrides.sleepImpl ?? ((ms) => sleep(ms)),
     spawnServerProcess:
@@ -522,9 +526,23 @@ export function createCliDependencies(
     isProcessRunning: overrides.isProcessRunning ?? defaultIsProcessRunning,
     stopProcess: overrides.stopProcess ?? defaultStopProcess,
     openUrl: overrides.openUrl ?? defaultOpenUrl,
+    resolveUpdateStatus:
+      overrides.resolveUpdateStatus ??
+      (() => resolveUpdateStatus({ fetchImpl })),
     log: overrides.log ?? ((message) => console.log(message)),
     error: overrides.error ?? ((message) => console.error(message)),
   };
+}
+
+async function printUpdateNoticeIfAvailable(deps: CliDependencies) {
+  try {
+    const updateStatus = await deps.resolveUpdateStatus();
+    if (!updateStatus.updateAvailable) return;
+
+    deps.log(
+      `Roughdraft update available: ${updateStatus.currentVersion} -> ${updateStatus.latestVersion}. Run \`${updateStatus.updateCommand}\` to update.`,
+    );
+  } catch {}
 }
 
 function printHelp(log: (message: string) => void) {
@@ -1381,255 +1399,349 @@ export async function runCli(
 ): Promise<number> {
   let deps = createCliDependencies(overrides);
   let parsed: ParsedCli;
+  let shouldPrintUpdateNotice = false;
 
   try {
-    parsed = parseGlobalArgs(args);
-  } catch (error) {
-    deps.error(error instanceof Error ? error.message : "Invalid usage.");
-    return USAGE_ERROR;
-  }
-
-  if (parsed.global.version) {
-    deps.log(readPackageVersion());
-    return 0;
-  }
-
-  if (!parsed.command) {
-    printHelp(deps.log);
-    return 0;
-  }
-
-  if (parsed.command === "help") {
-    const [topic, ...extra] = parsed.rest;
-    if (extra.length > 0) {
-      deps.error("Usage: roughdraft help [agent|criticmarkup|command]");
+    try {
+      parsed = parseGlobalArgs(args);
+    } catch (error) {
+      deps.error(error instanceof Error ? error.message : "Invalid usage.");
       return USAGE_ERROR;
     }
 
-    if (!topic) {
+    if (parsed.global.version) {
+      deps.log(readPackageVersion());
+      return 0;
+    }
+
+    if (!parsed.command) {
       printHelp(deps.log);
       return 0;
     }
 
-    if (topic === "agent") {
-      printAgentHelp(deps.log);
+    if (parsed.command === "help") {
+      const [topic, ...extra] = parsed.rest;
+      if (extra.length > 0) {
+        deps.error("Usage: roughdraft help [agent|criticmarkup|command]");
+        return USAGE_ERROR;
+      }
+
+      if (!topic) {
+        printHelp(deps.log);
+        return 0;
+      }
+
+      if (topic === "agent") {
+        printAgentHelp(deps.log);
+        return 0;
+      }
+
+      if (topic === "criticmarkup") {
+        printCriticMarkupHelp(deps.log);
+        return 0;
+      }
+
+      if (isKnownCommand(topic)) {
+        printCommandHelp(topic, deps.log);
+        return 0;
+      }
+
+      deps.error(`Unknown help topic: ${topic}`);
+      return USAGE_ERROR;
+    }
+
+    let command = parsed.command;
+    let rest = parsed.rest;
+
+    if (!isKnownCommand(command)) {
+      if (isPathLikeInput(command)) {
+        rest = [command, ...rest];
+        command = "open";
+      } else {
+        const suggestion = suggestCommand(command);
+        deps.error(
+          `Unknown command: ${command}.${suggestion ? ` Did you mean ${suggestion}?` : ""}`,
+        );
+        return USAGE_ERROR;
+      }
+    }
+
+    if (parsed.global.help) {
+      printCommandHelp(command as KnownCommand, deps.log);
       return 0;
     }
 
-    if (topic === "criticmarkup") {
+    if (command === "criticmarkup") {
+      shouldPrintUpdateNotice = true;
       printCriticMarkupHelp(deps.log);
       return 0;
     }
 
-    if (isKnownCommand(topic)) {
-      printCommandHelp(topic, deps.log);
+    if (command === "agent-setup") {
+      shouldPrintUpdateNotice = true;
+      printAgentHelp(deps.log);
       return 0;
     }
 
-    deps.error(`Unknown help topic: ${topic}`);
-    return USAGE_ERROR;
-  }
+    if (command === "start") {
+      let options: ParsedCommandOptions;
+      try {
+        options = parseCommandOptions(rest, { allowPort: true });
+      } catch (error) {
+        deps.error(error instanceof Error ? error.message : "Invalid usage.");
+        return USAGE_ERROR;
+      }
 
-  let command = parsed.command;
-  let rest = parsed.rest;
+      if (options.help) {
+        printCommandHelp("start", deps.log);
+        return 0;
+      }
 
-  if (!isKnownCommand(command)) {
-    if (isPathLikeInput(command)) {
-      rest = [command, ...rest];
-      command = "open";
-    } else {
-      const suggestion = suggestCommand(command);
-      deps.error(
-        `Unknown command: ${command}.${suggestion ? ` Did you mean ${suggestion}?` : ""}`,
-      );
-      return USAGE_ERROR;
-    }
-  }
+      if (options.positionals.length > 0) {
+        deps.error("Usage: roughdraft start [--port <port>] [--json]");
+        return USAGE_ERROR;
+      }
 
-  if (parsed.global.help) {
-    printCommandHelp(command as KnownCommand, deps.log);
-    return 0;
-  }
+      deps = applyCliEnvOverrides(deps, options);
+      const json = parsed.global.json || options.json;
+      shouldPrintUpdateNotice = !json;
+      const result = await ensureServerRunning(deps);
+      if (json) {
+        emitJson(deps.log, {
+          ...buildServerStatusJson(
+            result.server,
+            getServerStateFilePath(deps.env),
+          ),
+          reused: result.reused,
+          portChanged: result.portChanged,
+        });
+        return 0;
+      }
 
-  if (command === "criticmarkup") {
-    printCriticMarkupHelp(deps.log);
-    return 0;
-  }
+      if (result.reused) {
+        if (result.server.tracked) {
+          deps.log(`Roughdraft is already running at ${result.server.url}`);
+        } else {
+          deps.log(
+            `Roughdraft is already running at ${result.server.url}, but it is not managed by ${getServerStateFilePath(deps.env)}.`,
+          );
+        }
+        return 0;
+      }
 
-  if (command === "agent-setup") {
-    printAgentHelp(deps.log);
-    return 0;
-  }
-
-  if (command === "start") {
-    let options: ParsedCommandOptions;
-    try {
-      options = parseCommandOptions(rest, { allowPort: true });
-    } catch (error) {
-      deps.error(error instanceof Error ? error.message : "Invalid usage.");
-      return USAGE_ERROR;
-    }
-
-    if (options.help) {
-      printCommandHelp("start", deps.log);
-      return 0;
-    }
-
-    if (options.positionals.length > 0) {
-      deps.error("Usage: roughdraft start [--port <port>] [--json]");
-      return USAGE_ERROR;
-    }
-
-    deps = applyCliEnvOverrides(deps, options);
-    const json = parsed.global.json || options.json;
-    const result = await ensureServerRunning(deps);
-    if (json) {
-      emitJson(deps.log, {
-        ...buildServerStatusJson(
-          result.server,
-          getServerStateFilePath(deps.env),
-        ),
-        reused: result.reused,
-        portChanged: result.portChanged,
-      });
-      return 0;
-    }
-
-    if (result.reused) {
-      if (result.server.tracked) {
-        deps.log(`Roughdraft is already running at ${result.server.url}`);
-      } else {
+      if (result.portChanged) {
         deps.log(
-          `Roughdraft is already running at ${result.server.url}, but it is not managed by ${getServerStateFilePath(deps.env)}.`,
+          `Preferred port ${getPreferredPort(deps.env)} is busy, using ${result.server.port}.`,
         );
       }
+
+      deps.log(`Roughdraft running at ${result.server.url}`);
       return 0;
     }
 
-    if (result.portChanged) {
-      deps.log(
-        `Preferred port ${getPreferredPort(deps.env)} is busy, using ${result.server.port}.`,
-      );
-    }
+    if (command === "status") {
+      let options: ParsedCommandOptions;
+      try {
+        options = parseCommandOptions(rest, {});
+      } catch (error) {
+        deps.error(error instanceof Error ? error.message : "Invalid usage.");
+        return USAGE_ERROR;
+      }
 
-    deps.log(`Roughdraft running at ${result.server.url}`);
-    return 0;
-  }
+      if (options.help) {
+        printCommandHelp("status", deps.log);
+        return 0;
+      }
 
-  if (command === "status") {
-    let options: ParsedCommandOptions;
-    try {
-      options = parseCommandOptions(rest, {});
-    } catch (error) {
-      deps.error(error instanceof Error ? error.message : "Invalid usage.");
-      return USAGE_ERROR;
-    }
+      if (options.positionals.length > 0) {
+        deps.error("Usage: roughdraft status [--json]");
+        return USAGE_ERROR;
+      }
 
-    if (options.help) {
-      printCommandHelp("status", deps.log);
-      return 0;
-    }
+      deps = applyCliEnvOverrides(deps, options);
+      const json = parsed.global.json || options.json;
+      shouldPrintUpdateNotice = !json;
+      const server = await findReusableServer(deps);
+      if (!server) {
+        if (json) {
+          emitJson(
+            deps.log,
+            buildServerStatusJson(null, getServerStateFilePath(deps.env)),
+          );
+          return 0;
+        }
 
-    if (options.positionals.length > 0) {
-      deps.error("Usage: roughdraft status [--json]");
-      return USAGE_ERROR;
-    }
+        deps.log(
+          "Roughdraft is not running. Start it with `roughdraft start`.",
+        );
+        return 1;
+      }
 
-    deps = applyCliEnvOverrides(deps, options);
-    const json = parsed.global.json || options.json;
-    const server = await findReusableServer(deps);
-    if (!server) {
       if (json) {
         emitJson(
           deps.log,
-          buildServerStatusJson(null, getServerStateFilePath(deps.env)),
+          buildServerStatusJson(server, getServerStateFilePath(deps.env)),
         );
         return 0;
       }
 
-      deps.log("Roughdraft is not running. Start it with `roughdraft start`.");
-      return 1;
-    }
-
-    if (json) {
-      emitJson(
-        deps.log,
-        buildServerStatusJson(server, getServerStateFilePath(deps.env)),
-      );
+      deps.log(`Roughdraft is running at ${server.url}`);
+      if (server.tracked && server.pid !== null && server.startedAt !== null) {
+        deps.log(`PID: ${server.pid}`);
+        deps.log(`Started: ${server.startedAt}`);
+        deps.log(`State file: ${getServerStateFilePath(deps.env)}`);
+      } else {
+        deps.log(
+          `This server is not managed by ${getServerStateFilePath(deps.env)}.`,
+        );
+      }
       return 0;
     }
 
-    deps.log(`Roughdraft is running at ${server.url}`);
-    if (server.tracked && server.pid !== null && server.startedAt !== null) {
-      deps.log(`PID: ${server.pid}`);
-      deps.log(`Started: ${server.startedAt}`);
-      deps.log(`State file: ${getServerStateFilePath(deps.env)}`);
-    } else {
-      deps.log(
-        `This server is not managed by ${getServerStateFilePath(deps.env)}.`,
-      );
-    }
-    return 0;
-  }
+    if (command === "stop") {
+      let options: ParsedCommandOptions;
+      try {
+        options = parseCommandOptions(rest, { allowAll: true });
+      } catch (error) {
+        deps.error(error instanceof Error ? error.message : "Invalid usage.");
+        return USAGE_ERROR;
+      }
 
-  if (command === "stop") {
-    let options: ParsedCommandOptions;
-    try {
-      options = parseCommandOptions(rest, { allowAll: true });
-    } catch (error) {
-      deps.error(error instanceof Error ? error.message : "Invalid usage.");
-      return USAGE_ERROR;
-    }
+      if (options.help) {
+        printCommandHelp("stop", deps.log);
+        return 0;
+      }
 
-    if (options.help) {
-      printCommandHelp("stop", deps.log);
-      return 0;
-    }
+      if (options.positionals.length > 0) {
+        deps.error("Usage: roughdraft stop [--all]");
+        return USAGE_ERROR;
+      }
 
-    if (options.positionals.length > 0) {
-      deps.error("Usage: roughdraft stop [--all]");
-      return USAGE_ERROR;
-    }
+      deps = applyCliEnvOverrides(deps, options);
+      const json = parsed.global.json || options.json;
+      shouldPrintUpdateNotice = !json;
+      const stateFilePath = getServerStateFilePath(deps.env);
+      const stopResult = await stopTrackedServer(deps);
 
-    deps = applyCliEnvOverrides(deps, options);
-    const json = parsed.global.json || options.json;
-    const stateFilePath = getServerStateFilePath(deps.env);
-    const stopResult = await stopTrackedServer(deps);
+      if (!stopResult.persistedState) {
+        const preferredPort = getPreferredPort(deps.env);
+        const unmanagedServer = await getStatusPayload(preferredPort, deps);
+        if (unmanagedServer) {
+          const candidatePid = options.all
+            ? getConfidentStopCandidate(unmanagedServer)
+            : null;
+          if (candidatePid !== null) {
+            await deps.stopProcess(candidatePid);
+            const stopped = await waitForServerToStop(preferredPort, deps);
+            if (stopped) {
+              if (json) {
+                emitJson(deps.log, {
+                  stopped: true,
+                  managed: false,
+                  pid: candidatePid,
+                  url: buildPublicBaseUrl(preferredPort),
+                  stateFile: stateFilePath,
+                });
+                return 0;
+              }
 
-    if (!stopResult.persistedState) {
-      const preferredPort = getPreferredPort(deps.env);
-      const unmanagedServer = await getStatusPayload(preferredPort, deps);
-      if (unmanagedServer) {
-        const candidatePid = options.all
-          ? getConfidentStopCandidate(unmanagedServer)
-          : null;
-        if (candidatePid !== null) {
-          await deps.stopProcess(candidatePid);
-          const stopped = await waitForServerToStop(preferredPort, deps);
-          if (stopped) {
-            if (json) {
-              emitJson(deps.log, {
-                stopped: true,
-                managed: false,
-                pid: candidatePid,
-                url: buildPublicBaseUrl(preferredPort),
-                stateFile: stateFilePath,
-              });
+              deps.log(
+                `Stopped unmanaged Roughdraft at ${buildPublicBaseUrl(preferredPort)}.`,
+              );
               return 0;
             }
-
-            deps.log(
-              `Stopped unmanaged Roughdraft at ${buildPublicBaseUrl(preferredPort)}.`,
-            );
-            return 0;
           }
+
+          if (json) {
+            emitJson(deps.log, {
+              stopped: false,
+              managed: false,
+              url: buildPublicBaseUrl(preferredPort),
+              ...(options.all
+                ? { reason: "No confident unmanaged process candidate." }
+                : {}),
+              stateFile: stateFilePath,
+            });
+            return 1;
+          }
+
+          deps.error(
+            options.all
+              ? `Roughdraft is still running at ${buildPublicBaseUrl(preferredPort)}, but it could not be matched to a safe process candidate. Stop it manually.`
+              : `Roughdraft is still running at ${buildPublicBaseUrl(preferredPort)}, but it is not managed by ${stateFilePath}. Stop it manually.`,
+          );
+          return 1;
         }
 
         if (json) {
           emitJson(deps.log, {
             stopped: false,
-            managed: false,
-            url: buildPublicBaseUrl(preferredPort),
+            running: false,
+            stateFile: stateFilePath,
+          });
+          return 0;
+        }
+
+        deps.log("Roughdraft is not running.");
+        return 0;
+      }
+
+      if (stopResult.failedPid !== null) {
+        if (json) {
+          emitJson(deps.log, {
+            stopped: false,
+            pid: stopResult.failedPid,
+            stateFile: stateFilePath,
+          });
+          return 1;
+        }
+
+        deps.error(
+          `Failed to stop Roughdraft process ${stopResult.failedPid}.`,
+        );
+        return 1;
+      }
+
+      if (!stopResult.portIsQuiet) {
+        if (options.all) {
+          const unmanagedServer = await getStatusPayload(
+            stopResult.persistedState.port,
+            deps,
+          );
+          const candidatePid = getConfidentStopCandidate(unmanagedServer);
+          if (candidatePid !== null) {
+            await deps.stopProcess(candidatePid);
+            const stopped = await waitForServerToStop(
+              stopResult.persistedState.port,
+              deps,
+            );
+            if (stopped) {
+              if (json) {
+                emitJson(deps.log, {
+                  stopped: true,
+                  pid: stopResult.persistedState.pid,
+                  unmanagedPid: candidatePid,
+                  url: buildPublicBaseUrl(stopResult.persistedState.port),
+                  stateFile: stateFilePath,
+                });
+                return 0;
+              }
+
+              deps.log(
+                `Stopped Roughdraft at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
+              );
+              deps.log(`Stopped unmanaged Roughdraft process ${candidatePid}.`);
+              return 0;
+            }
+          }
+        }
+
+        if (json) {
+          emitJson(deps.log, {
+            stopped: true,
+            pid: stopResult.persistedState.pid,
+            url: buildPublicBaseUrl(stopResult.persistedState.port),
+            anotherInstanceRunning: true,
             ...(options.all
               ? { reason: "No confident unmanaged process candidate." }
               : {}),
@@ -1639,72 +1751,9 @@ export async function runCli(
         }
 
         deps.error(
-          options.all
-            ? `Roughdraft is still running at ${buildPublicBaseUrl(preferredPort)}, but it could not be matched to a safe process candidate. Stop it manually.`
-            : `Roughdraft is still running at ${buildPublicBaseUrl(preferredPort)}, but it is not managed by ${stateFilePath}. Stop it manually.`,
+          `Stopped tracked Roughdraft process ${stopResult.persistedState.pid}, but another Roughdraft instance is still running at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
         );
         return 1;
-      }
-
-      if (json) {
-        emitJson(deps.log, {
-          stopped: false,
-          running: false,
-          stateFile: stateFilePath,
-        });
-        return 0;
-      }
-
-      deps.log("Roughdraft is not running.");
-      return 0;
-    }
-
-    if (stopResult.failedPid !== null) {
-      if (json) {
-        emitJson(deps.log, {
-          stopped: false,
-          pid: stopResult.failedPid,
-          stateFile: stateFilePath,
-        });
-        return 1;
-      }
-
-      deps.error(`Failed to stop Roughdraft process ${stopResult.failedPid}.`);
-      return 1;
-    }
-
-    if (!stopResult.portIsQuiet) {
-      if (options.all) {
-        const unmanagedServer = await getStatusPayload(
-          stopResult.persistedState.port,
-          deps,
-        );
-        const candidatePid = getConfidentStopCandidate(unmanagedServer);
-        if (candidatePid !== null) {
-          await deps.stopProcess(candidatePid);
-          const stopped = await waitForServerToStop(
-            stopResult.persistedState.port,
-            deps,
-          );
-          if (stopped) {
-            if (json) {
-              emitJson(deps.log, {
-                stopped: true,
-                pid: stopResult.persistedState.pid,
-                unmanagedPid: candidatePid,
-                url: buildPublicBaseUrl(stopResult.persistedState.port),
-                stateFile: stateFilePath,
-              });
-              return 0;
-            }
-
-            deps.log(
-              `Stopped Roughdraft at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
-            );
-            deps.log(`Stopped unmanaged Roughdraft process ${candidatePid}.`);
-            return 0;
-          }
-        }
       }
 
       if (json) {
@@ -1712,163 +1761,154 @@ export async function runCli(
           stopped: true,
           pid: stopResult.persistedState.pid,
           url: buildPublicBaseUrl(stopResult.persistedState.port),
-          anotherInstanceRunning: true,
-          ...(options.all
-            ? { reason: "No confident unmanaged process candidate." }
-            : {}),
           stateFile: stateFilePath,
         });
+        return 0;
+      }
+
+      deps.log(
+        `Stopped Roughdraft at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
+      );
+      return 0;
+    }
+
+    if (command === "doctor") {
+      let options: ParsedCommandOptions;
+      try {
+        options = parseCommandOptions(rest, {});
+      } catch (error) {
+        deps.error(error instanceof Error ? error.message : "Invalid usage.");
+        return USAGE_ERROR;
+      }
+
+      if (options.help) {
+        printCommandHelp("doctor", deps.log);
+        return 0;
+      }
+
+      if (options.positionals.length > 0) {
+        deps.error("Usage: roughdraft doctor [--json]");
+        return USAGE_ERROR;
+      }
+
+      deps = applyCliEnvOverrides(deps, options);
+      const json = parsed.global.json || options.json;
+      shouldPrintUpdateNotice = !json;
+      return runDoctor(deps, json);
+    }
+
+    if (command === "open") {
+      let options: ParsedCommandOptions;
+      try {
+        options = parseCommandOptions(rest, {
+          allowOpen: true,
+          allowPort: true,
+        });
+      } catch (error) {
+        deps.error(error instanceof Error ? error.message : "Invalid usage.");
+        return USAGE_ERROR;
+      }
+
+      if (options.help) {
+        printCommandHelp("open", deps.log);
+        return 0;
+      }
+
+      const target = options.positionals[0];
+      if (!target) {
+        deps.error("Usage: roughdraft open <path>");
+        return USAGE_ERROR;
+      }
+
+      if (options.positionals.length > 1) {
+        deps.error("Usage: roughdraft open <path>");
+        return USAGE_ERROR;
+      }
+
+      deps = applyCliEnvOverrides(deps, options);
+      const json = parsed.global.json || options.json;
+      let resolvedTarget: ResolvedTargetPath;
+      try {
+        resolvedTarget = resolveTargetPath(target);
+      } catch (error) {
+        deps.error(error instanceof Error ? error.message : "Invalid path.");
         return 1;
       }
 
-      deps.error(
-        `Stopped tracked Roughdraft process ${stopResult.persistedState.pid}, but another Roughdraft instance is still running at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
-      );
-      return 1;
-    }
+      const { projectDir, openPath } = resolvedTarget;
+      const liveDevFrontendUrl = await resolveLiveDevFrontendBaseUrl(deps);
+      let result: EnsureRunningResult | null = null;
+      let baseUrl: string;
 
-    if (json) {
-      emitJson(deps.log, {
-        stopped: true,
-        pid: stopResult.persistedState.pid,
-        url: buildPublicBaseUrl(stopResult.persistedState.port),
-        stateFile: stateFilePath,
-      });
-      return 0;
-    }
-
-    deps.log(
-      `Stopped Roughdraft at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
-    );
-    return 0;
-  }
-
-  if (command === "doctor") {
-    let options: ParsedCommandOptions;
-    try {
-      options = parseCommandOptions(rest, {});
-    } catch (error) {
-      deps.error(error instanceof Error ? error.message : "Invalid usage.");
-      return USAGE_ERROR;
-    }
-
-    if (options.help) {
-      printCommandHelp("doctor", deps.log);
-      return 0;
-    }
-
-    if (options.positionals.length > 0) {
-      deps.error("Usage: roughdraft doctor [--json]");
-      return USAGE_ERROR;
-    }
-
-    deps = applyCliEnvOverrides(deps, options);
-    return runDoctor(deps, parsed.global.json || options.json);
-  }
-
-  if (command === "open") {
-    let options: ParsedCommandOptions;
-    try {
-      options = parseCommandOptions(rest, { allowOpen: true, allowPort: true });
-    } catch (error) {
-      deps.error(error instanceof Error ? error.message : "Invalid usage.");
-      return USAGE_ERROR;
-    }
-
-    if (options.help) {
-      printCommandHelp("open", deps.log);
-      return 0;
-    }
-
-    const target = options.positionals[0];
-    if (!target) {
-      deps.error("Usage: roughdraft open <path>");
-      return USAGE_ERROR;
-    }
-
-    if (options.positionals.length > 1) {
-      deps.error("Usage: roughdraft open <path>");
-      return USAGE_ERROR;
-    }
-
-    deps = applyCliEnvOverrides(deps, options);
-    const json = parsed.global.json || options.json;
-    let resolvedTarget: ResolvedTargetPath;
-    try {
-      resolvedTarget = resolveTargetPath(target);
-    } catch (error) {
-      deps.error(error instanceof Error ? error.message : "Invalid path.");
-      return 1;
-    }
-
-    const { projectDir, openPath } = resolvedTarget;
-    const liveDevFrontendUrl = await resolveLiveDevFrontendBaseUrl(deps);
-    let result: EnsureRunningResult | null = null;
-    let baseUrl: string;
-
-    if (liveDevFrontendUrl) {
-      baseUrl = liveDevFrontendUrl;
-    } else {
-      result = await ensureServerRunning(deps, { projectDir });
-      baseUrl = buildPublicBaseUrl(result.server.port);
-    }
-
-    const targetUrl = buildTargetUrl(baseUrl, openPath);
-    let openMode: OpenMode = "disabled";
-    if (!options.noOpen && deps.env.ROUGHDRAFT_NO_OPEN !== "1") {
-      openMode = (await sendOpenRequestToExistingWindow(
-        deps,
-        baseUrl,
-        targetUrl,
-        openPath,
-      ))
-        ? "existing-window"
-        : deps.openUrl(targetUrl);
-    }
-
-    if (result?.portChanged) {
-      const message = `Preferred port ${getPreferredPort(deps.env)} is busy, using ${result.server.port}.`;
-      if (options.printUrl) {
-        deps.error(message);
-      } else if (!json) {
-        deps.log(message);
+      if (liveDevFrontendUrl) {
+        baseUrl = liveDevFrontendUrl;
+      } else {
+        result = await ensureServerRunning(deps, { projectDir });
+        baseUrl = buildPublicBaseUrl(result.server.port);
       }
-    }
 
-    if (options.printUrl) {
-      deps.log(targetUrl);
+      const targetUrl = buildTargetUrl(baseUrl, openPath);
+      let openMode: OpenMode = "disabled";
+      if (!options.noOpen && deps.env.ROUGHDRAFT_NO_OPEN !== "1") {
+        openMode = (await sendOpenRequestToExistingWindow(
+          deps,
+          baseUrl,
+          targetUrl,
+          openPath,
+        ))
+          ? "existing-window"
+          : deps.openUrl(targetUrl);
+      }
+
+      if (result?.portChanged) {
+        const message = `Preferred port ${getPreferredPort(deps.env)} is busy, using ${result.server.port}.`;
+        if (options.printUrl) {
+          deps.error(message);
+        } else if (!json) {
+          deps.log(message);
+        }
+      }
+
+      if (options.printUrl) {
+        deps.log(targetUrl);
+        return 0;
+      }
+
+      if (json) {
+        emitJson(deps.log, {
+          opened: true,
+          url: targetUrl,
+          serverUrl: baseUrl,
+          path: openPath,
+          openMode,
+        });
+        return 0;
+      }
+
+      shouldPrintUpdateNotice = true;
+      if (openMode === "chrome-app") {
+        deps.log(`Opened Roughdraft in a Chrome app window: ${targetUrl}`);
+        return 0;
+      }
+
+      if (openMode === "existing-window") {
+        deps.log(`Reused an existing Roughdraft window: ${targetUrl}`);
+        return 0;
+      }
+
+      if (openMode === "browser") {
+        deps.log(`Opened Roughdraft in the default browser: ${targetUrl}`);
+        return 0;
+      }
+
+      deps.log(`Roughdraft is running at ${targetUrl}`);
       return 0;
     }
 
-    if (json) {
-      emitJson(deps.log, {
-        opened: true,
-        url: targetUrl,
-        serverUrl: baseUrl,
-        path: openPath,
-        openMode,
-      });
-      return 0;
+    return USAGE_ERROR;
+  } finally {
+    if (shouldPrintUpdateNotice) {
+      await printUpdateNoticeIfAvailable(deps);
     }
-
-    if (openMode === "chrome-app") {
-      deps.log(`Opened Roughdraft in a Chrome app window: ${targetUrl}`);
-      return 0;
-    }
-
-    if (openMode === "existing-window") {
-      deps.log(`Reused an existing Roughdraft window: ${targetUrl}`);
-      return 0;
-    }
-
-    if (openMode === "browser") {
-      deps.log(`Opened Roughdraft in the default browser: ${targetUrl}`);
-      return 0;
-    }
-
-    deps.log(`Roughdraft is running at ${targetUrl}`);
-    return 0;
   }
-
-  return USAGE_ERROR;
 }
