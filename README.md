@@ -247,6 +247,8 @@ ROUGHDRAFT_DEV_WRAPPER_REPO_ROOT
 
 Roughdraft uses [CriticMarkup](https://criticmarkup.com) as the readable review layer inside normal Markdown files. It supports the standard markers for comments, highlights, insertions, deletions, and substitutions:
 
+The canonical Roughdraft Flavored Markdown spec is published at [roughdraft.page/spec/roughdraft-flavored-markdown.md](https://roughdraft.page/spec/roughdraft-flavored-markdown.md). The review-index JSON Schema is published at [roughdraft.page/spec/roughdraft-flavored-markdown.schema.json](https://roughdraft.page/spec/roughdraft-flavored-markdown.schema.json).
+
 ```markdown
 This is {--deleted--} text.
 This is {++inserted++} text.

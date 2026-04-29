@@ -14,6 +14,8 @@ import { findAvailablePort } from "./ports.js";
 import { resolveUpdateStatus, type UpdateStatus } from "./update-status.js";
 
 const AGENT_SETUP_URL = "https://roughdraft.page/setup.md";
+const ROUGHDRAFT_FLAVORED_MARKDOWN_SPEC_URL =
+  "https://roughdraft.page/spec/roughdraft-flavored-markdown.md";
 const AGENT_SETUP_PROMPT = `Install Roughdraft for me using \`npm i -g roughdraft\`, then read ${AGENT_SETUP_URL} and set yourself up to use it.`;
 const STATUS_PATH = "/api/status";
 const STATUS_TIMEOUT_MS = 750;
@@ -735,6 +737,9 @@ function printCriticMarkupHelp(log: (message: string) => void) {
   log(
     "  Treat CriticMarkup inside fenced code blocks as literal example text.",
   );
+  log("");
+  log("Full spec:");
+  log(`  ${ROUGHDRAFT_FLAVORED_MARKDOWN_SPEC_URL}`);
 }
 
 function parsePort(value: string | undefined): number {

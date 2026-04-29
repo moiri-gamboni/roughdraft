@@ -68,6 +68,18 @@ describe("Homepage", () => {
       '{==this claim==}{>>Can we source this?<<}{id="c1"',
     );
     expect(container.textContent).toContain('re="s1"');
+    expect(container.textContent).toContain("Review workflow");
+    expect(container.textContent).toContain(
+      "Pass the same Markdown file back and forth with your agent.",
+    );
+    expect(container.textContent).toContain("Review an agent's draft");
+    expect(container.textContent).toContain(
+      "tell the agent to read the file again",
+    );
+    expect(container.textContent).toContain("Ask the agent to review yours");
+    expect(container.textContent).toContain(
+      "leave detailed comments, questions, and suggested edits",
+    );
     expect(
       container.querySelectorAll('[contenteditable="plaintext-only"]'),
     ).toHaveLength(0);
@@ -129,11 +141,16 @@ describe("Homepage", () => {
     );
     expect(container.textContent).toContain("CriticMarkup");
     expect(container.textContent).toContain("Notion-flavored Markdown");
+    expect(container.textContent).toContain("Official RFM spec");
     expect(container.textContent).toContain("Format contract");
     expect(container.textContent).toContain(
       "Review data lives where agents can inspect it",
     );
     expect(container.textContent).toContain("document-local");
+    expect(
+      container.querySelector('a[href="/spec/roughdraft-flavored-markdown.md"]')
+        ?.textContent,
+    ).toContain("Official RFM spec");
     expect(
       container.querySelector('a[href="https://criticmarkup.com/"]')
         ?.textContent,

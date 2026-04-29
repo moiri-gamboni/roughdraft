@@ -72,6 +72,8 @@ After updating your instructions, briefly tell the user which file you changed.
 
 Roughdraft uses CriticMarkup for inline comments and suggested changes while keeping all review state in the Markdown file.
 
+For exact syntax, metadata, and round-trip behavior, read the official Roughdraft Flavored Markdown spec at https://roughdraft.page/spec/roughdraft-flavored-markdown.md. The review-index JSON Schema is available at https://roughdraft.page/spec/roughdraft-flavored-markdown.schema.json.
+
 Base markers:
 
 ```text

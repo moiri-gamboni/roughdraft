@@ -955,6 +955,9 @@ describe("cli", () => {
     expect(test.logs).toContain(
       "  Treat CriticMarkup inside fenced code blocks as literal example text.",
     );
+    expect(test.logs).toContain(
+      "  https://roughdraft.page/spec/roughdraft-flavored-markdown.md",
+    );
   });
 
   it("points general help to agent setup", async () => {

@@ -72,6 +72,20 @@ const ROUGHDRAFT_MARKDOWN_FEATURES = [
     icon: FileText,
   },
 ] as const;
+const HOMEPAGE_WORKFLOWS = [
+  {
+    title: "Review an agent's draft",
+    description:
+      "Ask your agent to write a Markdown file, open it in Roughdraft, then leave comments and suggested changes. When you are done, tell the agent to read the file again so it can reply inline or incorporate your feedback.",
+    icon: MessageSquare,
+  },
+  {
+    title: "Ask the agent to review yours",
+    description:
+      "Start from your own writing and have the agent leave detailed comments, questions, and suggested edits in the document. You can accept the useful parts, push back in replies, or send the file back for another pass.",
+    icon: PencilLine,
+  },
+] as const;
 const ROUGHDRAFT_MARKDOWN_SYNTAX = [
   {
     label: "Comment",
@@ -105,6 +119,12 @@ const ROUGHDRAFT_MARKDOWN_SYNTAX = [
   },
 ] as const;
 const ROUGHDRAFT_MARKDOWN_REFERENCES = [
+  {
+    title: "Official RFM spec",
+    href: "/spec/roughdraft-flavored-markdown.md",
+    description:
+      "The normative syntax, metadata, round-trip, and JSON review-index contract for Roughdraft Flavored Markdown.",
+  },
   {
     title: "CriticMarkup",
     href: "https://criticmarkup.com/",
@@ -343,6 +363,49 @@ export function Homepage({
                 </div>
               ),
             )}
+          </div>
+        </section>
+
+        <section
+          aria-labelledby="homepage-workflow-heading"
+          className="mx-auto mt-16 w-full max-w-5xl border-t border-slate-200 pt-10 text-left"
+        >
+          <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
+            <div>
+              <p className="text-xs font-medium tracking-[0.16em] text-stone-500 uppercase">
+                Review workflow
+              </p>
+              <h2
+                className="mt-3 text-3xl leading-tight font-semibold text-balance text-slate-950 sm:text-4xl"
+                id="homepage-workflow-heading"
+              >
+                Pass the same Markdown file back and forth with your agent.
+              </h2>
+              <p className="mt-4 text-base leading-7 text-slate-600">
+                Roughdraft makes review state part of the document, so the next
+                agent turn can see the comments, suggestions, and replies
+                without needing access to a hosted editor.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {HOMEPAGE_WORKFLOWS.map(({ description, icon: Icon, title }) => (
+                <div
+                  className="rounded-lg border border-slate-200 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+                  key={title}
+                >
+                  <div className="flex size-10 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-700">
+                    <Icon className="size-4" aria-hidden="true" />
+                  </div>
+                  <h3 className="mt-4 text-base font-semibold text-slate-950">
+                    {title}
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    {description}
+                  </p>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
       </div>
