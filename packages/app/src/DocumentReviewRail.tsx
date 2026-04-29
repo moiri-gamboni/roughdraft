@@ -97,7 +97,9 @@ function getSuggestionRootComment(
 
 function renderQuotedSuggestionText(text: string, fallback: string) {
   return (
-    <span className="italic text-slate-600">"{text.trim() || fallback}"</span>
+    <span className="italic text-slate-600 dark:text-slate-400">
+      "{text.trim() || fallback}"
+    </span>
   );
 }
 
@@ -112,7 +114,9 @@ function SuggestionCommentContent({
   if (suggestion.kind === "addition") {
     return (
       <>
-        <span className="font-semibold text-slate-800">Insert:</span>{" "}
+        <span className="font-semibold text-slate-800 dark:text-slate-200">
+          Insert:
+        </span>{" "}
         {renderQuotedSuggestionText(newText, "Inserted text")}
       </>
     );
@@ -121,7 +125,9 @@ function SuggestionCommentContent({
   if (suggestion.kind === "deletion") {
     return (
       <>
-        <span className="font-semibold text-slate-800">Delete:</span>{" "}
+        <span className="font-semibold text-slate-800 dark:text-slate-200">
+          Delete:
+        </span>{" "}
         {renderQuotedSuggestionText(oldText, "Deleted text")}
       </>
     );
@@ -129,9 +135,11 @@ function SuggestionCommentContent({
 
   return (
     <>
-      <span className="font-semibold text-slate-800">Replace:</span>{" "}
+      <span className="font-semibold text-slate-800 dark:text-slate-200">
+        Replace:
+      </span>{" "}
       {renderQuotedSuggestionText(oldText, "Original text")}{" "}
-      <span className="text-slate-500">with</span>{" "}
+      <span className="text-slate-500 dark:text-slate-400">with</span>{" "}
       {renderQuotedSuggestionText(newText, "Changed text")}
     </>
   );
@@ -397,7 +405,7 @@ export function DocumentReviewRail({
                 className={cn(
                   "absolute left-0 right-0 rounded-xl border border-transparent bg-transparent shadow-none transition-all duration-200 ease-out will-change-transform",
                   isSelected
-                    ? "border-[#DFDFDC] bg-white shadow-[0_20px_48px_rgba(57,47,38,0.14)]"
+                    ? "border-[#DFDFDC] dark:border-slate-600 bg-white dark:bg-slate-800 shadow-[0_20px_48px_rgba(57,47,38,0.14)] dark:shadow-[0_20px_48px_rgba(0,0,0,0.4)]"
                     : "",
                   isSelected && "-translate-x-2",
                   isExpanded ? "cursor-default" : "cursor-pointer",
@@ -440,23 +448,23 @@ export function DocumentReviewRail({
                 key={layout.key}
                 ref={(node) => setItemRef(layout.key, node)}
                 data-suggestion-thread-container="true"
-                className="-translate-x-2 absolute left-0 right-0 rounded-xl border border-[#DFDFDC] bg-white px-4 py-3 shadow-[0_20px_48px_rgba(57,47,38,0.14)] transition-all duration-200 ease-out will-change-transform"
+                className="-translate-x-2 absolute left-0 right-0 rounded-xl border border-[#DFDFDC] dark:border-slate-600 bg-white dark:bg-slate-800 px-4 py-3 shadow-[0_20px_48px_rgba(57,47,38,0.14)] dark:shadow-[0_20px_48px_rgba(0,0,0,0.4)] transition-all duration-200 ease-out will-change-transform"
                 style={{ top: layout.railTop }}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="text-[11px] font-semibold tracking-[0.08em] text-stone-500 uppercase">
+                    <div className="text-[11px] font-semibold tracking-[0.08em] text-stone-500 dark:text-stone-400 uppercase">
                       {draftSuggestion?.type === "replacement"
                         ? "Replacement"
                         : "Insertion"}
                     </div>
-                    <div className="mt-1 text-sm leading-5 text-slate-700">
+                    <div className="mt-1 text-sm leading-5 text-slate-700 dark:text-slate-300">
                       {draftSuggestion?.sourceText || "Current cursor position"}
                     </div>
                   </div>
                   <button
                     type="button"
-                    className="flex size-7 shrink-0 items-center justify-center rounded-full text-stone-500 transition hover:bg-stone-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-full text-stone-500 dark:text-stone-400 transition hover:bg-stone-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 dark:focus-visible:ring-slate-600"
                     aria-label="Cancel suggestion"
                     onClick={() => onCancelDraftSuggestion?.()}
                   >
@@ -467,7 +475,7 @@ export function DocumentReviewRail({
                   ref={draftTextareaRef}
                   value={draftSuggestion?.text ?? ""}
                   rows={2}
-                  className="mt-3 min-h-16 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-800 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100"
+                  className="mt-3 min-h-16 w-full resize-y rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm leading-6 text-slate-800 dark:text-slate-200 outline-none transition focus:border-emerald-300 dark:focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 dark:focus:ring-emerald-900"
                   placeholder={
                     draftSuggestion?.type === "replacement"
                       ? "Replacement text"
@@ -489,14 +497,14 @@ export function DocumentReviewRail({
                 <div className="mt-3 flex justify-end gap-2">
                   <button
                     type="button"
-                    className="inline-flex h-8 items-center gap-1 rounded-lg px-3 text-sm font-medium text-stone-600 transition hover:bg-stone-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+                    className="inline-flex h-8 items-center gap-1 rounded-lg px-3 text-sm font-medium text-stone-600 dark:text-stone-400 transition hover:bg-stone-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 dark:focus-visible:ring-slate-600"
                     onClick={() => onCancelDraftSuggestion?.()}
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
-                    className="inline-flex h-8 items-center gap-1 rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white transition hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-8 items-center gap-1 rounded-lg bg-emerald-600 dark:bg-emerald-700 px-3 text-sm font-medium text-white transition hover:bg-emerald-700 dark:hover:bg-emerald-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 dark:focus-visible:ring-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
                     disabled={!draftSuggestion?.text}
                     onClick={() => onApplyDraftSuggestion?.()}
                   >
@@ -590,7 +598,7 @@ export function DocumentReviewRail({
               className={cn(
                 "absolute left-0 right-0 rounded-xl border border-transparent bg-transparent shadow-none transition-all duration-200 ease-out will-change-transform",
                 isSelected
-                  ? "-translate-x-2 border-[#DFDFDC] bg-white shadow-[0_20px_48px_rgba(57,47,38,0.14)]"
+                  ? "-translate-x-2 border-[#DFDFDC] dark:border-slate-600 bg-white dark:bg-slate-800 shadow-[0_20px_48px_rgba(57,47,38,0.14)] dark:shadow-[0_20px_48px_rgba(0,0,0,0.4)]"
                   : "",
                 isHovered && !isSelected && "cursor-pointer",
               )}

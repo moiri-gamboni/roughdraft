@@ -159,10 +159,10 @@ function SelectionMenuButton({
   return (
     <button
       type="button"
-      className={`inline-flex size-9 items-center justify-center rounded-xl border text-slate-600 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 ${
+      className={`inline-flex size-9 items-center justify-center rounded-xl border text-slate-600 dark:text-slate-400 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 dark:focus-visible:ring-slate-600 ${
         active
-          ? "border-slate-900 bg-slate-900 text-white shadow-[0_8px_18px_rgba(15,23,42,0.18)]"
-          : "border-transparent hover:bg-slate-100 hover:text-slate-900"
+          ? "border-slate-900 bg-slate-900 dark:border-slate-100 dark:bg-slate-100 text-white dark:text-slate-900 shadow-[0_8px_18px_rgba(15,23,42,0.18)]"
+          : "border-transparent hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100"
       } disabled:cursor-not-allowed disabled:opacity-40`}
       onMouseDown={(event) => {
         event.preventDefault();
@@ -557,7 +557,7 @@ export function EditorContextMenu({
       {children}
       {selectionActionPosition && !linkPopoverState ? (
         <div
-          className="absolute z-30 w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-full rounded-[22px] border border-slate-200/90 bg-white/95 p-2 shadow-[0_18px_48px_rgba(15,23,42,0.16)] backdrop-blur-xl"
+          className="absolute z-30 w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-full rounded-[22px] border border-slate-200/90 dark:border-slate-700/90 bg-white/95 dark:bg-slate-800/95 p-2 shadow-[0_18px_48px_rgba(15,23,42,0.16)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.4)] backdrop-blur-xl"
           style={{
             left: selectionActionPosition.left,
             top: selectionActionPosition.top,
@@ -644,7 +644,10 @@ export function EditorContextMenu({
               }}
             />
           </div>
-          <div className="my-2 h-px bg-slate-200/80" aria-hidden="true" />
+          <div
+            className="my-2 h-px bg-slate-200/80 dark:bg-slate-700/80"
+            aria-hidden="true"
+          />
           {selectionMenuState.activeCriticChangeId ? (
             <>
               <div className="grid grid-cols-2 gap-1">
@@ -695,12 +698,15 @@ export function EditorContextMenu({
                   <span>Reject</span>
                 </button>
               </div>
-              <div className="my-2 h-px bg-slate-200/80" aria-hidden="true" />
+              <div
+                className="my-2 h-px bg-slate-200/80 dark:bg-slate-700/80"
+                aria-hidden="true"
+              />
             </>
           ) : null}
           <button
             type="button"
-            className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+            className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 dark:text-slate-300 transition hover:bg-slate-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 dark:focus-visible:ring-slate-600"
             disabled={!onAddComment || editor?.state.selection.empty}
             onMouseDown={(event) => {
               event.preventDefault();
@@ -715,7 +721,7 @@ export function EditorContextMenu({
               <MessageSquarePlus className="size-4.5" />
               <span>Comment</span>
             </span>
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold tracking-[0.01em] text-slate-500">
+            <span className="rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1 text-[11px] font-semibold tracking-[0.01em] text-slate-500 dark:text-slate-400">
               {shortcutLabel}
             </span>
           </button>
@@ -724,7 +730,7 @@ export function EditorContextMenu({
       {linkPopoverState ? (
         <div
           ref={linkPopoverRef}
-          className="fixed z-[220] flex -translate-x-1/2 -translate-y-full items-center rounded-[18px] border border-slate-200/90 bg-white/95 px-3 py-2 shadow-[0_18px_48px_rgba(15,23,42,0.16)] backdrop-blur-xl"
+          className="fixed z-[220] flex -translate-x-1/2 -translate-y-full items-center rounded-[18px] border border-slate-200/90 dark:border-slate-700/90 bg-white/95 dark:bg-slate-800/95 px-3 py-2 shadow-[0_18px_48px_rgba(15,23,42,0.16)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.4)] backdrop-blur-xl"
           style={{
             left: linkPopoverState.left,
             top: linkPopoverState.top,
@@ -762,14 +768,17 @@ export function EditorContextMenu({
                 editor?.commands.focus();
               }
             }}
-            className="h-10 w-[22rem] border-0 bg-transparent px-2 text-[17px] text-slate-900 outline-none placeholder:text-slate-400"
+            className="h-10 w-[22rem] border-0 bg-transparent px-2 text-[17px] text-slate-900 dark:text-slate-100 outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
             placeholder="https://example.com"
             aria-label="Link URL"
           />
-          <div className="mx-2 h-8 w-px bg-slate-200" aria-hidden="true" />
+          <div
+            className="mx-2 h-8 w-px bg-slate-200 dark:bg-slate-700"
+            aria-hidden="true"
+          />
           <button
             type="button"
-            className="inline-flex size-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+            className="inline-flex size-9 items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 transition hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 dark:focus-visible:ring-slate-600"
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => {
               applyLink(linkDraft);
@@ -788,7 +797,7 @@ export function EditorContextMenu({
           </button>
           <button
             type="button"
-            className="inline-flex size-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+            className="inline-flex size-9 items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 transition hover:bg-rose-50 dark:hover:bg-rose-900/40 hover:text-rose-600 dark:hover:text-rose-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 dark:focus-visible:ring-rose-800"
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => {
               editor?.chain().focus().unsetLink().run();
@@ -804,12 +813,12 @@ export function EditorContextMenu({
       {position ? (
         <div
           ref={menuRef}
-          className="fixed z-[200] min-w-44 rounded-2xl border border-slate-200/90 bg-white/95 p-1.5 shadow-[0_18px_48px_rgba(15,23,42,0.16)] backdrop-blur-xl"
+          className="fixed z-[200] min-w-44 rounded-2xl border border-slate-200/90 dark:border-slate-700/90 bg-white/95 dark:bg-slate-800/95 p-1.5 shadow-[0_18px_48px_rgba(15,23,42,0.16)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.4)] backdrop-blur-xl"
           style={{ left: position.x, top: position.y }}
         >
           <button
             type="button"
-            className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-300 transition hover:bg-slate-50 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!editor || editor.state.selection.empty}
             onClick={() => {
               onAddComment?.();
@@ -817,13 +826,13 @@ export function EditorContextMenu({
             }}
           >
             <span>Add comment</span>
-            <span className="text-[11px] font-medium text-slate-400">
+            <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
               {shortcutLabel}
             </span>
           </button>
           <button
             type="button"
-            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-300 transition hover:bg-slate-50 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!editor || !onSuggestInsertion}
             onClick={() => {
               onSuggestInsertion?.();
@@ -834,7 +843,7 @@ export function EditorContextMenu({
           </button>
           <button
             type="button"
-            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-300 transition hover:bg-slate-50 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!editor || editor.state.selection.empty}
             onClick={() => {
               onSuggestDeletion?.();
@@ -845,7 +854,7 @@ export function EditorContextMenu({
           </button>
           <button
             type="button"
-            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-300 transition hover:bg-slate-50 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!editor || editor.state.selection.empty}
             onClick={() => {
               onSuggestReplacement?.();
@@ -856,7 +865,10 @@ export function EditorContextMenu({
           </button>
           {selectionMenuState.activeCriticChangeId ? (
             <>
-              <div className="my-1 h-px bg-slate-100" aria-hidden="true" />
+              <div
+                className="my-1 h-px bg-slate-100 dark:bg-slate-700"
+                aria-hidden="true"
+              />
               <button
                 type="button"
                 className="block w-full rounded-xl px-3 py-2 text-left text-sm text-emerald-700 transition hover:bg-emerald-50"
@@ -897,14 +909,14 @@ export function EditorContextMenu({
           ) : null}
           <button
             type="button"
-            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-300 transition hover:bg-slate-50 dark:hover:bg-slate-700"
             onClick={() => void handlePasteText()}
           >
             Paste
           </button>
           <button
             type="button"
-            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+            className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-300 transition hover:bg-slate-50 dark:hover:bg-slate-700"
             onClick={() => void handlePasteMarkdown()}
           >
             Paste Markdown

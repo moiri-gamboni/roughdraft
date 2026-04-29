@@ -42,7 +42,7 @@
 
 @layer components {
   .tiptap {
-    @apply min-h-[120px] text-slate-800 outline-none;
+    @apply min-h-[120px] text-slate-800 dark:text-slate-200 outline-none;
     --editor-font-size: 16px;
     font-size: var(--editor-font-size);
     line-height: 1.58;
@@ -57,21 +57,21 @@
   }
 
   .tiptap h1 {
-    @apply mt-[0.1em] mb-[0.7em] font-semibold text-slate-950;
+    @apply mt-[0.1em] mb-[0.7em] font-semibold text-slate-950 dark:text-slate-50;
     font-size: 2.15em;
     line-height: 1.1;
     letter-spacing: -0.03em;
   }
 
   .tiptap h2 {
-    @apply mt-[1.8em] mb-[0.5em] font-semibold text-slate-950;
+    @apply mt-[1.8em] mb-[0.5em] font-semibold text-slate-950 dark:text-slate-50;
     font-size: 1.65em;
     line-height: 1.2;
     letter-spacing: -0.02em;
   }
 
   .tiptap h3 {
-    @apply mt-[1.45em] mb-[0.35em] font-semibold text-slate-950;
+    @apply mt-[1.45em] mb-[0.35em] font-semibold text-slate-950 dark:text-slate-50;
     font-size: 1.25em;
     line-height: 1.28;
     letter-spacing: -0.01em;
@@ -86,7 +86,7 @@
   }
 
   .tiptap a {
-    @apply text-sky-700 underline decoration-sky-500/50 underline-offset-4;
+    @apply text-sky-700 dark:text-sky-400 underline decoration-sky-500/50 dark:decoration-sky-400/50 underline-offset-4;
   }
 
   .tiptap .comment-anchor {
@@ -115,6 +115,15 @@
     background-color: #ffd000;
   }
 
+  .dark .tiptap .comment-decoration {
+    background-color: rgb(133 77 14 / 0.35);
+  }
+
+  .dark .tiptap .comment-decoration.comment-decoration-hovered,
+  .dark .tiptap .comment-decoration.comment-decoration-active {
+    background-color: rgb(180 83 9 / 0.55);
+  }
+
   .tiptap .comment-decoration.comment-decoration-on-critic-change {
     background-color: transparent;
   }
@@ -126,19 +135,31 @@
 
   .tiptap .critic-change-addition,
   .tiptap .critic-change-substitution-new {
-    @apply rounded-sm px-0.5 text-emerald-850;
+    @apply rounded-sm px-0.5 text-emerald-850 dark:text-emerald-300;
     background-color: rgb(236 253 245 / 0.95);
     text-decoration: underline;
     text-decoration-color: rgb(16 185 129 / 0.75);
     text-underline-offset: 0.16em;
   }
 
+  .dark .tiptap .critic-change-addition,
+  .dark .tiptap .critic-change-substitution-new {
+    background-color: rgb(6 78 59 / 0.5);
+    text-decoration-color: rgb(52 211 153 / 0.6);
+  }
+
   .tiptap .critic-change-deletion,
   .tiptap .critic-change-substitution-old {
-    @apply rounded-sm px-0.5 text-rose-950;
+    @apply rounded-sm px-0.5 text-rose-950 dark:text-rose-300;
     background-color: rgb(255 241 242 / 0.95);
     text-decoration: line-through;
     text-decoration-color: rgb(225 29 72 / 0.75);
+  }
+
+  .dark .tiptap .critic-change-deletion,
+  .dark .tiptap .critic-change-substitution-old {
+    background-color: rgb(136 19 55 / 0.35);
+    text-decoration-color: rgb(251 113 133 / 0.6);
   }
 
   .tiptap .critic-change-decoration-hovered {
@@ -197,8 +218,96 @@
     background-color: rgb(254 205 211 / 0.95);
   }
 
+  .dark .tiptap .critic-change-addition.critic-change-decoration-hovered,
+  .dark
+    .tiptap
+    .critic-change-substitution-new.critic-change-decoration-hovered,
+  .dark
+    .tiptap
+    .critic-change-decoration-addition.critic-change-decoration-hovered,
+  .dark
+    .tiptap
+    .critic-change-decoration-substitution-new.critic-change-decoration-hovered,
+  .dark .tiptap .critic-change-decoration-hovered .critic-change-addition,
+  .dark
+    .tiptap
+    .critic-change-decoration-hovered
+    .critic-change-substitution-new,
+  .dark .tiptap .critic-change-addition .critic-change-decoration-hovered,
+  .dark
+    .tiptap
+    .critic-change-substitution-new
+    .critic-change-decoration-hovered {
+    background-color: rgb(6 78 59 / 0.65);
+  }
+
+  .dark .tiptap .critic-change-addition.critic-change-decoration-active,
+  .dark .tiptap .critic-change-substitution-new.critic-change-decoration-active,
+  .dark
+    .tiptap
+    .critic-change-decoration-addition.critic-change-decoration-active,
+  .dark
+    .tiptap
+    .critic-change-decoration-substitution-new.critic-change-decoration-active,
+  .dark .tiptap .critic-change-decoration-active .critic-change-addition,
+  .dark
+    .tiptap
+    .critic-change-decoration-active
+    .critic-change-substitution-new,
+  .dark .tiptap .critic-change-addition .critic-change-decoration-active,
+  .dark
+    .tiptap
+    .critic-change-substitution-new
+    .critic-change-decoration-active {
+    background-color: rgb(6 78 59 / 0.8);
+  }
+
+  .dark .tiptap .critic-change-deletion.critic-change-decoration-hovered,
+  .dark
+    .tiptap
+    .critic-change-substitution-old.critic-change-decoration-hovered,
+  .dark
+    .tiptap
+    .critic-change-decoration-deletion.critic-change-decoration-hovered,
+  .dark
+    .tiptap
+    .critic-change-decoration-substitution-old.critic-change-decoration-hovered,
+  .dark .tiptap .critic-change-decoration-hovered .critic-change-deletion,
+  .dark
+    .tiptap
+    .critic-change-decoration-hovered
+    .critic-change-substitution-old,
+  .dark .tiptap .critic-change-deletion .critic-change-decoration-hovered,
+  .dark
+    .tiptap
+    .critic-change-substitution-old
+    .critic-change-decoration-hovered {
+    background-color: rgb(136 19 55 / 0.5);
+  }
+
+  .dark .tiptap .critic-change-deletion.critic-change-decoration-active,
+  .dark .tiptap .critic-change-substitution-old.critic-change-decoration-active,
+  .dark
+    .tiptap
+    .critic-change-decoration-deletion.critic-change-decoration-active,
+  .dark
+    .tiptap
+    .critic-change-decoration-substitution-old.critic-change-decoration-active,
+  .dark .tiptap .critic-change-decoration-active .critic-change-deletion,
+  .dark
+    .tiptap
+    .critic-change-decoration-active
+    .critic-change-substitution-old,
+  .dark .tiptap .critic-change-deletion .critic-change-decoration-active,
+  .dark
+    .tiptap
+    .critic-change-substitution-old
+    .critic-change-decoration-active {
+    background-color: rgb(136 19 55 / 0.65);
+  }
+
   .tiptap code {
-    @apply rounded bg-slate-100 px-1.5 py-0.5 text-[0.9em] text-slate-900;
+    @apply rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[0.9em] text-slate-900 dark:text-slate-200;
   }
 
   .tiptap .comment-decoration code,
@@ -206,6 +315,12 @@
   .tiptap .critic-change code {
     @apply bg-transparent;
     box-shadow: inset 0 0 0 1px rgb(15 23 42 / 12%);
+  }
+
+  .dark .tiptap .comment-decoration code,
+  .dark .tiptap .comment-anchor code,
+  .dark .tiptap .critic-change code {
+    box-shadow: inset 0 0 0 1px rgb(226 232 240 / 15%);
   }
 
   .tiptap pre {
@@ -221,7 +336,7 @@
   }
 
   .tiptap blockquote {
-    @apply border-l-4 border-slate-300 pl-4 text-slate-600;
+    @apply border-l-4 border-slate-300 dark:border-slate-600 pl-4 text-slate-600 dark:text-slate-400;
     margin: 1.3em 0;
   }
 
@@ -267,8 +382,12 @@
     color: rgb(51 65 85);
   }
 
+  .dark .tiptap li::marker {
+    color: rgb(148 163 184);
+  }
+
   .tiptap hr {
-    @apply my-6 border-0 border-t border-slate-200;
+    @apply my-6 border-0 border-t border-slate-200 dark:border-slate-700;
   }
 
   .tiptap img {
@@ -281,11 +400,11 @@
 
   .tiptap th,
   .tiptap td {
-    @apply relative min-w-[1em] border border-slate-200 px-3 py-2 text-left align-top;
+    @apply relative min-w-[1em] border border-slate-200 dark:border-slate-700 px-3 py-2 text-left align-top;
   }
 
   .tiptap th {
-    @apply bg-slate-50 font-semibold text-slate-900;
+    @apply bg-slate-50 dark:bg-slate-800 font-semibold text-slate-900 dark:text-slate-100;
   }
 
   .tiptap td > *,
@@ -372,6 +491,11 @@
     color: rgb(15 23 42);
   }
 
+  .dark .markdown-code-editor {
+    color: rgb(226 232 240);
+    --cm-selection-bg: rgb(30 58 138 / 0.45);
+  }
+
   .markdown-code-editor .cm-editor {
     background: transparent;
   }
@@ -392,6 +516,16 @@
   .markdown-code-editor .cm-cursor,
   .markdown-code-editor .cm-dropCursor {
     border-left-color: rgb(15 23 42);
+  }
+
+  .dark .markdown-code-editor .cm-content,
+  .dark .markdown-code-editor .cm-line {
+    caret-color: rgb(226 232 240);
+  }
+
+  .dark .markdown-code-editor .cm-cursor,
+  .dark .markdown-code-editor .cm-dropCursor {
+    border-left-color: rgb(226 232 240);
   }
 
   @media (min-width: 1100px) {

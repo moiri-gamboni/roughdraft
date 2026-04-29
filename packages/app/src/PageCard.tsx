@@ -1576,7 +1576,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     .map((commentId) => comments.get(commentId))
     .filter((comment): comment is CriticComment => Boolean(comment));
   const contentCardClass =
-    "rounded-[0.75rem] border border-[#E9E9E8] bg-white shadow-[0_18px_44px_rgba(57,47,38,0.08)]";
+    "rounded-[0.75rem] border border-[#E9E9E8] dark:border-slate-700 bg-white dark:bg-card shadow-[0_18px_44px_rgba(57,47,38,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)]";
 
   return (
     <div className="cursor-text bg-transparent">
@@ -1706,7 +1706,7 @@ const CodeEditorSurface = memo(function CodeEditorSurface({
       >
         <div className="document-page-main min-w-0">
           <div className="pb-24">
-            <div className="markdown-code-shell rounded-[0.75rem] border border-[#E9E9E8] bg-white pl-5 pr-6 py-10 shadow-[0_18px_44px_rgba(57,47,38,0.08)] sm:pl-8 sm:pr-10 sm:py-14">
+            <div className="markdown-code-shell rounded-[0.75rem] border border-[#E9E9E8] dark:border-slate-700 bg-white dark:bg-card pl-5 pr-6 py-10 shadow-[0_18px_44px_rgba(57,47,38,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)] sm:pl-8 sm:pr-10 sm:py-14">
               <MarkdownCodeEditor
                 value={markdown}
                 onChange={onMarkdownChange}

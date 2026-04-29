@@ -137,18 +137,18 @@ export function DocumentWorkspace({
         <div
           role="status"
           aria-label="File conflict"
-          className="fixed top-3 left-1/2 z-50 flex w-[min(calc(100vw-1rem),52rem)] -translate-x-1/2 flex-col gap-3 rounded-[8px] border border-amber-300 bg-amber-50 px-3 py-3 text-amber-950 shadow-[0_14px_40px_rgba(120,53,15,0.18)] sm:flex-row sm:items-center sm:justify-between sm:px-4"
+          className="fixed top-3 left-1/2 z-50 flex w-[min(calc(100vw-1rem),52rem)] -translate-x-1/2 flex-col gap-3 rounded-[8px] border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950 px-3 py-3 text-amber-950 dark:text-amber-100 shadow-[0_14px_40px_rgba(120,53,15,0.18)] dark:shadow-[0_14px_40px_rgba(0,0,0,0.4)] sm:flex-row sm:items-center sm:justify-between sm:px-4"
         >
           <div className="flex min-w-0 items-start gap-2.5">
             <AlertTriangle
-              className="mt-0.5 size-4 shrink-0 text-amber-700"
+              className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-400"
               aria-hidden="true"
             />
             <div className="min-w-0">
               <div className="text-sm font-semibold leading-5">
                 {conflictNotice.title}
               </div>
-              <div className="mt-0.5 text-xs leading-5 text-amber-900">
+              <div className="mt-0.5 text-xs leading-5 text-amber-900 dark:text-amber-200">
                 {conflictNotice.body}
               </div>
             </div>
@@ -158,7 +158,7 @@ export function DocumentWorkspace({
               type="button"
               variant="ghost"
               size="sm"
-              className="h-8 rounded-[7px] bg-white/55 px-2 text-xs text-amber-950 hover:bg-white"
+              className="h-8 rounded-[7px] bg-white/55 dark:bg-white/10 px-2 text-xs text-amber-950 dark:text-amber-100 hover:bg-white dark:hover:bg-white/20"
               onClick={() => void onReloadDocumentFromDisk()}
             >
               <RefreshCcw className="size-3.5" />
@@ -169,7 +169,7 @@ export function DocumentWorkspace({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8 rounded-[7px] bg-white/55 px-2 text-xs text-amber-950 hover:bg-white"
+                className="h-8 rounded-[7px] bg-white/55 dark:bg-white/10 px-2 text-xs text-amber-950 dark:text-amber-100 hover:bg-white dark:hover:bg-white/20"
                 onClick={onKeepEditingWithoutAutosave}
               >
                 <PencilLine className="size-3.5" />
@@ -180,7 +180,7 @@ export function DocumentWorkspace({
               type="button"
               variant="ghost"
               size="sm"
-              className="h-8 rounded-[7px] bg-amber-900 px-2 text-xs text-white hover:bg-amber-800"
+              className="h-8 rounded-[7px] bg-amber-900 dark:bg-amber-600 px-2 text-xs text-white hover:bg-amber-800 dark:hover:bg-amber-500"
               onClick={() => void onOverwriteDocumentOnDisk()}
             >
               <Upload className="size-3.5" />
@@ -204,13 +204,13 @@ export function DocumentWorkspace({
                     render={
                       <button
                         type="button"
-                        className="grid h-[1.25rem] shrink-0 grid-cols-2 rounded-[999px] bg-[#DED8CE] px-[2px] py-[2px] shadow-[inset_0_1px_0_rgba(255,251,245,0.72)]"
+                        className="grid h-[1.25rem] shrink-0 grid-cols-2 rounded-[999px] bg-[#DED8CE] dark:bg-slate-700 px-[2px] py-[2px] shadow-[inset_0_1px_0_rgba(255,251,245,0.72)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
                       >
                         <span
                           className={`flex h-[1rem] w-[1.375rem] items-center justify-center rounded-full transition ${
                             documentEditorViewMode === "rich-text"
-                              ? "bg-[#FFFDFC] text-stone-700 shadow-[0_1px_2px_rgba(41,37,36,0.12)]"
-                              : "text-stone-500"
+                              ? "bg-[#FFFDFC] dark:bg-slate-500 text-stone-700 dark:text-white shadow-[0_1px_2px_rgba(41,37,36,0.12)]"
+                              : "text-stone-500 dark:text-slate-400"
                           }`}
                         >
                           <Eye className="size-[0.75rem]" />
@@ -218,8 +218,8 @@ export function DocumentWorkspace({
                         <span
                           className={`flex h-[1rem] w-[1.375rem] items-center justify-center rounded-full transition ${
                             documentEditorViewMode === "code"
-                              ? "bg-[#FFFDFC] text-stone-700 shadow-[0_1px_2px_rgba(41,37,36,0.12)]"
-                              : "text-stone-500"
+                              ? "bg-[#FFFDFC] dark:bg-slate-500 text-stone-700 dark:text-white shadow-[0_1px_2px_rgba(41,37,36,0.12)]"
+                              : "text-stone-500 dark:text-slate-400"
                           }`}
                         >
                           <CodeXml className="size-[0.75rem]" />
@@ -238,7 +238,7 @@ export function DocumentWorkspace({
                   <TooltipContent>{editorViewModeToggleLabel}</TooltipContent>
                 </Tooltip>
                 <div
-                  className="min-w-0 truncate font-mono text-[0.7rem] tracking-[0.01em] text-stone-400"
+                  className="min-w-0 truncate font-mono text-[0.7rem] tracking-[0.01em] text-stone-400 dark:text-stone-500"
                   title={documentFilenameLabel}
                 >
                   {documentFilenameLabel}
@@ -252,7 +252,7 @@ export function DocumentWorkspace({
                   >
                     <SelectTrigger
                       aria-label="Document mode"
-                      className="h-[1.5rem] px-1 font-mono text-[0.7rem] leading-[1.25rem] font-normal tracking-[0.01em] text-stone-400 hover:text-stone-500"
+                      className="h-[1.5rem] px-1 font-mono text-[0.7rem] leading-[1.25rem] font-normal tracking-[0.01em] text-stone-400 dark:text-stone-500 hover:text-stone-500 dark:hover:text-stone-400"
                     >
                       <ActiveDocumentInteractionModeIcon className="size-[0.68rem]" />
                       <SelectValue />
@@ -261,7 +261,7 @@ export function DocumentWorkspace({
                       {documentInteractionModeOptions.map(
                         ({ value, label, Icon }) => (
                           <SelectItem key={value} value={value} label={label}>
-                            <Icon className="size-3 text-stone-500" />
+                            <Icon className="size-3 text-stone-500 dark:text-stone-400" />
                             <SelectItemText>{label}</SelectItemText>
                           </SelectItem>
                         ),
@@ -298,7 +298,7 @@ export function DocumentWorkspace({
             />
           ) : null
         ) : (
-          <div className="flex min-h-[50vh] items-center justify-center text-sm text-slate-500">
+          <div className="flex min-h-[50vh] items-center justify-center text-sm text-slate-500 dark:text-slate-400">
             Open a markdown file to begin.
           </div>
         )}
