@@ -394,8 +394,14 @@
     @apply my-4 block h-auto max-w-full rounded-2xl;
   }
 
+  .tiptap .tableWrapper {
+    @apply my-4 overflow-x-auto rounded-2xl;
+  }
+
   .tiptap table {
-    @apply my-4 w-full table-fixed border-collapse overflow-hidden rounded-2xl;
+    @apply table-fixed border-collapse;
+    /* biome-ignore lint/complexity/noImportantStyles: override Tiptap inline min-width */
+    min-width: 100% !important;
   }
 
   .tiptap th,
