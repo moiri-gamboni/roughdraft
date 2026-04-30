@@ -912,16 +912,61 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
           if (from === to) return false;
 
           event.preventDefault();
-          const mark =
-            getReusableSuggestionDeletionMark(currentEditor, from, to) ??
-            view.state.schema.marks.criticChange.create(
-              createCriticChange("deletion", undefined, {
-                existingChanges: getDocumentCriticChanges(currentEditor),
-              }),
-            );
-          const nextSelectionPosition = event.key === "Backspace" ? from : to;
-          const tr = view.state.tr.addMark(from, to, mark);
-          tr.setSelection(TextSelection.create(tr.doc, nextSelectionPosition));
+
+          const criticMarkType = view.state.schema.marks.criticChange;
+          const isAdditionKind = (m: ProseMirrorMark) =>
+            m.type === criticMarkType &&
+            (m.attrs.kind === "addition" ||
+              m.attrs.kind === "substitution-new");
+
+          // Collect segments, distinguishing suggested-insertion text
+          // from original text so we can delete the former and mark the
+          // latter.
+          type Segment = {
+            from: number;
+            to: number;
+            isAddition: boolean;
+          };
+          const segments: Segment[] = [];
+          view.state.doc.nodesBetween(from, to, (node, pos) => {
+            if (!node.isText) return;
+            const segFrom = Math.max(pos, from);
+            const segTo = Math.min(pos + node.nodeSize, to);
+            if (segFrom >= segTo) return;
+            const isAdd = node.marks.some(isAdditionKind);
+            const prev = segments[segments.length - 1];
+            if (prev && prev.isAddition === isAdd && prev.to === segFrom) {
+              prev.to = segTo;
+            } else {
+              segments.push({ from: segFrom, to: segTo, isAddition: isAdd });
+            }
+          });
+
+          const tr = view.state.tr;
+
+          // Process right-to-left so earlier positions stay valid.
+          for (const seg of [...segments].reverse()) {
+            if (seg.isAddition) {
+              tr.delete(seg.from, seg.to);
+            } else {
+              const deletionMark =
+                getReusableSuggestionDeletionMark(
+                  currentEditor,
+                  seg.from,
+                  seg.to,
+                ) ??
+                view.state.schema.marks.criticChange.create(
+                  createCriticChange("deletion", undefined, {
+                    existingChanges: getDocumentCriticChanges(currentEditor),
+                  }),
+                );
+              tr.addMark(seg.from, seg.to, deletionMark);
+            }
+          }
+
+          const basePos = event.key === "Backspace" ? from : to;
+          const mappedPos = tr.mapping.map(basePos, -1);
+          tr.setSelection(TextSelection.create(tr.doc, mappedPos));
           tr.scrollIntoView();
 
           view.dispatch(tr);
