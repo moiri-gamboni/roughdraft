@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
-  ArrowRight,
   Braces,
   Check,
   Copy,
@@ -35,6 +34,7 @@ import {
 import { detectBackend } from "./detect-backend";
 import { DocumentWorkspace } from "./DocumentWorkspace";
 import { PreviewBackend } from "./preview-backend";
+import { RoughdraftFormatDemo } from "./RoughdraftFormatDemo";
 import {
   MarkdownFileConflictError,
   type Page,
@@ -59,32 +59,6 @@ const PREVIEW_INITIAL_MARKDOWN = [
   '{==Select this sentence==}{>>Try replying to this comment or suggesting a replacement.<<}{id="preview-comment" by="Roughdraft" at="2026-04-28T12:00:00.000Z"}',
   "",
 ].join("\n");
-const ROUGHDRAFT_MARKDOWN_FEATURES = [
-  {
-    title: "Comment in the margins",
-    description:
-      "Leave review notes inline, then let your agent read and respond to the same `.md` file.",
-    example:
-      '{==this claim==}{>>Can we source this?<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}',
-    icon: MessageSquare,
-  },
-  {
-    title: "Suggest changes",
-    description:
-      "Mark insertions, deletions, and substitutions without turning Markdown into a proprietary document.",
-    example:
-      '{++clear next step++}{id="s1" by="AI" at="2026-04-28T12:05:00.000Z"}{>>Use the launch example.<<}{id="c2" by="user" at="2026-04-28T12:06:00.000Z" re="s1"}',
-    icon: PencilLine,
-  },
-  {
-    title: "Keep Markdown portable",
-    description:
-      "Roughdraft flavored Markdown blends CriticMarkup with Notion-style review affordances for people and agents.",
-    example:
-      'regular.md + {>>Review note<<}{id="c3" by="AI" at="2026-04-28T12:07:00.000Z"}',
-    icon: FileText,
-  },
-] as const;
 const HOMEPAGE_WORKFLOWS = [
   {
     title: "Review an agent's draft",
@@ -220,7 +194,7 @@ export function Homepage({
           <UpdateNotice updateStatus={updateStatus} />
         </div>
       ) : null}
-      <div className="w-full max-w-6xl text-center">
+      <div className="w-full text-center">
         <div className="mx-auto max-w-2xl">
           <p className="mb-3 text-xs font-medium tracking-[0.16em] text-slate-500 dark:text-slate-400 uppercase">
             Roughdraft
@@ -250,7 +224,7 @@ export function Homepage({
             <Dialog>
               <DialogTrigger
                 render={
-                  <Button className="h-10 gap-2 px-4 text-sm" size="lg">
+                  <Button className="h-12 gap-2 px-6 text-base" size="lg">
                     Install Now
                   </Button>
                 }
@@ -296,6 +270,7 @@ export function Homepage({
             <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-xs font-medium text-stone-500">
               <Button
                 className="h-6 gap-1.5 px-1 text-xs text-stone-500 hover:bg-transparent hover:text-stone-700"
+                nativeButton={false}
                 size="sm"
                 variant="ghost"
                 render={
@@ -321,65 +296,7 @@ export function Homepage({
           />
         </div>
 
-        <section
-          aria-labelledby="roughdraft-markdown-heading"
-          className="mx-auto mt-20 grid w-full max-w-5xl gap-8 text-left sm:mt-24 lg:grid-cols-[0.95fr_1.05fr] lg:items-start"
-        >
-          <div>
-            <p className="text-xs font-medium tracking-[0.16em] text-stone-500 dark:text-stone-400 uppercase">
-              Roughdraft flavored Markdown
-            </p>
-            <h2
-              className="mt-3 text-3xl leading-tight font-semibold text-balance text-slate-950 dark:text-slate-50 sm:text-4xl"
-              id="roughdraft-markdown-heading"
-            >
-              We extended Markdown to add support for comment threads and
-              suggested changes.
-            </h2>
-            <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-400">
-              The big idea is simple: keep the file as Markdown, but make it
-              reviewable. Roughdraft uses a small layer of portable markup so
-              you can comment, suggest edits, and send the exact same document
-              back to your coding agent.
-            </p>
-            <Button
-              className="mt-6 h-9 gap-2 px-3 text-sm"
-              variant="outline"
-              render={
-                <a href={ROUGHDRAFT_FLAVORED_MARKDOWN_PATH}>
-                  Read the spec
-                  <ArrowRight className="size-4" aria-hidden="true" />
-                </a>
-              }
-            />
-          </div>
-
-          <div className="grid gap-3">
-            {ROUGHDRAFT_MARKDOWN_FEATURES.map(
-              ({ description, example, icon: Icon, title }) => (
-                <div
-                  className="grid gap-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 shadow-[0_10px_30px_rgba(15,23,42,0.06)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.3)] sm:grid-cols-[2.5rem_1fr]"
-                  key={title}
-                >
-                  <div className="flex size-10 items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                    <Icon className="size-4" aria-hidden="true" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-950 dark:text-slate-50">
-                      {title}
-                    </h3>
-                    <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-400">
-                      {description}
-                    </p>
-                    <code className="mt-3 block overflow-x-auto rounded-md border border-slate-200 dark:border-slate-700 bg-[#FAFAF8] dark:bg-slate-800 px-3 py-2 text-xs text-slate-700 dark:text-slate-300">
-                      {example}
-                    </code>
-                  </div>
-                </div>
-              ),
-            )}
-          </div>
-        </section>
+        <RoughdraftFormatDemo />
 
         <section
           aria-labelledby="homepage-workflow-heading"
@@ -434,6 +351,7 @@ export function RoughdraftFlavoredMarkdownPage() {
       <div className="mx-auto max-w-5xl">
         <Button
           className="h-9 gap-2 px-3 text-sm"
+          nativeButton={false}
           variant="ghost"
           render={
             <a href="/">

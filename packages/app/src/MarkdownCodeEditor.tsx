@@ -4,12 +4,14 @@ import { yamlFrontmatter } from "@codemirror/lang-yaml";
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useRef } from "react";
+import { cn } from "./lib/utils";
 
 interface MarkdownCodeEditorProps {
   value: string;
   onChange: (value: string) => void;
   autoFocus?: boolean;
   readOnly?: boolean;
+  className?: string;
 }
 
 export function createMarkdownCodeEditorExtensions(
@@ -86,6 +88,7 @@ export function MarkdownCodeEditor({
   onChange,
   autoFocus = false,
   readOnly = false,
+  className,
 }: MarkdownCodeEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const editorViewRef = useRef<EditorView | null>(null);
@@ -146,5 +149,7 @@ export function MarkdownCodeEditor({
     });
   }, [value]);
 
-  return <div ref={hostRef} className="markdown-code-editor" />;
+  return (
+    <div ref={hostRef} className={cn("markdown-code-editor", className)} />
+  );
 }

@@ -997,6 +997,22 @@ export function criticMarkdownHasReviewRail(
   return comments.size > 0 || changes.size > 0;
 }
 
+export function criticMarkdownToRenderedHtml(
+  markdown: string,
+  options?: MarkdownOptions,
+): {
+  html: string;
+  comments: Map<string, CriticComment>;
+  changes: Map<string, CriticChangeAttrs>;
+  frontmatter: string | null;
+} {
+  const { frontmatter, body } = splitYamlFrontmatter(markdown);
+  const { parser, comments, changes } = createCriticMarked(options);
+  const html = parser.parse(protectRichTextRoundTripMarkdown(body)) as string;
+
+  return { html, comments, changes, frontmatter };
+}
+
 export function criticMarkdownToEditorState(
   markdown: string,
   options?: MarkdownOptions,

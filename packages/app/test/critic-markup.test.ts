@@ -8,6 +8,7 @@ import {
   createNextCommentId,
   criticMarkdownHasReviewRail,
   criticMarkdownToEditorState,
+  criticMarkdownToRenderedHtml,
   editorStateToCriticMarkdown,
   getCommentDescendantIds,
 } from "../src/critic-markup";
@@ -452,6 +453,38 @@ const command = "{==roughdraft open==}{>>test<<}{id="c1" by="user" at="2026-04-2
     const { doc, comments } = criticMarkdownToEditorState(input);
 
     expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it("round-trips a substitution suggestion with an attached comment", () => {
+    const input =
+      'Use {~~old text~>new text~~}{id="s3" by="AI" at="2024-01-15T10:32:00.000Z"}{>>Confirm this with legal.<<}{id="c1" by="user" at="2024-01-15T10:33:00.000Z" re="s3"} here.\n';
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+
+    expect(comments.get("c1")).toMatchObject({
+      id: "c1",
+      content: "Confirm this with legal.",
+      parentCommentId: "s3",
+    });
+    expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
+  });
+
+  it("renders review markup to HTML with comments and changes", () => {
+    const input =
+      'Keep {==the launch date==}{>>Verify this.<<}{id="c1" by="user" at="2024-01-15T10:33:00.000Z"} and add {++the customer quote++}{id="s1" by="AI" at="2024-01-15T10:34:00.000Z"}.\n';
+
+    const { html, comments, changes, frontmatter } =
+      criticMarkdownToRenderedHtml(input);
+
+    expect(frontmatter).toBeNull();
+    expect(comments.get("c1")?.content).toBe("Verify this.");
+    expect(changes.get("s1")).toMatchObject({
+      changeId: "s1",
+      kind: "addition",
+      authorType: "ai",
+    });
+    expect(html).toContain('data-comment-ids="[&quot;c1&quot;]"');
+    expect(html).toContain('data-critic-change-kind="addition"');
   });
 
   it("imports suggestions without metadata and serializes generated metadata", () => {
