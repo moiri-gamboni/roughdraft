@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  PREVIEW_PATH,
   ROUGHDRAFT_FLAVORED_MARKDOWN_PATH,
   getRequestedPathState,
   syncRequestedPathInUrl,
@@ -37,6 +38,14 @@ describe("app navigation", () => {
 
   it("does not treat reserved app pages as file paths", () => {
     window.history.replaceState(null, "", ROUGHDRAFT_FLAVORED_MARKDOWN_PATH);
+
+    expect(getRequestedPathState()).toEqual({
+      rawPath: null,
+      projectPath: null,
+      documentPath: null,
+    });
+
+    window.history.replaceState(null, "", PREVIEW_PATH);
 
     expect(getRequestedPathState()).toEqual({
       rawPath: null,

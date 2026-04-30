@@ -12,13 +12,13 @@ import {
 } from "lucide-react";
 import {
   type DocumentEditorViewMode,
+  PREVIEW_PATH,
   ROUGHDRAFT_FLAVORED_MARKDOWN_PATH,
   buildLocationForDocumentEditorViewMode,
   formatWorkspacePathForDisplay,
   getDocumentEditorViewModeFromLocation,
   getPathLeaf,
   getRequestedPathState,
-  isReservedAppPath,
   joinPath,
   syncRequestedPathInUrl,
 } from "./app-navigation";
@@ -34,6 +34,7 @@ import {
 } from "./components/ui/dialog";
 import { detectBackend } from "./detect-backend";
 import { DocumentWorkspace } from "./DocumentWorkspace";
+import { PreviewBackend } from "./preview-backend";
 import {
   MarkdownFileConflictError,
   type Page,
@@ -46,6 +47,18 @@ type SaveState = "idle" | "saving" | "error";
 type DocumentDiskChangeState = "clean" | "changed" | "conflict" | "paused";
 const AGENT_SETUP_PROMPT =
   "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.";
+const PREVIEW_DOCUMENT_PATH = "preview.md";
+const PREVIEW_INITIAL_MARKDOWN = [
+  "# Live Preview",
+  "",
+  "This draft only lives in memory. Edit it freely, switch between rich text and code view, and reload the page when you want a clean copy.",
+  "",
+  "- Comments and suggested changes use Roughdraft flavored Markdown.",
+  "- Autosave updates the in-memory document, not disk or browser storage.",
+  "",
+  '{==Select this sentence==}{>>Try replying to this comment or suggesting a replacement.<<}{id="preview-comment" by="Roughdraft" at="2026-04-28T12:00:00.000Z"}',
+  "",
+].join("\n");
 const ROUGHDRAFT_MARKDOWN_FEATURES = [
   {
     title: "Comment in the margins",
@@ -233,7 +246,7 @@ export function Homepage({
             ))}
           </div>
 
-          <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          <div className="mt-7 flex flex-col items-center justify-center gap-3">
             <Dialog>
               <DialogTrigger
                 render={
@@ -280,21 +293,23 @@ export function Homepage({
               </DialogContent>
             </Dialog>
 
-            <Button
-              className="h-10 gap-2 px-4 text-sm"
-              size="lg"
-              variant="outline"
-              render={
-                <a
-                  href="https://github.com/Lex-Inc/roughdraft"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <ExternalLink className="size-4" aria-hidden="true" />
-                  View on GitHub
-                </a>
-              }
-            />
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-xs font-medium text-stone-500">
+              <Button
+                className="h-6 gap-1.5 px-1 text-xs text-stone-500 hover:bg-transparent hover:text-stone-700"
+                size="sm"
+                variant="ghost"
+                render={
+                  <a
+                    href="https://github.com/Lex-Inc/roughdraft"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <ExternalLink className="size-3.5" aria-hidden="true" />
+                    View on GitHub
+                  </a>
+                }
+              />
+            </div>
           </div>
         </div>
 
@@ -653,12 +668,84 @@ export function RoughdraftFlavoredMarkdownPage() {
   );
 }
 
+function createPreviewPage(): Page {
+  return {
+    id: "preview",
+    title: "Live Preview",
+    content: PREVIEW_INITIAL_MARKDOWN,
+    version: "memory:initial",
+  };
+}
+
+export function PreviewPage() {
+  const [backend] = useState(() => new PreviewBackend(createPreviewPage()));
+  const [previewPage, setPreviewPage] = useState<Page>(() =>
+    backend.getCurrentPage(),
+  );
+  const [previewForceResetKey, setPreviewForceResetKey] = useState<
+    string | null
+  >(null);
+  const [editorViewMode, setEditorViewMode] = useState<DocumentEditorViewMode>(
+    () => getDocumentEditorViewModeFromLocation("rich-text"),
+  );
+  const [, setSaveState] = useState<SaveState>("idle");
+
+  useEffect(() => () => backend.dispose(), [backend]);
+
+  useEffect(() => {
+    document.title = "Roughdraft Preview";
+  }, []);
+
+  const handleSaveDocument = useCallback(
+    async (_id: string, content: string) => {
+      const savedPage = await backend.saveMarkdownFile(
+        PREVIEW_DOCUMENT_PATH,
+        content,
+      );
+      setPreviewPage(savedPage);
+    },
+    [backend],
+  );
+
+  const handleResetPreview = useCallback(async () => {
+    const freshBackendPage = createPreviewPage();
+    const savedPage = await backend.saveMarkdownFile(
+      PREVIEW_DOCUMENT_PATH,
+      freshBackendPage.content,
+    );
+    setPreviewPage(savedPage);
+    setPreviewForceResetKey(`preview-reset:${Date.now()}`);
+  }, [backend]);
+
+  return (
+    <main className="relative flex h-screen min-w-0 flex-col overflow-hidden bg-[#FCFCFC] text-slate-950">
+      <DocumentWorkspace
+        documentPage={previewPage}
+        activeDocumentPath={PREVIEW_DOCUMENT_PATH}
+        documentFilenameLabel={PREVIEW_DOCUMENT_PATH}
+        documentEditorViewMode={editorViewMode}
+        onDocumentEditorViewModeChange={setEditorViewMode}
+        onSaveDocument={handleSaveDocument}
+        onDocumentSaveStateChange={setSaveState}
+        onDocumentDirtyStateChange={() => {}}
+        onDocumentLocalContentChange={() => {}}
+        documentDiskChangeState="clean"
+        documentForceResetKey={previewForceResetKey}
+        onReloadDocumentFromDisk={handleResetPreview}
+        onKeepEditingWithoutAutosave={() => {}}
+        onOverwriteDocumentOnDisk={() => {}}
+        backend={backend}
+      />
+    </main>
+  );
+}
+
 export function App() {
   const initialRequestedPathState = getRequestedPathState();
   const [requestedPathState] = useState(initialRequestedPathState);
-  const isRoughdraftFlavoredMarkdownRoute = isReservedAppPath(
-    window.location.pathname,
-  );
+  const isRoughdraftFlavoredMarkdownRoute =
+    window.location.pathname === ROUGHDRAFT_FLAVORED_MARKDOWN_PATH;
+  const isPreviewRoute = window.location.pathname === PREVIEW_PATH;
   const [backend, setBackend] = useState<StorageBackend | null>(null);
   const [documentPage, setDocumentPage] = useState<Page | null>(null);
   const [activeDocumentPath, setActiveDocumentPath] = useState<string | null>(
@@ -824,13 +911,16 @@ export function App() {
         )
       : null;
 
-    document.title = isRoughdraftFlavoredMarkdownRoute
-      ? "Roughdraft Flavored Markdown"
-      : (workspaceTitlePath ?? "Roughdraft");
+    document.title = isPreviewRoute
+      ? "Roughdraft Preview"
+      : isRoughdraftFlavoredMarkdownRoute
+        ? "Roughdraft Flavored Markdown"
+        : (workspaceTitlePath ?? "Roughdraft");
   }, [
     activeDocumentPath,
     backend,
     isRoughdraftFlavoredMarkdownRoute,
+    isPreviewRoute,
     requestedPathState.rawPath,
   ]);
 
@@ -995,6 +1085,10 @@ export function App() {
 
   if (isRoughdraftFlavoredMarkdownRoute) {
     return <RoughdraftFlavoredMarkdownPage />;
+  }
+
+  if (isPreviewRoute) {
+    return <PreviewPage />;
   }
 
   if (!requestedPathState.rawPath || loadError) {

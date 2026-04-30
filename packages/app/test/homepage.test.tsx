@@ -1,7 +1,12 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Homepage, RoughdraftFlavoredMarkdownPage } from "../src/App";
+import {
+  Homepage,
+  PreviewPage,
+  RoughdraftFlavoredMarkdownPage,
+} from "../src/App";
 
 const AGENT_SETUP_PROMPT =
   "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.";
@@ -19,6 +24,20 @@ describe("Homepage", () => {
   let writeText: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    (
+      globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
+    if (!("ResizeObserver" in globalThis)) {
+      Object.defineProperty(globalThis, "ResizeObserver", {
+        configurable: true,
+        value: class ResizeObserver {
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        },
+      });
+    }
+
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -36,6 +55,7 @@ describe("Homepage", () => {
     });
     container.remove();
     document.body.innerHTML = "";
+    vi.restoreAllMocks();
   });
 
   it("opens the agent setup prompt from the CTA and copies it", async () => {
@@ -97,6 +117,8 @@ describe("Homepage", () => {
       'a[href="https://github.com/Lex-Inc/roughdraft"]',
     );
 
+    expect(container.textContent).not.toContain("Try live preview");
+    expect(container.querySelector('a[href="/preview"]')).toBeNull();
     expect(githubLink?.textContent).toContain("View on GitHub");
     expect(githubLink?.getAttribute("target")).toBe("_blank");
     expect(githubLink?.getAttribute("rel")).toBe("noreferrer");
@@ -168,5 +190,24 @@ describe("Homepage", () => {
     expect(container.querySelector('a[href="/"]')?.textContent).toContain(
       "Back to Roughdraft",
     );
+  });
+
+  it("renders an in-memory live preview page", async () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+
+    await act(async () => {
+      root.render(
+        <TooltipProvider>
+          <PreviewPage />
+        </TooltipProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("preview.md");
+    expect(container.textContent).toContain("Live Preview");
+    expect(container.textContent).toContain("This draft only lives in memory.");
+    expect(container.textContent).toContain("Select this sentence");
+    expect(setItem).not.toHaveBeenCalled();
   });
 });
