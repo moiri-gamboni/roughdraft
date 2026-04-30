@@ -1,8 +1,7 @@
 # Roughdraft
-
 A local-first markdown editor and viewer for working with AI.
 
-Open one markdown file on your machine. Review it, comment on it, and suggest edits.
+{==Open one markdown file on your machine. Review it, comment on it, and suggest edits.==}{>>What does this mean?<<}{id="c3" by="user" at="2026-04-30T20:18:51.163Z"}{>>It means Roughdraft works with a normal local Markdown file: you open one .md file from your computer, read it in the app, leave inline comments, and propose edits that are saved back into the Markdown using CriticMarkup.<<}{id="c4" by="AI" at="2026-04-30T20:19:39.000Z" re="c3"}
 
 Paste this into your coding agent:
 
@@ -16,30 +15,24 @@ Or install and open a file yourself:
 npm i -g roughdraft
 roughdraft open /absolute/path/to/file.md
 ```
-
 ## What is this?
-
 Roughdraft is a local-first markdown editor and viewer that runs on your computer.
 
 Its job is to make markdown files easy to open, read, edit, review, and discuss with your AI agent without moving them into a proprietary format or a hosted app.
 
 Roughdraft opens a single markdown file directly for CriticMarkup comments and suggested changes.
-
 ## How it works
-
-*   **Local-first markdown editor** — Open normal `.md` files from your machine and edit them directly
-    
-*   **Works with your AI agent** — Tell your local agent to open a file in Roughdraft on your computer, then keep collaborating from there
-    
-*   **Comments & suggested changes** — Use CriticMarkup for inline feedback, revisions, and review conversations
-    
-*   **Markdown files on disk** — Everything stays as regular markdown files you can also edit in VS Code, Vim, Cursor, or anywhere else
-    
-*   **No cloud, no account, no telemetry** — Runs entirely on your machine
-    
-
+- **Local-first markdown editor** — Open normal `.md` files from your machine and edit them directly
+  
+- **Works with your AI agent** — Tell your local agent to open a file in Roughdraft on your computer, then keep collaborating from there
+  
+- **Comments & suggested changes** — Use CriticMarkup for inline feedback, revisions, and review conversations
+  
+- **Markdown files on disk** — Everything stays as regular markdown files you can also edit in VS Code, Vim, Cursor, or anywhere else
+  
+- **No cloud, no account, no telemetry** — Runs entirely on your machine
+  
 ## Quick start
-
 Install Roughdraft and start the local server:
 
 ```bash
@@ -81,19 +74,17 @@ http://localhost:7373/?path=/absolute/path/to/my-essay/draft.md
 
 That makes an agent-friendly workflow possible:
 
-1.  Your AI writes or updates markdown files on disk.
-    
-2.  You tell it to open a markdown file in Roughdraft.
-    
-3.  Roughdraft opens locally on your machine.
-    
-4.  You read, edit, leave comments, and suggest changes.
-    
-5.  You tell the AI you are done, and it can respond to your comments or revise the document.
-    
-
+1. Your AI writes or updates markdown files on disk.
+  
+2. You tell it to open a markdown file in Roughdraft.
+  
+3. Roughdraft opens locally on your machine.
+  
+4. You read, edit, leave comments, and suggest changes.
+  
+5. You tell the AI you are done, and it can respond to your comments or revise the document.
+  
 ## Local development
-
 ```bash
 ./scripts/setup.sh
 ./scripts/run.sh
@@ -125,19 +116,17 @@ pnpm check
 ```
 
 `pnpm check` is the same command the pull request workflow runs before merge.
-
 ## Publishing
-
 Roughdraft publishes from `main` when the root `package.json` version is newer than the current npm `latest` version.
 
 Release flow:
 
-1.  Bump the root `package.json` version in a pull request.
-    
-2.  Merge the pull request to `main`.
-    
-3.  The `Publish to npm` GitHub Actions workflow runs `pnpm check`, publishes the package if that exact version is not already on npm and is newer than `latest`, then creates a `v<version>` git tag.
-    
+1. Bump the root `package.json` version in a pull request.
+  
+2. Merge the pull request to `main`.
+  
+3. The `Publish to npm` GitHub Actions workflow runs `pnpm check`, publishes the package if that exact version is not already on npm and is newer than `latest`, then creates a `v<version>` git tag.
+  
 
 The workflow uses npm trusted publishing, so npm must be configured with this trusted publisher:
 
@@ -148,9 +137,7 @@ Workflow filename: publish.yml
 ```
 
 No `NPM_TOKEN` secret is required.
-
 ## Files on disk
-
 ```
 my-essay/
   draft-1.md            # A normal markdown file on disk
@@ -158,9 +145,7 @@ my-essay/
 ```
 
 Roughdraft reads and writes the markdown file directly.
-
 ## Agent setup
-
 If you want your local agent to remember the Roughdraft workflow, ask it to read the live setup prompt:
 
 ```text
@@ -168,9 +153,7 @@ Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdr
 ```
 
 Use `roughdraft help`, `roughdraft help agent`, or `roughdraft help criticmarkup` if you need a local refresher.
-
 ## CLI reference
-
 ```text
 roughdraft [flags] <command> [args]
 roughdraft <path>
@@ -244,9 +227,7 @@ ROUGHDRAFT_DEV_WRAPPER_NAME
 ROUGHDRAFT_DEV_WRAPPER_PATH
 ROUGHDRAFT_DEV_WRAPPER_REPO_ROOT
 ```
-
 ## Roughdraft-flavored CriticMarkup
-
 Roughdraft uses [CriticMarkup](https://criticmarkup.com) as the readable review layer inside normal Markdown files. It supports the standard markers for comments, highlights, insertions, deletions, and substitutions:
 
 The canonical Roughdraft Flavored Markdown spec is published at [roughdraft.page/spec/roughdraft-flavored-markdown.md](https://roughdraft.page/spec/roughdraft-flavored-markdown.md). The review-index JSON Schema is published at [roughdraft.page/spec/roughdraft-flavored-markdown.schema.json](https://roughdraft.page/spec/roughdraft-flavored-markdown.schema.json).
@@ -267,14 +248,14 @@ Please revisit {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="202
 
 Supported attributes:
 
-*   `id` gives the comment or suggested change a stable document-local id.
-    
-*   `by` records the reviewer or agent that created it.
-    
-*   `at` records an ISO timestamp.
-    
-*   `re` links a reply to another comment or suggestion id.
-    
+- `id` gives the comment or suggested change a stable document-local id.
+  
+- `by` records the reviewer or agent that created it.
+  
+- `at` records an ISO timestamp.
+  
+- `re` links a reply to another comment or suggestion id.
+  
 
 Replies are stored as additional comment blocks that point at the parent id:
 
@@ -302,21 +283,17 @@ Inline code stays literal: `{==not a comment==}`.
 
 This matters because the main workflow is often:
 
-*   The AI writes a doc
-    
-*   The user opens it in Roughdraft
-    
-*   The user leaves comments and suggested changes
-    
-*   The AI reads those comments and responds in the same markdown file
-    
-
+- The AI writes a doc
+  
+- The user opens it in Roughdraft
+  
+- The user leaves comments and suggested changes
+  
+- The AI reads those comments and responds in the same markdown file
+  
 ## Try the demo
-
 Don't want to install anything? Try the [live demo](https://roughdraft.page) — it runs entirely in your browser using local storage.
-
 ## License
-
 MIT
 
 * * *

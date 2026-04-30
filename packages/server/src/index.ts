@@ -162,6 +162,10 @@ function ensureProjectPath(
   return absolute;
 }
 
+function pageFilePathFromId(projectDir: string, id: string): string | null {
+  return ensureProjectPath(projectDir, `${id}.md`);
+}
+
 function nextAssetPath(projectDir: string, filename: string): string {
   const assetsDir = path.join(projectDir, ".roughdraft-assets");
   fs.mkdirSync(assetsDir, { recursive: true });
@@ -390,8 +394,8 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     if (!projectDir) return;
 
     const id = req.params.id;
-    const filePath = path.join(projectDir, `${id}.md`);
-    if (!fs.existsSync(filePath)) {
+    const filePath = pageFilePathFromId(projectDir, id);
+    if (!filePath || !fs.existsSync(filePath)) {
       res.status(404).json({ error: "Page not found" });
       return;
     }
@@ -479,8 +483,8 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     if (!projectDir) return;
 
     const id = req.params.id;
-    const filePath = path.join(projectDir, `${id}.md`);
-    if (!fs.existsSync(filePath)) {
+    const filePath = pageFilePathFromId(projectDir, id);
+    if (!filePath || !fs.existsSync(filePath)) {
       res.status(404).json({ error: "Page not found" });
       return;
     }
@@ -546,8 +550,8 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     if (!projectDir) return;
 
     const id = req.params.id;
-    const filePath = path.join(projectDir, `${id}.md`);
-    if (!fs.existsSync(filePath)) {
+    const filePath = pageFilePathFromId(projectDir, id);
+    if (!filePath || !fs.existsSync(filePath)) {
       res.status(404).json({ error: "Page not found" });
       return;
     }

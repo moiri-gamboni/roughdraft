@@ -250,6 +250,46 @@ describe("createApp", () => {
     expect(response.body).toEqual({ error: "Markdown file not found" });
   });
 
+  it("rejects page ids that resolve outside the project directory", async () => {
+    const outsideName = `${path.basename(projectDir)}-secret`;
+    const outsideFilePath = path.join(
+      path.dirname(projectDir),
+      `${outsideName}.md`,
+    );
+    fs.writeFileSync(outsideFilePath, "# Secret\n");
+
+    try {
+      const { app } = createApp({
+        homeDir,
+        staticDirPath: projectDir,
+      });
+      const traversalPath = `/api/pages/${encodeURIComponent(`../${outsideName}`)}`;
+
+      const readResponse = await request(app).get(traversalPath).query({
+        projectPath: projectDir,
+      });
+      const updateResponse = await request(app)
+        .put(traversalPath)
+        .query({
+          projectPath: projectDir,
+        })
+        .send({ content: "# Updated\n" });
+      const deleteResponse = await request(app).delete(traversalPath).query({
+        projectPath: projectDir,
+      });
+
+      expect(readResponse.status).toBe(404);
+      expect(readResponse.body).toEqual({ error: "Page not found" });
+      expect(updateResponse.status).toBe(404);
+      expect(updateResponse.body).toEqual({ error: "Page not found" });
+      expect(deleteResponse.status).toBe(404);
+      expect(deleteResponse.body).toEqual({ error: "Page not found" });
+      expect(fs.readFileSync(outsideFilePath, "utf-8")).toBe("# Secret\n");
+    } finally {
+      fs.rmSync(outsideFilePath, { force: true });
+    }
+  });
+
   it("requires projectPath on project-backed routes", async () => {
     const { app } = createApp({
       homeDir,
