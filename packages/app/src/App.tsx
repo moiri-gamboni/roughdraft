@@ -718,7 +718,7 @@ export function PreviewPage() {
   }, [backend]);
 
   return (
-    <main className="relative flex h-screen min-w-0 flex-col overflow-hidden bg-[#FCFCFC] text-slate-950">
+    <main className="relative flex h-screen min-w-0 flex-col overflow-hidden bg-[#FCFCFC] dark:bg-background text-slate-950 dark:text-slate-50">
       <DocumentWorkspace
         documentPage={previewPage}
         activeDocumentPath={PREVIEW_DOCUMENT_PATH}
