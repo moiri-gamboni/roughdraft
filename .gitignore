@@ -6,7 +6,9 @@ test-results
 .DS_Store
 *.tsbuildinfo
 sandbox
-.codex/
+.codex/*
+!.codex/skills/
+!.codex/skills/**
 .conductor/
 .claude/
 .agents/

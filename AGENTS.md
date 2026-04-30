@@ -1,23 +1,29 @@
 # Roughdraft Agent Instructions
 
+## Testing Principles
+
+Use the repo-local `test-desiderata` skill when planning, adding, changing, or reviewing tests. Keep the core bar visible even when the skill is not loaded: tests should optimize for Kent Beck's Test Desiderata (https://testdesiderata.com/) as context-specific tradeoffs, not as a mechanical checklist.
+
+Before finalizing test work, check that the tests are:
+
+- Isolated: results do not depend on execution order or shared mutable state.
+- Composable: tests combine without hidden coupling.
+- Deterministic: unchanged code and inputs produce the same result every run.
+- Fast: tests are quick enough to run during normal development.
+- Writable: tests are cheap to create relative to the behavior protected.
+- Readable: tests make their motivation and expected behavior clear.
+- Behavioral: tests fail when the behavior under test changes.
+- Structure-insensitive: tests survive internal refactors that preserve behavior.
+- Automated: tests run without manual intervention.
+- Specific: failures point clearly at the broken behavior.
+- Predictive: passing tests justify confidence in production behavior.
+- Inspiring: the suite increases confidence instead of creating noise or avoidance.
+
+Prefer the fastest test that remains predictive. Escalate to integration or e2e coverage when the boundary itself is the behavior under test, and make any meaningful tradeoff explicit in the final summary.
+
 ## Bug Fix Workflow
 
 When the user asks you to fix something, first have a subagent reproduce the bug with a failing test case before implementing the fix. The subagent should focus on the smallest behavioral test that demonstrates the problem, and should report the failing command, changed test files, and why the failure captures the requested bug.
-
-Tests should follow Kent Beck's desiderata:
-
-- Isolated: tests should return the same results regardless of the order in which they are run.
-- Composable: if tests are isolated, then 1, 10, 100, or 1,000,000 tests can run and get the same results.
-- Fast: tests should run quickly.
-- Inspiring: passing tests should inspire confidence.
-- Writable: tests should be cheap to write relative to the cost of the code being tested.
-- Readable: tests should be comprehensible for the reader, invoking the motivation for writing this particular test.
-- Behavioral: tests should be sensitive to changes in the behavior of the code under test. If the behavior changes, the test result should change.
-- Structure-insensitive: tests should not change their result if the structure of the code changes.
-- Automated: tests should run without human intervention.
-- Specific: if a test fails, the cause of the failure should be obvious.
-- Deterministic: if nothing changes, the test result should not change.
-- Predictive: if the tests all pass, then the code under test should be suitable for production.
 
 ## Slog Default
 
