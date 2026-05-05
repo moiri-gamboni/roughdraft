@@ -231,7 +231,7 @@ export function Homepage({
               />
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Copy this into your coding agent</DialogTitle>
+                  <DialogTitle>Give this to your coding agent</DialogTitle>
                   <DialogDescription>
                     This prompt tells the agent how to install Roughdraft and
                     set up the review workflow.

@@ -100,7 +100,7 @@ export function RoughdraftFormatDemo() {
       aria-labelledby="roughdraft-markdown-heading"
       className="rfm-format-demo mx-auto mt-20 w-full max-w-none border-t border-slate-200 pt-10 text-left dark:border-slate-700 sm:mt-24"
     >
-      <div className="mx-auto w-full">
+      <div className="rfm-format-demo-intro mx-auto w-full px-4">
         <div className="max-w-3xl">
           <p className="text-xs font-medium tracking-[0.16em] text-stone-500 uppercase dark:text-stone-400">
             Roughdraft flavored Markdown
@@ -135,7 +135,7 @@ export function RoughdraftFormatDemo() {
       </div>
 
       <div
-        className="mx-auto mt-5 flex w-full flex-wrap gap-2"
+        className="rfm-format-demo-examples mx-auto mt-5 flex w-full flex-wrap gap-2 px-4"
         role="group"
         aria-label="Format examples"
       >
@@ -153,22 +153,24 @@ export function RoughdraftFormatDemo() {
       </div>
 
       <div className="mx-auto mt-5 grid w-full gap-3 lg:grid-cols-[minmax(20rem,0.72fr)_2.5rem_minmax(0,1.28fr)] lg:items-stretch">
-        <div className="rfm-demo-pane">
+        <div className="rfm-demo-pane rfm-source-pane">
           <div className="rfm-demo-pane-header">
             <span>Source</span>
           </div>
-          <MarkdownCodeEditor
-            className="rfm-source-editor"
-            value={source}
-            onChange={handleSourceChange}
-          />
+          <div className="rfm-source-page">
+            <MarkdownCodeEditor
+              className="rfm-source-editor"
+              value={source}
+              onChange={handleSourceChange}
+            />
+          </div>
         </div>
 
         <div className="hidden items-start justify-center pt-3 text-slate-400 dark:text-slate-500 lg:flex">
           <ArrowRight className="size-5" aria-hidden="true" />
         </div>
 
-        <div className="rfm-demo-pane">
+        <div className="rfm-demo-pane rfm-result-pane">
           <div className="rfm-demo-pane-header">
             <span>Result</span>
           </div>

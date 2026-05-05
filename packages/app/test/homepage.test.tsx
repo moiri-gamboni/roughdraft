@@ -160,14 +160,40 @@ describe("Homepage", () => {
     expect(container.querySelector(".rfm-format-demo")?.className).toContain(
       "max-w-none",
     );
+    expect(
+      container.querySelector(".rfm-format-demo-intro")?.className,
+    ).toContain("px-4");
+    expect(
+      container.querySelector(".rfm-format-demo-examples")?.className,
+    ).toContain("px-4");
     const formatDemoGrid = container.querySelector(
       ".rfm-format-demo > div:nth-of-type(3)",
     );
     const formatDemoArrow = formatDemoGrid?.children.item(1);
     expect(formatDemoArrow?.className).toContain("items-start");
+    expect(container.querySelector(".rfm-source-pane")?.textContent).toContain(
+      "Source",
+    );
+    expect(container.querySelector(".rfm-result-pane")?.textContent).toContain(
+      "Result",
+    );
     expect(APP_STYLES).toMatch(
       /\.rfm-result-editor \.document-page-shell \{[^}]*grid-template-columns:\s*minmax\(0,\s*min\(100%,\s*42rem\)\)\s+minmax\(13rem,\s*16rem\);[^}]*justify-content:\s*start;/s,
     );
+    expect(APP_STYLES).toMatch(
+      /\.rfm-source-pane,\s*\.rfm-result-pane \{[^}]*border:\s*0;[^}]*background-color:\s*transparent;[^}]*box-shadow:\s*none;[^}]*overflow:\s*visible;/s,
+    );
+    expect(APP_STYLES).toMatch(
+      /\.rfm-source-pane \.rfm-demo-pane-header \{[^}]*justify-content:\s*flex-end;/s,
+    );
+    expect(APP_STYLES).toMatch(
+      /\.rfm-source-page \{[^}]*margin:\s*1rem;[^}]*min-height:\s*calc\(70vh \+ 7rem\);[^}]*border:\s*1px solid #e9e9e8;[^}]*border-radius:\s*0\.75rem;[^}]*background-color:\s*#fff;[^}]*box-shadow:\s*0 18px 44px rgb\(57 47 38 \/ 8%\);/s,
+    );
+    const resultDocumentCard = container.querySelector(
+      ".rfm-result-editor .document-page-main > .pb-24 > div",
+    );
+    expect(resultDocumentCard?.className).toContain("bg-white");
+    expect(resultDocumentCard?.className).toContain("shadow-");
     expect(APP_STYLES).not.toContain("rfm-token-");
     expect(container.querySelector('[class*="rfm-token-"]')).toBeNull();
     expect(
@@ -236,7 +262,7 @@ describe("Homepage", () => {
     await click(cta);
 
     expect(document.body.textContent).toContain(
-      "Copy this into your coding agent",
+      "Give this to your coding agent",
     );
     expect(document.body.textContent).toContain(AGENT_SETUP_PROMPT);
 
