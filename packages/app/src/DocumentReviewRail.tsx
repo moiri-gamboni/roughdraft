@@ -28,6 +28,7 @@ import {
   normalizeCommentMeasurement,
   resolveAnchoredRailLayouts,
 } from "./document-comments";
+import { SUGGESTED_PARAGRAPH_SENTINEL } from "./editor-extensions";
 import { cn } from "./lib/utils";
 import type { DraftSuggestionState } from "./PageCard";
 
@@ -96,9 +97,19 @@ function getSuggestionRootComment(
 }
 
 function renderQuotedSuggestionText(text: string, fallback: string) {
+  const withoutParagraphSentinels = text.replaceAll(
+    SUGGESTED_PARAGRAPH_SENTINEL,
+    "",
+  );
+  const displayText =
+    withoutParagraphSentinels.trim() ||
+    (text.includes(SUGGESTED_PARAGRAPH_SENTINEL)
+      ? "Inserted paragraph"
+      : fallback);
+
   return (
     <span className="italic text-slate-600 dark:text-slate-400">
-      "{text.trim() || fallback}"
+      "{displayText}"
     </span>
   );
 }

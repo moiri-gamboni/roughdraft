@@ -202,7 +202,15 @@ async function typeTextAsBrowserInput(editor: Editor, text: string) {
   await flushReact();
 }
 
-async function pressEditorKey(editor: Editor, key: string) {
+async function pressEditorKey(
+  editor: Editor,
+  key: string,
+  options: {
+    ctrlKey?: boolean;
+    altKey?: boolean;
+    metaKey?: boolean;
+  } = {},
+) {
   await act(async () => {
     let handled = false;
 
@@ -211,6 +219,7 @@ async function pressEditorKey(editor: Editor, key: string) {
         editor.view,
         new KeyboardEvent("keydown", {
           key,
+          ...options,
           bubbles: true,
           cancelable: true,
         }),
@@ -772,6 +781,138 @@ describe("PageCard editor integration", () => {
         /^S\{--tar--\}\{id="s1" by="user" at="[^"]+"\}t\n$/,
       ),
     );
+  });
+
+  it("suggesting mode tracks Enter at the end of a paragraph as an inserted paragraph", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-suggesting-enter-paragraph-1",
+        title: "Doc Suggesting Enter Paragraph 1",
+        content: "Start",
+      },
+      interactionMode: "suggesting",
+      selected: true,
+    });
+    const editor = rendered.getEditor();
+
+    vi.useFakeTimers();
+
+    await act(async () => {
+      editor.commands.focus("end");
+    });
+    await pressEditorKey(editor, "Enter");
+    await act(async () => {
+      vi.advanceTimersByTime(20);
+      await Promise.resolve();
+    });
+
+    expect(rendered.container.textContent).toContain("Inserted paragraph");
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledWith(
+      "doc-suggesting-enter-paragraph-1",
+      expect.stringMatching(
+        /^Start\n\n\{\+\+\u2060\+\+\}\{id="s1" by="user" at="[^"]+"\}\n$/,
+      ),
+    );
+  });
+
+  it("accepts and rejects inserted paragraph suggestions without leaving marker text", async () => {
+    const accepted = await renderPageCard({
+      page: {
+        id: "doc-suggesting-enter-accept-1",
+        title: "Doc Suggesting Enter Accept 1",
+        content: "Start",
+      },
+      interactionMode: "suggesting",
+      selected: true,
+    });
+    const acceptEditor = accepted.getEditor();
+
+    await act(async () => {
+      acceptEditor.commands.focus("end");
+    });
+    await pressEditorKey(acceptEditor, "Enter");
+    await act(async () => {
+      acceptEditor.commands.acceptCriticChange("s1");
+    });
+
+    expect(acceptEditor.state.doc.childCount).toBe(2);
+    expect(acceptEditor.getText()).not.toContain("\u2060");
+
+    const rejected = await renderPageCard({
+      page: {
+        id: "doc-suggesting-enter-reject-1",
+        title: "Doc Suggesting Enter Reject 1",
+        content: "Start",
+      },
+      interactionMode: "suggesting",
+      selected: true,
+    });
+    const rejectEditor = rejected.getEditor();
+
+    await act(async () => {
+      rejectEditor.commands.focus("end");
+    });
+    await pressEditorKey(rejectEditor, "Enter");
+    await act(async () => {
+      rejectEditor.commands.rejectCriticChange("s1");
+    });
+
+    expect(rejectEditor.state.doc.childCount).toBe(1);
+    expect(rejectEditor.getText()).toBe("Start");
+  });
+
+  it("suggesting mode consumes Ctrl+Backspace at a paragraph start without joining paragraphs", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-suggesting-boundary-backspace-1",
+        title: "Doc Suggesting Boundary Backspace 1",
+        content: "First paragraph\n\nSecond paragraph",
+      },
+      interactionMode: "suggesting",
+      selected: true,
+    });
+    const editor = rendered.getEditor();
+
+    await act(async () => {
+      const range = findTextRange(editor, "Second paragraph");
+      expect(range).not.toBeNull();
+      editor.commands.focus();
+      editor.commands.setTextSelection(range?.from ?? 1);
+    });
+    await pressEditorKey(editor, "Backspace", { ctrlKey: true });
+
+    expect(editor.state.doc.childCount).toBe(2);
+    expect(editor.getText()).toBe("First paragraph\n\nSecond paragraph");
+  });
+
+  it("suggesting mode consumes Ctrl+Delete at a paragraph end without joining paragraphs", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-suggesting-boundary-delete-1",
+        title: "Doc Suggesting Boundary Delete 1",
+        content: "First paragraph\n\nSecond paragraph",
+      },
+      interactionMode: "suggesting",
+      selected: true,
+    });
+    const editor = rendered.getEditor();
+
+    await act(async () => {
+      const range = findTextRange(editor, "First paragraph");
+      expect(range).not.toBeNull();
+      editor.commands.focus();
+      editor.commands.setTextSelection(range?.to ?? 1);
+    });
+    await pressEditorKey(editor, "Delete", { ctrlKey: true });
+
+    expect(editor.state.doc.childCount).toBe(2);
+    expect(editor.getText()).toBe("First paragraph\n\nSecond paragraph");
   });
 
   it("document code mode shows raw markdown and hides rich text chrome", async () => {

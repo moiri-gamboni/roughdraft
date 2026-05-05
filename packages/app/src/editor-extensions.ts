@@ -49,6 +49,8 @@ export interface CriticChangeAttrs {
   createdAt: string;
 }
 
+export const SUGGESTED_PARAGRAPH_SENTINEL = "\u2060";
+
 const CommentRef = Mark.create({
   name: "commentRef",
   priority: 1100,
@@ -225,6 +227,42 @@ function collectCriticChangeRanges(doc: ProseMirrorNode, changeId: string) {
   return ranges;
 }
 
+function findSuggestedParagraphSentinels(
+  doc: ProseMirrorNode,
+  from: number,
+  to: number,
+) {
+  const positions: number[] = [];
+
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (!node.isText || !node.text) return;
+
+    let index = node.text.indexOf(SUGGESTED_PARAGRAPH_SENTINEL);
+    while (index >= 0) {
+      positions.push(pos + index);
+      index = node.text.indexOf(SUGGESTED_PARAGRAPH_SENTINEL, index + 1);
+    }
+  });
+
+  return positions;
+}
+
+function isOnlyTextblockContent(
+  doc: ProseMirrorNode,
+  from: number,
+  to: number,
+) {
+  const $from = doc.resolve(from);
+  const $to = doc.resolve(to);
+
+  return (
+    $from.sameParent($to) &&
+    $from.parent.isTextblock &&
+    from === $from.start() &&
+    to === $from.end()
+  );
+}
+
 const CriticChange = Mark.create({
   name: "criticChange",
   priority: 1090,
@@ -321,7 +359,22 @@ const CriticChange = Mark.create({
             ) {
               tr.delete(range.from, range.to);
             } else {
-              tr.removeMark(range.from, range.to, markType);
+              const sentinelPositions = findSuggestedParagraphSentinels(
+                state.doc,
+                range.from,
+                range.to,
+              );
+
+              for (const position of [...sentinelPositions].reverse()) {
+                tr.delete(
+                  position,
+                  position + SUGGESTED_PARAGRAPH_SENTINEL.length,
+                );
+              }
+
+              const from = tr.mapping.map(range.from, -1);
+              const to = tr.mapping.map(range.to, -1);
+              tr.removeMark(from, to, markType);
             }
           }
 
@@ -344,7 +397,20 @@ const CriticChange = Mark.create({
               range.kind === "addition" ||
               range.kind === "substitution-new"
             ) {
-              tr.delete(range.from, range.to);
+              const sentinelPositions = findSuggestedParagraphSentinels(
+                state.doc,
+                range.from,
+                range.to,
+              );
+              if (
+                sentinelPositions.length > 0 &&
+                isOnlyTextblockContent(state.doc, range.from, range.to)
+              ) {
+                const $from = state.doc.resolve(range.from);
+                tr.delete($from.before(), $from.after());
+              } else {
+                tr.delete(range.from, range.to);
+              }
             } else {
               tr.removeMark(range.from, range.to, markType);
             }
