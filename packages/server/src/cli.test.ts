@@ -1293,3 +1293,476 @@ describe("cli", () => {
     expect(result.server.port).toBe(ROUGHDRAFT_DEFAULT_PORT + 1);
   });
 });
+
+describe("runCli open in remote mode", () => {
+  let tempDir: string;
+  let projectDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-cli-remote-"));
+    projectDir = path.join(tempDir, "project");
+    fs.mkdirSync(projectDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  async function startRemoteHost(remoteDocumentToken?: string): Promise<{
+    url: string;
+    close: () => Promise<void>;
+  }> {
+    const { app } = createApp({
+      homeDir: tempDir,
+      remoteDocumentToken,
+      staticDirPath: tempDir,
+    });
+    const server = createHttpServer(app);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", () => resolve()),
+    );
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Failed to bind remote host");
+    }
+    return {
+      url: `http://127.0.0.1:${address.port}`,
+      close: () =>
+        new Promise<void>((resolve) => {
+          server.closeAllConnections?.();
+          server.close(() => resolve());
+        }),
+    };
+  }
+
+  it("prints register failure and exits 1 when the remote host is unreachable", async () => {
+    const filePath = path.join(projectDir, "draft.md");
+    fs.writeFileSync(filePath, "# hello\n");
+
+    const logs: string[] = [];
+    const errors: string[] = [];
+
+    const exitCode = await runCli(["open", filePath], {
+      env: { ROUGHDRAFT_HOST: "http://127.0.0.1:1" },
+      cwd: projectDir,
+      log: (m) => logs.push(m),
+      error: (m) => errors.push(m),
+      openUrl: () => "disabled",
+      resolveUpdateStatus: async () => ({
+        packageName: "roughdraft",
+        currentVersion: "0.1.0",
+        latestVersion: "0.1.0",
+        updateAvailable: false,
+        updateCommand: "",
+      }),
+    });
+
+    expect(exitCode).toBe(1);
+    expect(errors.join("\n")).toContain("Could not register remote session");
+  });
+
+  it("rejects non-.md targets in remote mode without contacting the host", async () => {
+    const filePath = path.join(projectDir, "notes.txt");
+    fs.writeFileSync(filePath, "hello");
+
+    const errors: string[] = [];
+    let fetchCalls = 0;
+
+    const exitCode = await runCli(["open", filePath], {
+      env: { ROUGHDRAFT_HOST: "http://127.0.0.1:1" },
+      cwd: projectDir,
+      log: () => {},
+      error: (m) => errors.push(m),
+      openUrl: () => "disabled",
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        return new Response("", { status: 200 });
+      },
+      resolveUpdateStatus: async () => ({
+        packageName: "roughdraft",
+        currentVersion: "0.1.0",
+        latestVersion: "0.1.0",
+        updateAvailable: false,
+        updateCommand: "",
+      }),
+    });
+
+    expect(exitCode).toBe(1);
+    expect(fetchCalls).toBe(0);
+    expect(errors.join("\n")).toContain("can only open .md files");
+  });
+
+  it("registers a session, opens the viewer URL, and writes save events to disk", {
+    timeout: 15_000,
+  }, async () => {
+    const remote = await startRemoteHost();
+    try {
+      const filePath = path.join(projectDir, "draft.md");
+      fs.writeFileSync(filePath, "before\n");
+
+      const logs: string[] = [];
+      const errors: string[] = [];
+      let openedUrl: string | null = null;
+
+      const cliPromise = runCli(["open", filePath], {
+        env: { ROUGHDRAFT_HOST: remote.url },
+        cwd: projectDir,
+        log: (m) => logs.push(m),
+        error: (m) => errors.push(m),
+        openUrl: (url) => {
+          openedUrl = url;
+          return "disabled";
+        },
+        resolveUpdateStatus: async () => ({
+          packageName: "roughdraft",
+          currentVersion: "0.1.0",
+          latestVersion: "0.1.0",
+          updateAvailable: false,
+          updateCommand: "",
+        }),
+      });
+
+      // Wait for the CLI to register and open the SSE channel.
+      const deadline = Date.now() + 4000;
+      while (openedUrl === null && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(openedUrl).not.toBeNull();
+      const sessionId = new URL(
+        openedUrl as unknown as string,
+      ).searchParams.get("session");
+      expect(sessionId).toBeTruthy();
+
+      // Wait until the server actually has the SSE client connected before PUTting.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Trigger a save event by PUTting new content.
+      const putResponse = await fetch(
+        `${remote.url}/api/remote-document/${sessionId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "after\n" }),
+        },
+      );
+      expect(putResponse.status).toBe(200);
+
+      // Wait until the file on disk reflects the save.
+      const writeDeadline = Date.now() + 4000;
+      while (
+        fs.readFileSync(filePath, "utf-8") !== "after\n" &&
+        Date.now() < writeDeadline
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(fs.readFileSync(filePath, "utf-8")).toBe("after\n");
+
+      // Closing the server ends the SSE stream and lets the CLI exit cleanly.
+      await remote.close();
+      const exitCode = await cliPromise;
+      expect(exitCode).toBe(0);
+      expect(
+        logs.some((m) => m.includes("Opened remote Roughdraft session")),
+      ).toBe(true);
+    } finally {
+      await remote.close();
+    }
+  });
+
+  it("authenticates remote registration and the CLI save-back stream with ROUGHDRAFT_TOKEN", {
+    timeout: 15_000,
+  }, async () => {
+    const remote = await startRemoteHost("secret-token");
+    try {
+      const filePath = path.join(projectDir, "draft.md");
+      fs.writeFileSync(filePath, "before\n");
+
+      const logs: string[] = [];
+      const errors: string[] = [];
+      let openedUrl: string | null = null;
+
+      const cliPromise = runCli(["open", filePath], {
+        env: {
+          ROUGHDRAFT_HOST: remote.url,
+          ROUGHDRAFT_TOKEN: "secret-token",
+        },
+        cwd: projectDir,
+        log: (m) => logs.push(m),
+        error: (m) => errors.push(m),
+        openUrl: (url) => {
+          openedUrl = url;
+          return "disabled";
+        },
+        resolveUpdateStatus: async () => ({
+          packageName: "roughdraft",
+          currentVersion: "0.1.0",
+          latestVersion: "0.1.0",
+          updateAvailable: false,
+          updateCommand: "",
+        }),
+      });
+
+      const openDeadline = Date.now() + 4000;
+      while (openedUrl === null && Date.now() < openDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(openedUrl).not.toBeNull();
+
+      const parsedOpenedUrl = new URL(openedUrl as unknown as string);
+      const sessionId = parsedOpenedUrl.searchParams.get("session");
+      expect(sessionId).toBeTruthy();
+      expect(parsedOpenedUrl.searchParams.get("token")).toBe("secret-token");
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const putResponse = await fetch(
+        `${remote.url}/api/remote-document/${sessionId}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: "Bearer secret-token",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ content: "after-token\n" }),
+        },
+      );
+      expect(putResponse.status).toBe(200);
+
+      const writeDeadline = Date.now() + 4000;
+      while (
+        fs.readFileSync(filePath, "utf-8") !== "after-token\n" &&
+        Date.now() < writeDeadline
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(fs.readFileSync(filePath, "utf-8")).toBe("after-token\n");
+
+      await remote.close();
+      expect(await cliPromise).toBe(0);
+      expect(errors).toEqual([]);
+      expect(
+        logs.some((m) => m.includes("Opened remote Roughdraft session")),
+      ).toBe(true);
+    } finally {
+      await remote.close();
+    }
+  });
+
+  it("writes remote saves to disk without altering markdown constructs", {
+    timeout: 15_000,
+  }, async () => {
+    const remote = await startRemoteHost();
+    try {
+      const filePath = path.join(projectDir, "roundtrip.md");
+      const originalContent = [
+        "---",
+        "title: Remote Roundtrip",
+        "---",
+        "",
+        "# Remote Roundtrip",
+        "",
+        "{>>Keep this comment<<}",
+        "{++new text++}",
+        "{--old text--}",
+        "{~~old~>new~~}",
+        "{==highlight==}",
+        "",
+        "| A | B |",
+        "| - | - |",
+        "| 1 | 2 |",
+        "",
+        "- [ ] task",
+        "",
+        "```md",
+        "{>>literal example<<}",
+        "```",
+        "",
+        "Inline `{>>literal<<}` and [local](./neighbor.md).",
+        "",
+        "<aside>supported html</aside>",
+        "",
+      ].join("\n");
+      const savedContent = originalContent.replace(
+        "# Remote Roundtrip",
+        "# Remote Roundtrip Edited",
+      );
+      fs.writeFileSync(filePath, originalContent);
+
+      const logs: string[] = [];
+      const errors: string[] = [];
+      let openedUrl: string | null = null;
+
+      const cliPromise = runCli(["open", filePath], {
+        env: { ROUGHDRAFT_HOST: remote.url },
+        cwd: projectDir,
+        log: (m) => logs.push(m),
+        error: (m) => errors.push(m),
+        openUrl: (url) => {
+          openedUrl = url;
+          return "disabled";
+        },
+        resolveUpdateStatus: async () => ({
+          packageName: "roughdraft",
+          currentVersion: "0.1.0",
+          latestVersion: "0.1.0",
+          updateAvailable: false,
+          updateCommand: "",
+        }),
+      });
+
+      const openDeadline = Date.now() + 4000;
+      while (openedUrl === null && Date.now() < openDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(openedUrl).not.toBeNull();
+
+      const sessionId = new URL(
+        openedUrl as unknown as string,
+      ).searchParams.get("session");
+      expect(sessionId).toBeTruthy();
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const loaded = await fetch(
+        `${remote.url}/api/remote-document/${sessionId}`,
+      );
+      expect(loaded.status).toBe(200);
+      const payload = (await loaded.json()) as { version: string };
+
+      const putResponse = await fetch(
+        `${remote.url}/api/remote-document/${sessionId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: savedContent,
+            expectedVersion: payload.version,
+          }),
+        },
+      );
+      expect(putResponse.status).toBe(200);
+
+      const writeDeadline = Date.now() + 4000;
+      while (
+        fs.readFileSync(filePath, "utf-8") !== savedContent &&
+        Date.now() < writeDeadline
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(savedContent);
+
+      await remote.close();
+      expect(await cliPromise).toBe(0);
+      expect(errors).toEqual([]);
+      expect(
+        logs.some((m) => m.includes("Saved") && m.includes("roundtrip.md")),
+      ).toBe(true);
+    } finally {
+      await remote.close();
+    }
+  });
+
+  it("keeps the CLI save-back stream when a browser also watches the remote session", {
+    timeout: 15_000,
+  }, async () => {
+    const remote = await startRemoteHost();
+    let browserEventsReader: ReadableStreamDefaultReader<Uint8Array> | null =
+      null;
+
+    try {
+      const filePath = path.join(projectDir, "draft.md");
+      fs.writeFileSync(filePath, "before\n");
+
+      const logs: string[] = [];
+      const errors: string[] = [];
+      let openedUrl: string | null = null;
+      let cliSettled = false;
+
+      const cliPromise = runCli(["open", filePath], {
+        env: { ROUGHDRAFT_HOST: remote.url },
+        cwd: projectDir,
+        log: (m) => logs.push(m),
+        error: (m) => errors.push(m),
+        openUrl: (url) => {
+          openedUrl = url;
+          return "disabled";
+        },
+        resolveUpdateStatus: async () => ({
+          packageName: "roughdraft",
+          currentVersion: "0.1.0",
+          latestVersion: "0.1.0",
+          updateAvailable: false,
+          updateCommand: "",
+        }),
+      }).finally(() => {
+        cliSettled = true;
+      });
+
+      const openDeadline = Date.now() + 4000;
+      while (openedUrl === null && Date.now() < openDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(openedUrl).not.toBeNull();
+
+      const sessionId = new URL(
+        openedUrl as unknown as string,
+      ).searchParams.get("session");
+      expect(sessionId).toBeTruthy();
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const browserEvents = await fetch(
+        `${remote.url}/api/remote-document/${sessionId}/events?role=viewer`,
+      );
+      expect(browserEvents.status).toBe(200);
+      browserEventsReader = browserEvents.body?.getReader() ?? null;
+      expect(browserEventsReader).not.toBeNull();
+
+      const decoder = new TextDecoder();
+      let connectedChunk = "";
+      const browserConnectDeadline = Date.now() + 4000;
+      while (
+        !connectedChunk.includes("event: connected") &&
+        Date.now() < browserConnectDeadline
+      ) {
+        const chunk = await browserEventsReader?.read();
+        if (!chunk || chunk.done) break;
+        connectedChunk += decoder.decode(chunk.value);
+      }
+      expect(connectedChunk).toContain("event: connected");
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(cliSettled).toBe(false);
+
+      const putResponse = await fetch(
+        `${remote.url}/api/remote-document/${sessionId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "after-browser-watch\n" }),
+        },
+      );
+      expect(putResponse.status).toBe(200);
+
+      const writeDeadline = Date.now() + 4000;
+      while (
+        fs.readFileSync(filePath, "utf-8") !== "after-browser-watch\n" &&
+        Date.now() < writeDeadline
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(fs.readFileSync(filePath, "utf-8")).toBe("after-browser-watch\n");
+
+      await browserEventsReader?.cancel();
+      await remote.close();
+      expect(await cliPromise).toBe(0);
+      expect(errors).toEqual([]);
+      expect(
+        logs.some((m) => m.includes("Opened remote Roughdraft session")),
+      ).toBe(true);
+    } finally {
+      await browserEventsReader?.cancel().catch(() => undefined);
+      await remote.close();
+    }
+  });
+});

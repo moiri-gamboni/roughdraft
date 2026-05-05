@@ -771,6 +771,14 @@ export function App() {
 
         setBackend(detectedBackend);
 
+        if (detectedBackend.info.kind === "remote") {
+          const documentPath = detectedBackend.info.detail || "remote.md";
+          await loadDocument(detectedBackend, documentPath);
+          if (cancelled) return;
+          setLoading(false);
+          return;
+        }
+
         if (!requestedPathState.rawPath) {
           setActiveDocumentPath(null);
           setLoading(false);

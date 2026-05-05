@@ -28,6 +28,7 @@ import {
 import { criticMarkdownHasReviewRail } from "./critic-markup";
 import { cn } from "./lib/utils";
 import { PageCard, type DocumentInteractionMode } from "./PageCard";
+import { RemoteSessionBanner } from "./components/RemoteSessionBanner";
 import type { Page, StorageBackend } from "./storage";
 
 type SaveState = "idle" | "saving" | "error";
@@ -156,6 +157,7 @@ export function DocumentWorkspace({
         conflictNotice ? "pt-40 sm:pt-28" : "pt-10",
       )}
     >
+      <RemoteSessionBanner backend={backend} />
       {conflictNotice ? (
         <div
           role="status"

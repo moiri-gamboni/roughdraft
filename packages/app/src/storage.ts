@@ -28,10 +28,12 @@ export interface StoredAsset {
 }
 
 export interface BackendInfo {
-  kind: "local-files" | "local-storage";
+  kind: "local-files" | "local-storage" | "remote";
   label: string;
   detail: string;
   projectPath?: string;
+  sessionId?: string;
+  originPath?: string;
 }
 
 export interface StorageBackend {
