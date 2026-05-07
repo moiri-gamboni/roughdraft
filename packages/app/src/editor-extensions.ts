@@ -496,6 +496,11 @@ function createCommentHighlightDecorations(
     decorations.push(
       Decoration.inline(pos, pos + node.nodeSize, {
         class: classNames.join(" "),
+        "data-testid": classNames.includes(
+          "comment-decoration-on-critic-change",
+        )
+          ? "comment-decoration-on-critic-change"
+          : "comment-decoration",
       }),
     );
   });
@@ -601,6 +606,9 @@ function createCriticChangeHighlightDecorations(
     )?.attrs.kind as CriticChangeKind | undefined;
     decorations.push(
       Decoration.inline(pos, pos + node.nodeSize, {
+        "data-testid": isSelected
+          ? "critic-change-decoration-active"
+          : "critic-change-decoration-hovered",
         class: [
           isSelected
             ? "critic-change-decoration-active"

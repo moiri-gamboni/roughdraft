@@ -146,10 +146,9 @@ async function selectText(editor: Editor, text: string) {
 
 async function addCommentWithShortcut() {
   await flushAnimationFrame();
-  const commentButton = [...document.querySelectorAll("button")].find(
-    (button) =>
-      button.getAttribute("aria-label") === "Comment" ||
-      button.textContent?.includes("Comment"),
+  const commentButton = queryByTestId<HTMLButtonElement>(
+    document,
+    "selection-menu-action-comment",
   );
   if (commentButton) {
     await act(async () => {
@@ -238,16 +237,35 @@ async function pressEditorKey(
   await flushReact();
 }
 
+function queryByTestId<T extends Element = HTMLElement>(
+  container: ParentNode,
+  testId: string,
+) {
+  return container.querySelector<T>(`[data-testid="${testId}"]`);
+}
+
+function getByTestId<T extends Element = HTMLElement>(
+  container: ParentNode,
+  testId: string,
+) {
+  const element = queryByTestId<T>(container, testId);
+  expect(element).not.toBeNull();
+  return element as T;
+}
+
 function getEditable(container: HTMLElement) {
-  const editable = container.querySelector(".ProseMirror");
+  const editor = getByTestId(container, "rich-text-editor");
+  const editable = editor.querySelector(".ProseMirror");
   expect(editable).not.toBeNull();
   return editable as HTMLElement;
 }
 
 function getToolbarButton(container: HTMLElement, label: string) {
-  const button = container.querySelector(`button[aria-label="${label}"]`);
-  expect(button).not.toBeNull();
-  return button as HTMLButtonElement;
+  const actionId = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  return getByTestId<HTMLButtonElement>(
+    container,
+    `selection-menu-action-${actionId}`,
+  );
 }
 
 type PageCardTestOptions = Partial<{
@@ -820,9 +838,7 @@ describe("PageCard editor integration", () => {
     await flushAnimationFrame();
 
     expect(document.activeElement).toBe(getEditable(rendered.container));
-    expect(
-      rendered.container.querySelector('input[aria-label="Link URL"]'),
-    ).toBeNull();
+    expect(queryByTestId(rendered.container, "link-url-input")).toBeNull();
   });
 
   it("opens the link edit popover without focusing the URL input when clicking link text", async () => {
@@ -848,8 +864,9 @@ describe("PageCard editor integration", () => {
     });
     await flushAnimationFrame();
 
-    const input = rendered.container.querySelector<HTMLInputElement>(
-      'input[aria-label="Link URL"]',
+    const input = queryByTestId<HTMLInputElement>(
+      rendered.container,
+      "link-url-input",
     );
 
     expect(input).not.toBeNull();
@@ -1175,11 +1192,11 @@ describe("PageCard editor integration", () => {
     expect(rendered.container.textContent).toContain("{==alpha==}");
     expect(rendered.container.textContent).toContain("{>>Comment body<<}");
     expect(
-      rendered.container.querySelector('[aria-label="Block type"]'),
+      queryByTestId(rendered.container, "selection-menu-block-type"),
     ).toBeNull();
     expect(
       rendered.container
-        .querySelector(".document-comment-rail")
+        .querySelector('[data-testid="document-review-rail"]')
         ?.classList.contains("invisible"),
     ).toBe(true);
   });
@@ -1197,11 +1214,11 @@ describe("PageCard editor integration", () => {
 
     expect(
       rendered.container
-        .querySelector(".document-page-shell")
+        .querySelector('[data-testid="document-page-shell"]')
         ?.classList.contains("document-page-shell-no-comments"),
     ).toBe(false);
     expect(
-      rendered.container.querySelector(".document-comment-rail"),
+      queryByTestId(rendered.container, "document-review-rail"),
     ).not.toBeNull();
   });
 
@@ -1225,11 +1242,11 @@ describe("PageCard editor integration", () => {
 
     expect(
       rendered.container
-        .querySelector(".document-page-shell")
+        .querySelector('[data-testid="document-page-shell"]')
         ?.classList.contains("document-page-shell-no-comments"),
     ).toBe(true);
     expect(
-      rendered.container.querySelector(".document-comment-rail"),
+      queryByTestId(rendered.container, "document-review-rail"),
     ).toBeNull();
   });
 
@@ -1244,10 +1261,16 @@ describe("PageCard editor integration", () => {
       selected: true,
     });
 
-    const editor = rendered.container.querySelector(".cm-editor");
+    const editor = getByTestId(
+      rendered.container,
+      "markdown-code-editor",
+    ).querySelector(".cm-editor");
     expect(editor).not.toBeNull();
 
-    const gutters = rendered.container.querySelector(".cm-gutters");
+    const gutters = getByTestId(
+      rendered.container,
+      "markdown-code-editor",
+    ).querySelector(".cm-gutters");
     expect(gutters).not.toBeNull();
     expect(gutters?.textContent).toContain("1");
     expect(getComputedStyle(gutters as Element).display).not.toBe("none");
@@ -1326,7 +1349,7 @@ describe("PageCard editor integration", () => {
 
     await selectText(editor, "alpha");
     expect(
-      rendered.container.querySelector(".document-comment-fallback")
+      queryByTestId(rendered.container, "document-comment-fallback")
         ?.textContent,
     ).toContain("Comment body");
 
@@ -1343,7 +1366,7 @@ describe("PageCard editor integration", () => {
     });
 
     expect(
-      rendered.container.querySelector(".document-comment-fallback")
+      queryByTestId(rendered.container, "document-comment-fallback")
         ?.textContent,
     ).toContain("Comment body");
   });
@@ -1407,7 +1430,7 @@ describe("PageCard editor integration", () => {
     await selectText(rendered.getEditor(), "alpha");
 
     expect(
-      rendered.container.querySelector(".document-comment-fallback")
+      queryByTestId(rendered.container, "document-comment-fallback")
         ?.textContent,
     ).toContain("Comment body");
     expect(rendered.container.textContent).toContain("Me");
@@ -1428,8 +1451,9 @@ describe("PageCard editor integration", () => {
 
     vi.useFakeTimers();
 
-    const commentEditor = rendered.container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Add your comment"]',
+    const commentEditor = queryByTestId<HTMLTextAreaElement>(
+      rendered.container,
+      "comment-banner-c1-editor",
     );
     expect(commentEditor).not.toBeNull();
 
@@ -1450,10 +1474,11 @@ describe("PageCard editor integration", () => {
       commentEditor.dispatchEvent(new InputEvent("input", { bubbles: true }));
     });
 
-    const saveButton = [...rendered.container.querySelectorAll("button")].find(
-      (button) => button.textContent?.includes("Save"),
+    const saveButton = queryByTestId<HTMLButtonElement>(
+      rendered.container,
+      "comment-banner-c1-action-save",
     );
-    expect(saveButton).not.toBeUndefined();
+    expect(saveButton).not.toBeNull();
 
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -1485,11 +1510,10 @@ describe("PageCard editor integration", () => {
 
     await selectText(rendered.getEditor(), "alpha");
 
-    const editButtons = rendered.container.querySelectorAll(
-      'button[aria-label="Edit"]',
+    const nestedEditButton = getByTestId<HTMLButtonElement>(
+      rendered.container,
+      "comment-banner-child-action-edit",
     );
-    expect(editButtons.length).toBeGreaterThanOrEqual(2);
-    const nestedEditButton = editButtons[1] as HTMLButtonElement;
 
     vi.useFakeTimers();
     await act(async () => {
@@ -1505,8 +1529,9 @@ describe("PageCard editor integration", () => {
     await flushReact();
     await flushReact();
 
-    const replyEditor = rendered.container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Write a reply"]',
+    const replyEditor = queryByTestId<HTMLTextAreaElement>(
+      rendered.container,
+      "comment-banner-c1-editor",
     );
     expect(replyEditor).not.toBeNull();
 
@@ -1531,10 +1556,10 @@ describe("PageCard editor integration", () => {
 
     await selectText(rendered.getEditor(), "alpha");
 
-    const deleteThreadButton =
-      rendered.container.querySelector<HTMLButtonElement>(
-        'button[aria-label="Delete thread"]',
-      );
+    const deleteThreadButton = queryByTestId<HTMLButtonElement>(
+      rendered.container,
+      "comment-banner-root-action-delete-thread",
+    );
     expect(deleteThreadButton).not.toBeNull();
 
     vi.useFakeTimers();
@@ -1572,7 +1597,7 @@ describe("PageCard editor integration", () => {
     await flushAnimationFrame();
 
     const railText =
-      rendered.container.querySelector(".document-comment-rail")?.textContent ??
+      queryByTestId(rendered.container, "document-review-rail")?.textContent ??
       "";
 
     expect(railText.split(commentText).length - 1).toBe(1);
@@ -1622,7 +1647,9 @@ describe("PageCard editor integration", () => {
       'Insert: "clearer wording"',
     );
     expect(suggestionThread?.textContent).toContain("Looks good.");
-    expect(suggestionThread?.querySelector('[class*="w-px"]')).not.toBeNull();
+    expect(
+      suggestionThread?.querySelector('[data-testid="comment-tree-line"]'),
+    ).not.toBeNull();
   });
 
   it("preserves suggestion color when comments are attached to suggestion text", async () => {
@@ -1639,11 +1666,11 @@ describe("PageCard editor integration", () => {
     await flushAnimationFrame();
 
     const suggestion = rendered.container.querySelector(
-      ".critic-change-addition",
+      '[data-critic-change-id="s1"]',
     );
     expect(suggestion?.textContent).toContain("clearer wording");
     expect(
-      rendered.container.querySelector(".comment-decoration-on-critic-change"),
+      queryByTestId(rendered.container, "comment-decoration-on-critic-change"),
     ).not.toBeNull();
   });
 
@@ -1691,7 +1718,7 @@ describe("PageCard editor integration", () => {
 
     expect(
       rendered.container
-        .querySelector(".document-page-shell")
+        .querySelector('[data-testid="document-page-shell"]')
         ?.classList.contains("document-page-shell-no-comments"),
     ).toBe(true);
 
@@ -1705,7 +1732,7 @@ describe("PageCard editor integration", () => {
 
     expect(
       rendered.container
-        .querySelector(".document-page-shell")
+        .querySelector('[data-testid="document-page-shell"]')
         ?.classList.contains("document-page-shell-no-comments"),
     ).toBe(false);
   });

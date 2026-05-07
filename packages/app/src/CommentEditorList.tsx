@@ -29,6 +29,7 @@ interface CommentEditorListProps {
   selectedCommentId?: string | null;
   hoveredCommentId?: string | null;
   className?: string;
+  testId?: string;
   interactive?: boolean;
   onDeleteComment: (commentId: string) => void;
   onUpdateComment: (commentId: string, nextContent: string) => void;
@@ -93,6 +94,7 @@ export function CommentEditorList({
   selectedCommentId = null,
   hoveredCommentId = null,
   className,
+  testId,
   interactive = true,
   onDeleteComment,
   onUpdateComment,
@@ -253,6 +255,7 @@ export function CommentEditorList({
 
   return (
     <div
+      data-testid={testId}
       data-comment-thread-container="true"
       className={cn(
         variant === "banner"
@@ -531,6 +534,7 @@ function CommentThreadNode({
 
   return (
     <div
+      data-testid={`comment-${variant}-${comment.id}`}
       data-comment-thread-root-id={isRootThread ? comment.id : undefined}
       tabIndex={interactive && isRootThread ? 0 : undefined}
       className={cn(
@@ -568,6 +572,7 @@ function CommentThreadNode({
             {ancestorGuideOffsets.map((left) => (
               <div
                 key={`${comment.id}-guide-${left}`}
+                data-testid="comment-tree-line"
                 className={cn("absolute top-0 bottom-0 w-px", treeLineTone)}
                 style={{
                   left,
@@ -577,6 +582,7 @@ function CommentThreadNode({
               />
             ))}
             <div
+              data-testid="comment-tree-line"
               className={cn(
                 "absolute w-px",
                 treeLineTone,
@@ -595,6 +601,7 @@ function CommentThreadNode({
               }}
             />
             <div
+              data-testid="comment-tree-line"
               className={cn("absolute h-px", treeLineTone)}
               style={{
                 left: (depth - 1) * COMMENT_TREE_INDENT + COMMENT_AVATAR_CENTER,
@@ -609,6 +616,7 @@ function CommentThreadNode({
             {interactive && isRootThread ? (
               <CommentActionButton
                 label="Delete thread"
+                testId={`comment-${variant}-${comment.id}-action-delete-thread`}
                 tone="danger"
                 icon={<Trash2 className="size-3.5" />}
                 compact
@@ -622,6 +630,7 @@ function CommentThreadNode({
             {hasReplies ? (
               <div
                 aria-hidden="true"
+                data-testid="comment-tree-line"
                 className={cn(
                   "pointer-events-none absolute w-px",
                   treeLineTone,
@@ -666,6 +675,7 @@ function CommentThreadNode({
               </div>
               {isEditing ? (
                 <Textarea
+                  data-testid={`comment-${variant}-${comment.id}-editor`}
                   ref={(node) => {
                     if (node) {
                       textareaRefs.current.set(comment.id, node);

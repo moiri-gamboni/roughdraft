@@ -53,6 +53,7 @@ interface DocumentReviewRailProps {
   hoveredChangeId: string | null;
   contentHeight: number;
   className?: string;
+  testId?: string;
   onDeleteComment: (commentId: string) => void;
   onUpdateComment: (commentId: string, nextContent: string) => void;
   onReplyComment: (commentId: string) => void;
@@ -166,6 +167,7 @@ export function DocumentReviewRail({
   hoveredChangeId,
   contentHeight,
   className,
+  testId,
   onDeleteComment,
   onUpdateComment,
   onReplyComment,
@@ -394,7 +396,7 @@ export function DocumentReviewRail({
   }
 
   return (
-    <aside className={cn("min-w-0", className)}>
+    <aside className={cn("min-w-0", className)} data-testid={testId}>
       <div className="relative" style={{ minHeight: railHeight }}>
         {layouts.map((layout) => {
           if (layout.type === "comment") {
@@ -412,6 +414,7 @@ export function DocumentReviewRail({
               <div
                 key={layout.key}
                 ref={(node) => setItemRef(layout.key, node)}
+                data-testid={`comment-thread-${layout.thread.rootCommentId}`}
                 data-comment-thread-container="true"
                 className={cn(
                   "absolute left-0 right-0 rounded-xl border border-transparent bg-transparent shadow-none transition-all duration-200 ease-out will-change-transform",
@@ -458,6 +461,7 @@ export function DocumentReviewRail({
               <div
                 key={layout.key}
                 ref={(node) => setItemRef(layout.key, node)}
+                data-testid="draft-suggestion-thread"
                 data-suggestion-thread-container="true"
                 className="-translate-x-2 absolute left-0 right-0 rounded-xl border border-[#DFDFDC] dark:border-slate-600 bg-white dark:bg-card px-4 py-3 shadow-[0_20px_48px_rgba(57,47,38,0.14)] dark:shadow-[0_20px_48px_rgba(0,0,0,0.4)] transition-all duration-200 ease-out will-change-transform"
                 style={{ top: layout.railTop }}
@@ -475,6 +479,7 @@ export function DocumentReviewRail({
                   </div>
                   <button
                     type="button"
+                    data-testid="draft-suggestion-action-dismiss"
                     className="flex size-7 shrink-0 items-center justify-center rounded-full text-stone-500 dark:text-stone-400 transition hover:bg-stone-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 dark:focus-visible:ring-slate-600"
                     aria-label="Cancel suggestion"
                     onClick={() => onCancelDraftSuggestion?.()}
@@ -484,6 +489,7 @@ export function DocumentReviewRail({
                 </div>
                 <textarea
                   ref={draftTextareaRef}
+                  data-testid="draft-suggestion-editor"
                   value={draftSuggestion?.text ?? ""}
                   rows={2}
                   className="mt-3 min-h-16 w-full resize-y rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm leading-6 text-slate-800 dark:text-slate-200 outline-none transition focus:border-emerald-300 dark:focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 dark:focus:ring-emerald-900"
@@ -508,6 +514,7 @@ export function DocumentReviewRail({
                 <div className="mt-3 flex justify-end gap-2">
                   <button
                     type="button"
+                    data-testid="draft-suggestion-action-cancel"
                     className="inline-flex h-8 items-center gap-1 rounded-lg px-3 text-sm font-medium text-stone-600 dark:text-stone-400 transition hover:bg-stone-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 dark:focus-visible:ring-slate-600"
                     onClick={() => onCancelDraftSuggestion?.()}
                   >
@@ -515,6 +522,7 @@ export function DocumentReviewRail({
                   </button>
                   <button
                     type="button"
+                    data-testid="draft-suggestion-action-apply"
                     className="inline-flex h-8 items-center gap-1 rounded-lg bg-emerald-600 dark:bg-emerald-700 px-3 text-sm font-medium text-white transition hover:bg-emerald-700 dark:hover:bg-emerald-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 dark:focus-visible:ring-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
                     disabled={!draftSuggestion?.text}
                     onClick={() => onApplyDraftSuggestion?.()}
@@ -605,6 +613,7 @@ export function DocumentReviewRail({
             <div
               key={layout.key}
               ref={(node) => setItemRef(layout.key, node)}
+              data-testid={`suggestion-thread-${suggestion.changeId}`}
               data-suggestion-thread-container="true"
               className={cn(
                 "absolute left-0 right-0 rounded-xl border border-transparent bg-transparent shadow-none transition-all duration-200 ease-out will-change-transform",

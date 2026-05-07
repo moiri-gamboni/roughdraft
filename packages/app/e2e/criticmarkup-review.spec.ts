@@ -35,16 +35,17 @@ test.describe("CriticMarkup review flows", () => {
     );
 
     await openMarkdownFile(page, filePath);
-    await expect(page.getByText("Needs detail")).toBeVisible();
+    await expect(page.getByTestId("document-review-rail")).toContainText(
+      "Needs detail",
+    );
 
     await page
-      .getByLabel("Reply")
-      .first()
+      .getByTestId("comment-rail-c1-action-reply")
       .evaluate((element) => {
         (element as HTMLButtonElement).click();
       });
     await page
-      .getByPlaceholder("Write a reply")
+      .getByTestId("comment-rail-c2-editor")
       .fill("Added context looks good.");
     await page
       .getByTestId("comment-rail-c2-action-save")
@@ -78,9 +79,9 @@ test.describe("CriticMarkup review flows", () => {
 
     await openMarkdownFile(page, filePath);
     await selectRichText(page, "target text");
-    await page.getByRole("button", { name: /Comment/ }).click();
+    await page.getByTestId("selection-menu-action-comment").click();
     await page
-      .getByRole("textbox", { name: "Add your comment" })
+      .getByTestId("comment-rail-c1-editor")
       .fill("Clarify this phrase.");
     await page.getByTestId("comment-rail-c1-action-save").click();
 
@@ -114,12 +115,12 @@ test.describe("CriticMarkup review flows", () => {
     await openMarkdownFile(page, filePath);
     await expect(page.locator('[data-critic-change-id="s1"]')).toBeVisible();
 
-    await page.getByLabel("Accept suggestion").first().click();
+    await page.getByTestId("comment-rail-s1-action-accept").click();
     await expect
       .poll(() => readProjectFile(projectDir, "suggestions.md"))
       .toContain("Keep clear wording here.");
 
-    await page.getByLabel("Reject suggestion").first().click();
+    await page.getByTestId("comment-rail-s2-action-reject").click();
     await expect
       .poll(() => readProjectFile(projectDir, "suggestions.md"))
       .toContain("Remove drafty there.");

@@ -50,6 +50,22 @@ async function click(element: Element) {
   });
 }
 
+function queryByTestId<T extends Element = HTMLElement>(
+  container: ParentNode,
+  testId: string,
+) {
+  return container.querySelector<T>(`[data-testid="${testId}"]`);
+}
+
+function getByTestId<T extends Element = HTMLElement>(
+  container: ParentNode,
+  testId: string,
+) {
+  const element = queryByTestId<T>(container, testId);
+  expect(element).not.toBeNull();
+  return element as T;
+}
+
 describe("Homepage", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -157,24 +173,21 @@ describe("Homepage", () => {
     expect(container.textContent).toContain("Review a spec");
     expect(container.textContent).toContain("Review a plan");
     expect(container.textContent).toContain("Edit writing");
-    expect(container.querySelector(".rfm-format-demo")?.className).toContain(
+    expect(getByTestId(container, "rfm-format-demo").className).toContain(
       "max-w-none",
     );
-    expect(
-      container.querySelector(".rfm-format-demo-intro")?.className,
-    ).toContain("px-4");
-    expect(
-      container.querySelector(".rfm-format-demo-examples")?.className,
-    ).toContain("px-4");
-    const formatDemoGrid = container.querySelector(
-      ".rfm-format-demo > div:nth-of-type(3)",
+    expect(getByTestId(container, "rfm-format-demo-intro").className).toContain(
+      "px-4",
     );
-    const formatDemoArrow = formatDemoGrid?.children.item(1);
+    expect(
+      getByTestId(container, "rfm-format-demo-examples").className,
+    ).toContain("px-4");
+    const formatDemoArrow = getByTestId(container, "rfm-format-demo-arrow");
     expect(formatDemoArrow?.className).toContain("items-start");
-    expect(container.querySelector(".rfm-source-pane")?.textContent).toContain(
+    expect(getByTestId(container, "rfm-source-pane").textContent).toContain(
       "Source",
     );
-    expect(container.querySelector(".rfm-result-pane")?.textContent).toContain(
+    expect(getByTestId(container, "rfm-result-pane").textContent).toContain(
       "Result",
     );
     expect(APP_STYLES).toMatch(
@@ -189,13 +202,14 @@ describe("Homepage", () => {
     expect(APP_STYLES).toMatch(
       /\.rfm-source-page \{[^}]*margin:\s*1rem;[^}]*min-height:\s*calc\(70vh \+ 7rem\);[^}]*border:\s*1px solid #e9e9e8;[^}]*border-radius:\s*0\.75rem;[^}]*background-color:\s*#fff;[^}]*box-shadow:\s*0 18px 44px rgb\(57 47 38 \/ 8%\);/s,
     );
-    const resultDocumentCard = container.querySelector(
-      ".rfm-result-editor .document-page-main > .pb-24 > div",
-    );
+    const resultDocumentCard = getByTestId(
+      container,
+      "rfm-result-editor",
+    ).querySelector('[data-testid="document-content-card"]');
     expect(resultDocumentCard?.className).toContain("bg-white");
     expect(resultDocumentCard?.className).toContain("shadow-");
     expect(APP_STYLES).not.toContain("rfm-token-");
-    expect(container.querySelector('[class*="rfm-token-"]')).toBeNull();
+    expect(queryByTestId(container, "rfm-token")).toBeNull();
     expect(
       container.querySelector(".comment-anchor[data-comment-ids]"),
     ).not.toBeNull();
@@ -214,18 +228,17 @@ describe("Homepage", () => {
     expect(container.textContent).toContain(
       "leave detailed comments, questions, and suggested edits",
     );
+    expect(container.innerHTML).not.toContain(
+      'contenteditable="plaintext-only"',
+    );
     expect(
-      container.querySelectorAll('[contenteditable="plaintext-only"]'),
-    ).toHaveLength(0);
-    expect(
-      container
-        .querySelector('img[alt="Roughdraft markdown review workspace"]')
-        ?.getAttribute("src"),
+      getByTestId(container, "homepage-sneak-peek-image").getAttribute("src"),
     ).toBe("/sneak-peek.png");
     expect(document.body.textContent).not.toContain(AGENT_SETUP_PROMPT);
 
-    const cta = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes("Install Now"),
+    const cta = getByTestId<HTMLButtonElement>(
+      container,
+      "homepage-install-button",
     );
     const githubLink = container.querySelector(
       'a[href="https://github.com/Lex-Inc/roughdraft"]',
@@ -241,12 +254,10 @@ describe("Homepage", () => {
         ?.textContent,
     ).toContain("spec");
 
-    const planReviewButton = [...container.querySelectorAll("button")].find(
-      (button) => button.textContent?.includes("Review a plan"),
+    const planReviewButton = getByTestId<HTMLButtonElement>(
+      container,
+      "rfm-format-example-plan-review",
     );
-
-    expect(planReviewButton).toBeDefined();
-    if (!planReviewButton) throw new Error("Plan review example not found");
 
     await click(planReviewButton);
 
@@ -256,9 +267,6 @@ describe("Homepage", () => {
     );
     expect(container.textContent).toContain('re="s1"');
 
-    expect(cta).toBeDefined();
-    if (!cta) throw new Error("CTA not found");
-
     await click(cta);
 
     expect(document.body.textContent).toContain(
@@ -266,12 +274,10 @@ describe("Homepage", () => {
     );
     expect(document.body.textContent).toContain(AGENT_SETUP_PROMPT);
 
-    const copyButton = [...document.body.querySelectorAll("button")].find(
-      (button) => button.textContent?.includes("Copy prompt"),
+    const copyButton = getByTestId<HTMLButtonElement>(
+      document.body,
+      "homepage-copy-prompt-button",
     );
-
-    expect(copyButton).toBeDefined();
-    if (!copyButton) throw new Error("Copy button not found");
 
     await click(copyButton);
 

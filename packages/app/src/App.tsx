@@ -214,7 +214,10 @@ export function Homepage({
   }, []);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#FCFCFC] dark:bg-background px-6 py-12 text-slate-950 dark:text-slate-50">
+    <div
+      className="flex min-h-screen items-center justify-center bg-[#FCFCFC] dark:bg-background px-6 py-12 text-slate-950 dark:text-slate-50"
+      data-testid="homepage"
+    >
       {updateStatus ? (
         <div className="absolute top-4 right-4 max-w-sm">
           <UpdateNotice updateStatus={updateStatus} />
@@ -250,7 +253,11 @@ export function Homepage({
             <Dialog>
               <DialogTrigger
                 render={
-                  <Button className="h-12 gap-2 px-6 text-base" size="lg">
+                  <Button
+                    className="h-12 gap-2 px-6 text-base"
+                    data-testid="homepage-install-button"
+                    size="lg"
+                  >
                     Install Now
                   </Button>
                 }
@@ -279,6 +286,7 @@ export function Homepage({
                 <DialogFooter>
                   <Button
                     className="h-9 gap-2 px-3 text-sm"
+                    data-testid="homepage-copy-prompt-button"
                     type="button"
                     onClick={handleCopySetupPrompt}
                   >
@@ -316,6 +324,7 @@ export function Homepage({
 
         <div className="mx-auto mt-10 w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-[0_20px_60px_rgba(15,23,42,0.12)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.4)]">
           <img
+            data-testid="homepage-sneak-peek-image"
             src="/sneak-peek.png"
             alt="Roughdraft markdown review workspace"
             className="block aspect-[1728/1117] w-full object-cover"

@@ -176,6 +176,22 @@ async function click(element: Element) {
   });
 }
 
+function queryByTestId<T extends Element = HTMLElement>(
+  container: ParentNode,
+  testId: string,
+) {
+  return container.querySelector<T>(`[data-testid="${testId}"]`);
+}
+
+function getByTestId<T extends Element = HTMLElement>(
+  container: ParentNode,
+  testId: string,
+) {
+  const element = queryByTestId<T>(container, testId);
+  expect(element).not.toBeNull();
+  return element as T;
+}
+
 describe("view mode toggle uses client-side state (issue 1 fix)", () => {
   afterEach(() => {
     window.history.replaceState(null, "", "/");
@@ -302,8 +318,8 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     await renderSaveStatus({ saveState });
 
     expect(
-      container.querySelector(`[role="status"][aria-label="${label}"]`),
-    ).not.toBeNull();
+      getByTestId(container, "document-save-status").textContent,
+    ).toContain(label);
     expect(container.textContent).toContain(label);
   });
 
@@ -315,19 +331,18 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     await renderSaveStatus({ documentDiskChangeState: state });
 
     expect(
-      container.querySelector(`[role="status"][aria-label="${label}"]`),
-    ).not.toBeNull();
+      getByTestId(container, "document-save-status").textContent,
+    ).toContain(label);
     expect(container.textContent).toContain(label);
   });
 
   it("renders save status below the handoff button when handoff exists", async () => {
     await renderWorkspace({ watcherCount: 1 });
 
-    const stack = container.querySelector(
-      '[data-document-status-stack="true"]',
-    );
-    const doneReviewingButton = [...container.querySelectorAll("button")].find(
-      (button) => button.textContent?.includes("I'm done"),
+    const stack = queryByTestId(container, "document-status-stack");
+    const doneReviewingButton = queryByTestId(
+      container,
+      "review-handoff-button",
     );
     expect(stack).not.toBeNull();
     expect(doneReviewingButton).toBeDefined();
@@ -339,9 +354,7 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
   it("renders standalone save status in the top-right stack without handoff", async () => {
     await renderWorkspace();
 
-    const stack = container.querySelector(
-      '[data-document-status-stack="true"]',
-    );
+    const stack = queryByTestId(container, "document-status-stack");
     expect(stack).not.toBeNull();
     expect(stack?.textContent).not.toContain("I'm done");
     expect(stack?.textContent).toContain("Saved");
@@ -400,8 +413,8 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     expect(container.textContent).toContain("Save conflict");
     expect(container.textContent).toContain("This file changed on disk");
     expect(
-      container.querySelector('[aria-label="Save conflict"]'),
-    ).not.toBeNull();
+      getByTestId(container, "document-save-status").textContent,
+    ).toContain("Save conflict");
   });
 
   it.each([
@@ -488,14 +501,14 @@ describe("interaction mode preserved across view toggle (issue 3 fix)", () => {
     // Mount with rich-text → mode is "editing" by default
     await renderWorkspace("rich-text");
     expect(
-      container.querySelector('[aria-label="Document mode"]')?.textContent,
+      getByTestId(container, "document-mode-trigger").textContent,
     ).toContain("editing");
 
     // Rerender with code view (same component instance, no remount) →
     // mode stays "editing" because the component is not destroyed.
     await renderWorkspace("code");
     expect(
-      container.querySelector('[aria-label="Document mode"]')?.textContent,
+      getByTestId(container, "document-mode-trigger").textContent,
     ).toContain("editing");
   });
 });
@@ -574,8 +587,9 @@ describe("review handoff watcher affordance", () => {
 
     await renderWorkspace({ getWatcherCount: () => 1, onCompleteReview });
 
-    const doneReviewingButton = [...container.querySelectorAll("button")].find(
-      (button) => button.textContent?.includes("I'm done"),
+    const doneReviewingButton = queryByTestId<HTMLButtonElement>(
+      container,
+      "review-handoff-button",
     );
     expect(doneReviewingButton).toBeDefined();
     expect(container.textContent).toContain("Agent watching");
@@ -599,8 +613,9 @@ describe("review handoff watcher affordance", () => {
 
     await renderWorkspace({ getWatcherCount: () => 1, onCompleteReview });
 
-    const doneReviewingButton = [...container.querySelectorAll("button")].find(
-      (button) => button.textContent?.includes("I'm done"),
+    const doneReviewingButton = queryByTestId<HTMLButtonElement>(
+      container,
+      "review-handoff-button",
     );
     if (!doneReviewingButton) {
       throw new Error("I'm done button not found");
@@ -626,8 +641,9 @@ describe("review handoff watcher affordance", () => {
       onCompleteReview,
     });
 
-    const doneReviewingButton = [...container.querySelectorAll("button")].find(
-      (button) => button.textContent?.includes("I'm done"),
+    const doneReviewingButton = queryByTestId<HTMLButtonElement>(
+      container,
+      "review-handoff-button",
     );
     if (!doneReviewingButton) {
       throw new Error("I'm done button not found");
@@ -659,8 +675,9 @@ describe("review handoff watcher affordance", () => {
       onCompleteReview,
     });
 
-    const doneReviewingButton = [...container.querySelectorAll("button")].find(
-      (button) => button.textContent?.includes("I'm done"),
+    const doneReviewingButton = queryByTestId<HTMLButtonElement>(
+      container,
+      "review-handoff-button",
     );
     if (!doneReviewingButton) {
       throw new Error("I'm done button not found");

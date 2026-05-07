@@ -98,9 +98,13 @@ export function RoughdraftFormatDemo() {
   return (
     <section
       aria-labelledby="roughdraft-markdown-heading"
+      data-testid="rfm-format-demo"
       className="rfm-format-demo mx-auto mt-20 w-full max-w-none border-t border-slate-200 pt-10 text-left dark:border-slate-700 sm:mt-24"
     >
-      <div className="rfm-format-demo-intro mx-auto w-full px-4">
+      <div
+        className="rfm-format-demo-intro mx-auto w-full px-4"
+        data-testid="rfm-format-demo-intro"
+      >
         <div className="max-w-3xl">
           <p className="text-xs font-medium tracking-[0.16em] text-stone-500 uppercase dark:text-stone-400">
             Roughdraft flavored Markdown
@@ -136,12 +140,14 @@ export function RoughdraftFormatDemo() {
 
       <div
         className="rfm-format-demo-examples mx-auto mt-5 flex w-full flex-wrap gap-2 px-4"
+        data-testid="rfm-format-demo-examples"
         role="group"
         aria-label="Format examples"
       >
         {FORMAT_EXAMPLES.map((example) => (
           <Button
             className="h-8 px-3 text-xs"
+            data-testid={`rfm-format-example-${example.id}`}
             key={example.id}
             type="button"
             variant={selectedExampleId === example.id ? "default" : "outline"}
@@ -152,8 +158,14 @@ export function RoughdraftFormatDemo() {
         ))}
       </div>
 
-      <div className="mx-auto mt-5 grid w-full gap-3 lg:grid-cols-[minmax(20rem,0.72fr)_2.5rem_minmax(0,1.28fr)] lg:items-stretch">
-        <div className="rfm-demo-pane rfm-source-pane">
+      <div
+        className="mx-auto mt-5 grid w-full gap-3 lg:grid-cols-[minmax(20rem,0.72fr)_2.5rem_minmax(0,1.28fr)] lg:items-stretch"
+        data-testid="rfm-format-demo-grid"
+      >
+        <div
+          className="rfm-demo-pane rfm-source-pane"
+          data-testid="rfm-source-pane"
+        >
           <div className="rfm-demo-pane-header">
             <span>Source</span>
           </div>
@@ -166,15 +178,21 @@ export function RoughdraftFormatDemo() {
           </div>
         </div>
 
-        <div className="hidden items-start justify-center pt-3 text-slate-400 dark:text-slate-500 lg:flex">
+        <div
+          className="hidden items-start justify-center pt-3 text-slate-400 dark:text-slate-500 lg:flex"
+          data-testid="rfm-format-demo-arrow"
+        >
           <ArrowRight className="size-5" aria-hidden="true" />
         </div>
 
-        <div className="rfm-demo-pane rfm-result-pane">
+        <div
+          className="rfm-demo-pane rfm-result-pane"
+          data-testid="rfm-result-pane"
+        >
           <div className="rfm-demo-pane-header">
             <span>Result</span>
           </div>
-          <div className="rfm-result-editor">
+          <div className="rfm-result-editor" data-testid="rfm-result-editor">
             <PageCard
               page={page}
               selected

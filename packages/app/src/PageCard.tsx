@@ -1857,8 +1857,12 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     "rounded-[0.75rem] border border-[#E9E9E8] dark:border-slate-700 bg-white dark:bg-card shadow-[0_18px_44px_rgba(57,47,38,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)]";
 
   return (
-    <div className="cursor-text bg-transparent">
+    <div
+      className="cursor-text bg-transparent"
+      data-testid="page-card-rich-text"
+    >
       <div
+        data-testid="document-page-shell"
         className={cn(
           "document-page-shell",
           !hasReviewRail && "document-page-shell-no-comments",
@@ -1869,6 +1873,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
             <CommentEditorList
               comments={activeComments}
               className="document-comment-fallback mb-4"
+              testId="document-comment-fallback"
               selectedCommentId={selectedCommentId}
               hoveredCommentId={hoveredCommentId}
               onDeleteComment={deleteComment}
@@ -1891,6 +1896,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
           ) : null}
           <div className="pb-24">
             <div
+              data-testid="document-content-card"
               className={cn(contentCardClass, "px-10 py-10 sm:px-14 sm:py-14")}
             >
               <EditorContextMenu
@@ -1916,13 +1922,16 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
                     : handleSuggestInsertion
                 }
               >
-                <EditorContent editor={editor} />
+                <div data-testid="rich-text-editor">
+                  <EditorContent editor={editor} />
+                </div>
               </EditorContextMenu>
             </div>
           </div>
         </div>
         <DocumentReviewRail
           className="document-comment-rail"
+          testId="document-review-rail"
           commentGroups={commentGroups}
           comments={comments}
           suggestions={criticChanges}
@@ -1976,8 +1985,9 @@ const CodeEditorSurface = memo(function CodeEditorSurface({
   onMarkdownChange,
 }: CodeEditorSurfaceProps) {
   return (
-    <div className="cursor-text bg-transparent">
+    <div className="cursor-text bg-transparent" data-testid="page-card-code">
       <div
+        data-testid="document-page-shell"
         className={cn(
           "document-page-shell",
           !hasCommentRailSpace && "document-page-shell-no-comments",
@@ -1985,8 +1995,12 @@ const CodeEditorSurface = memo(function CodeEditorSurface({
       >
         <div className="document-page-main min-w-0">
           <div className="pb-24">
-            <div className="markdown-code-shell rounded-[0.75rem] border border-[#E9E9E8] dark:border-slate-700 bg-white dark:bg-card pl-5 pr-6 py-10 shadow-[0_18px_44px_rgba(57,47,38,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)] sm:pl-8 sm:pr-10 sm:py-14">
+            <div
+              className="markdown-code-shell rounded-[0.75rem] border border-[#E9E9E8] dark:border-slate-700 bg-white dark:bg-card pl-5 pr-6 py-10 shadow-[0_18px_44px_rgba(57,47,38,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)] sm:pl-8 sm:pr-10 sm:py-14"
+              data-testid="document-content-card"
+            >
               <MarkdownCodeEditor
+                testId="markdown-code-editor"
                 value={markdown}
                 onChange={onMarkdownChange}
                 readOnly={interactionMode === "viewing"}
@@ -1997,6 +2011,7 @@ const CodeEditorSurface = memo(function CodeEditorSurface({
         </div>
         {hasCommentRailSpace ? (
           <div
+            data-testid="document-review-rail"
             className="document-comment-rail pointer-events-none invisible"
             aria-hidden="true"
           />

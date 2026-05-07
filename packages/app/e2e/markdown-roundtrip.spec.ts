@@ -2,11 +2,14 @@ import fs from "node:fs";
 import { expect, test } from "@playwright/test";
 import {
   appendInCodeEditor,
+  codeEditor,
   createMarkdownProject,
+  documentSaveStatus,
   logE2eEvent,
   openMarkdownFile,
   readProjectFile,
   removeMarkdownProject,
+  richTextEditor,
   writeProjectFile,
 } from "./helpers";
 
@@ -42,19 +45,17 @@ test.describe("markdown round-trips", () => {
     const filePath = writeProjectFile(projectDir, "roundtrip.md", original);
 
     await openMarkdownFile(page, filePath);
-    await expect(
-      page.getByRole("heading", { name: "Round Trip" }),
-    ).toBeVisible();
-
-    await page.getByLabel("Switch to code view").click();
-    await expect(page.locator(".cm-content")).toContainText(
-      "{>>not review feedback<<}",
+    await expect(page.getByTestId("rich-text-editor")).toContainText(
+      "Round Trip",
     );
 
-    await page.getByLabel("Switch to rich text view").click();
-    await expect(
-      page.getByRole("heading", { name: "Round Trip" }),
-    ).toBeVisible();
+    await page.getByTestId("document-editor-view-toggle").click();
+    await expect(codeEditor(page)).toContainText("{>>not review feedback<<}");
+
+    await page.getByTestId("document-editor-view-toggle").click();
+    await expect(page.getByTestId("rich-text-editor")).toContainText(
+      "Round Trip",
+    );
     expect(readProjectFile(projectDir, "roundtrip.md")).toBe(original);
 
     logE2eEvent("markdown-roundtrip.toggle-preserved", {
@@ -99,7 +100,7 @@ test.describe("markdown round-trips", () => {
 
     await openMarkdownFile(page, filePath);
 
-    await expect(page.getByRole("status", { name: "Saved" })).toBeVisible();
+    await expect(documentSaveStatus(page)).toContainText("Saved");
 
     logE2eEvent("markdown-roundtrip.initial-saved", {
       file: "initial-saved.md",
@@ -122,7 +123,7 @@ test.describe("markdown round-trips", () => {
     await expect
       .poll(() => readProjectFile(projectDir, "manual-save.md"))
       .toContain("Saved by shortcut.");
-    await expect(page.getByRole("status", { name: "Saved" })).toBeVisible();
+    await expect(documentSaveStatus(page)).toContainText("Saved");
 
     logE2eEvent("markdown-roundtrip.manual-save-shortcut", {
       file: "manual-save.md",
@@ -137,7 +138,7 @@ test.describe("markdown round-trips", () => {
     const filePath = writeProjectFile(projectDir, "rich-save.md", initial);
 
     await openMarkdownFile(page, filePath, "rich-text");
-    const editor = page.locator(".ProseMirror");
+    const editor = richTextEditor(page);
     await expect(editor).toBeVisible();
     await editor.click();
     await page.keyboard.press(
@@ -151,7 +152,7 @@ test.describe("markdown round-trips", () => {
     await expect
       .poll(() => readProjectFile(projectDir, "rich-save.md"))
       .toContain("Saved by shortcut.");
-    await expect(page.getByRole("status", { name: "Saved" })).toBeVisible();
+    await expect(documentSaveStatus(page)).toContainText("Saved");
 
     logE2eEvent("markdown-roundtrip.rich-manual-save", {
       file: "rich-save.md",
@@ -172,9 +173,9 @@ test.describe("markdown round-trips", () => {
       await openMarkdownFile(page, filePath, editorMode);
 
       if (editorMode === "code") {
-        await page.locator(".cm-content").click();
+        await codeEditor(page).click();
       } else {
-        await page.locator(".ProseMirror").click();
+        await richTextEditor(page).click();
       }
 
       const events = await page.evaluate(() =>
@@ -201,7 +202,7 @@ test.describe("markdown round-trips", () => {
         { defaultPrevented: true, metaKey: true, ctrlKey: false },
         { defaultPrevented: true, metaKey: false, ctrlKey: true },
       ]);
-      await expect(page.getByRole("status", { name: "Saved" })).toBeVisible();
+      await expect(documentSaveStatus(page)).toContainText("Saved");
     }
 
     logE2eEvent("markdown-roundtrip.save-default-prevented", {

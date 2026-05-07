@@ -2,7 +2,10 @@ import fs from "node:fs";
 import { expect, test } from "@playwright/test";
 import {
   appendInCodeEditor,
+  codeEditor,
   createMarkdownProject,
+  documentSaveStatus,
+  fileConflictNotice,
   logE2eEvent,
   openMarkdownFile,
   readProjectFile,
@@ -33,29 +36,25 @@ test.describe("stale writes", () => {
     );
 
     await openMarkdownFile(page, filePath, "code");
-    await expect(page.locator(".cm-content")).toContainText("Original body.");
+    await expect(codeEditor(page)).toContainText("Original body.");
 
     fs.writeFileSync(filePath, "# Conflict\n\nExternal body.\n");
     await appendInCodeEditor(page, "\nLocal body.\n");
 
+    await expect(documentSaveStatus(page)).toContainText("Save conflict");
+    await expect(page.getByTestId("file-conflict-action-reload")).toBeVisible();
     await expect(
-      page.getByRole("status", { name: "Save conflict" }),
-    ).toBeVisible();
-    await expect(page.getByText("Reload")).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Keep editing" }),
+      page.getByTestId("file-conflict-action-keep-editing"),
     ).toBeVisible();
     expect(readProjectFile(projectDir, "conflict.md")).toBe(
       "# Conflict\n\nExternal body.\n",
     );
 
-    await page.getByRole("button", { name: "Keep editing" }).click();
-    await expect(
-      page.getByRole("status", { name: "Autosave paused" }),
-    ).toBeVisible();
+    await page.getByTestId("file-conflict-action-keep-editing").click();
+    await expect(documentSaveStatus(page)).toContainText("Autosave paused");
     await appendInCodeEditor(page, "\nStill local.\n");
-    await expect(page.locator(".cm-content")).toContainText("Local body.");
-    await expect(page.locator(".cm-content")).toContainText("Still local.");
+    await expect(codeEditor(page)).toContainText("Local body.");
+    await expect(codeEditor(page)).toContainText("Still local.");
     await expect
       .poll(() => readProjectFile(projectDir, "conflict.md"))
       .toBe("# Conflict\n\nExternal body.\n");
@@ -77,26 +76,20 @@ test.describe("stale writes", () => {
     );
 
     await openMarkdownFile(page, filePath, "code");
-    await expect(page.locator(".cm-content")).toContainText("Original body.");
+    await expect(codeEditor(page)).toContainText("Original body.");
 
     fs.writeFileSync(filePath, "# Conflict\n\nExternal body.\n");
     await appendInCodeEditor(page, "\nLocal overwrite body.\n");
 
-    await expect(
-      page.getByRole("status", { name: "Save conflict" }),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "Overwrite disk file" }).click();
+    await expect(documentSaveStatus(page)).toContainText("Save conflict");
+    await page.getByTestId("file-conflict-action-overwrite").click();
 
     await expect
       .poll(() => readProjectFile(projectDir, "overwrite-conflict.md"))
       .toContain("Local overwrite body.");
-    await expect(page.getByRole("status", { name: "Saved" })).toBeVisible();
-    await expect(
-      page.getByRole("status", { name: "Save failed" }),
-    ).toBeHidden();
-    await expect(
-      page.getByRole("status", { name: "Unsaved changes" }),
-    ).toBeHidden();
+    await expect(documentSaveStatus(page)).toContainText("Saved");
+    await expect(documentSaveStatus(page)).not.toContainText("Save failed");
+    await expect(documentSaveStatus(page)).not.toContainText("Unsaved changes");
 
     logE2eEvent("stale-write.overwrite-saved", {
       file: "overwrite-conflict.md",
@@ -116,7 +109,7 @@ test.describe("stale writes", () => {
     );
 
     await openMarkdownFile(page, filePath, "code");
-    await expect(page.locator(".cm-content")).toContainText("Original body.");
+    await expect(codeEditor(page)).toContainText("Original body.");
 
     fs.writeFileSync(filePath, "# Manual Conflict\n\nExternal body.\n");
     await appendInCodeEditor(page, "\nLocal body.\n");
@@ -124,12 +117,10 @@ test.describe("stale writes", () => {
       process.platform === "darwin" ? "Meta+S" : "Control+S",
     );
 
-    await expect(
-      page.getByRole("status", { name: "Save conflict" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("status", { name: "File conflict" }),
-    ).toContainText("This file changed on disk while you have unsaved edits.");
+    await expect(documentSaveStatus(page)).toContainText("Save conflict");
+    await expect(fileConflictNotice(page)).toContainText(
+      "This file changed on disk while you have unsaved edits.",
+    );
     expect(readProjectFile(projectDir, "manual-conflict.md")).toBe(
       "# Manual Conflict\n\nExternal body.\n",
     );
@@ -151,13 +142,13 @@ test.describe("stale writes", () => {
     fs.utimesSync(filePath, fixedTimestamp, fixedTimestamp);
 
     await openMarkdownFile(page, filePath, "code");
-    await expect(page.locator(".cm-content")).toContainText("Original");
+    await expect(codeEditor(page)).toContainText("Original");
 
     fs.writeFileSync(filePath, "# External\n");
     fs.utimesSync(filePath, fixedTimestamp, fixedTimestamp);
     await appendInCodeEditor(page, "\nLocal body.\n");
 
-    await expect(page.getByText("Save conflict")).toBeVisible();
+    await expect(documentSaveStatus(page)).toContainText("Save conflict");
     expect(readProjectFile(projectDir, "metadata-conflict.md")).toBe(
       "# External\n",
     );
@@ -183,9 +174,9 @@ test.describe("stale writes", () => {
     );
 
     await openMarkdownFile(page, filePath, "code");
-    await expect(page.locator(".cm-content")).toContainText("Paragraph 1");
+    await expect(codeEditor(page)).toContainText("Paragraph 1");
 
-    await page.locator(".cm-content").click();
+    await codeEditor(page).click();
     await page.keyboard.press(
       process.platform === "darwin" ? "Meta+End" : "Control+End",
     );
@@ -195,9 +186,7 @@ test.describe("stale writes", () => {
     );
     await page.keyboard.type("\nLocal draft at the bottom.\n");
 
-    const conflictNotice = page.getByRole("status", {
-      name: "File conflict",
-    });
+    const conflictNotice = fileConflictNotice(page);
     await expect(conflictNotice).toBeVisible();
     await expect(conflictNotice).toHaveCSS("position", "fixed");
     await expect(conflictNotice).toContainText(
@@ -206,16 +195,12 @@ test.describe("stale writes", () => {
     await expect(conflictNotice).toContainText(
       "Autosave is paused so your draft will not overwrite those changes.",
     );
+    await expect(page.getByTestId("file-conflict-action-reload")).toBeVisible();
     await expect(
-      conflictNotice.getByRole("button", { name: "Reload from disk" }),
+      page.getByTestId("file-conflict-action-keep-editing"),
     ).toBeVisible();
     await expect(
-      conflictNotice.getByRole("button", {
-        name: "Keep editing with autosave paused",
-      }),
-    ).toBeVisible();
-    await expect(
-      conflictNotice.getByRole("button", { name: "Overwrite disk file" }),
+      page.getByTestId("file-conflict-action-overwrite"),
     ).toBeVisible();
   });
 
@@ -237,15 +222,13 @@ test.describe("stale writes", () => {
       fs.writeFileSync(filePath, "# Layout conflict\n\nOriginal body.\n");
       await page.setViewportSize(viewport);
       await openMarkdownFile(page, filePath, "code");
-      await expect(page.locator(".cm-content")).toContainText("Original body.");
+      await expect(codeEditor(page)).toContainText("Original body.");
 
       fs.writeFileSync(filePath, "# Layout conflict\n\nExternal body.\n");
       await appendInCodeEditor(page, `\nLocal body ${viewport.width}.\n`);
 
-      const conflictNotice = page.getByRole("status", {
-        name: "File conflict",
-      });
-      const statusStack = page.locator('[data-document-status-stack="true"]');
+      const conflictNotice = fileConflictNotice(page);
+      const statusStack = page.getByTestId("document-status-stack");
       await expect(conflictNotice).toBeVisible();
       await expect(statusStack).toBeVisible();
 
@@ -265,7 +248,7 @@ test.describe("stale writes", () => {
         conflictBox.y + conflictBox.height > stackBox.y;
 
       expect(intersects).toBe(false);
-      await page.getByRole("button", { name: "Reload from disk" }).click();
+      await page.getByTestId("file-conflict-action-reload").click();
       await expect(conflictNotice).toBeHidden();
     }
   });

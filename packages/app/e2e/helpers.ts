@@ -38,8 +38,24 @@ export async function openMarkdownFile(
   await page.goto(`/?${params.toString()}`);
 }
 
+export function codeEditor(page: Page) {
+  return page.getByTestId("markdown-code-editor").locator(".cm-content");
+}
+
+export function richTextEditor(page: Page) {
+  return page.getByTestId("rich-text-editor").locator(".ProseMirror");
+}
+
+export function documentSaveStatus(page: Page) {
+  return page.getByTestId("document-save-status");
+}
+
+export function fileConflictNotice(page: Page) {
+  return page.getByTestId("file-conflict-notice");
+}
+
 export async function appendInCodeEditor(page: Page, text: string) {
-  const editor = page.locator(".cm-content");
+  const editor = codeEditor(page);
   await expect(editor).toBeVisible();
   await editor.click();
   await page.keyboard.press(
@@ -49,7 +65,7 @@ export async function appendInCodeEditor(page: Page, text: string) {
 }
 
 export async function selectRichText(page: Page, text: string) {
-  await page.locator(".ProseMirror").focus();
+  await richTextEditor(page).focus();
   await page.evaluate((targetText) => {
     const editor = document.querySelector(".ProseMirror");
     if (!editor) {

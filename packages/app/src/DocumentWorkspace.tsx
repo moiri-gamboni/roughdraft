@@ -159,6 +159,7 @@ export function DocumentSaveStatusIndicator({
 
   return (
     <span
+      data-testid="document-save-status"
       role="status"
       aria-label={saveStatus.ariaLabel}
       className={cn(
@@ -418,6 +419,7 @@ export function DocumentWorkspace({
           "fixed right-3 z-[60] flex max-w-[min(16rem,calc(100vw-1rem))] flex-col items-end gap-1.5",
           conflictNotice ? "top-[19rem] sm:top-[7rem]" : "top-3",
         )}
+        data-testid="document-status-stack"
         data-document-status-stack="true"
       >
         {showReviewHandoffButton ? (
@@ -426,6 +428,7 @@ export function DocumentWorkspace({
               render={
                 <Button
                   type="button"
+                  data-testid="review-handoff-button"
                   size="lg"
                   className="h-9 rounded-[7px] bg-black px-3 text-sm font-bold text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] hover:bg-black/85 focus-visible:ring-black/25 dark:bg-black dark:text-white dark:hover:bg-black/85 dark:focus-visible:ring-white/30"
                   disabled={isReviewHandoffDisabled({
@@ -445,7 +448,10 @@ export function DocumentWorkspace({
                 </Button>
               }
             />
-            <PopoverContent aria-label="Review handoff status">
+            <PopoverContent
+              aria-label="Review handoff status"
+              data-testid="review-handoff-status"
+            >
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-black text-white dark:bg-white dark:text-black">
                   {reviewHandoffState === "notifying" ? (
@@ -478,6 +484,7 @@ export function DocumentWorkspace({
       </div>
       {conflictNotice ? (
         <div
+          data-testid="file-conflict-notice"
           role="status"
           aria-label="File conflict"
           className="fixed top-3 left-1/2 z-50 flex w-[min(calc(100vw-1rem),52rem)] -translate-x-1/2 flex-col gap-3 rounded-[8px] border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950 px-3 py-3 text-amber-950 dark:text-amber-100 shadow-[0_14px_40px_rgba(120,53,15,0.18)] dark:shadow-[0_14px_40px_rgba(0,0,0,0.4)] sm:flex-row sm:items-center sm:justify-between sm:px-4"
@@ -499,6 +506,7 @@ export function DocumentWorkspace({
           <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
             <Button
               type="button"
+              data-testid="file-conflict-action-reload"
               variant="ghost"
               size="sm"
               className="h-8 rounded-[7px] bg-white/55 dark:bg-white/10 px-2 text-xs text-amber-950 dark:text-amber-100 hover:bg-white dark:hover:bg-white/20"
@@ -510,6 +518,7 @@ export function DocumentWorkspace({
             {documentDiskChangeState !== "paused" ? (
               <Button
                 type="button"
+                data-testid="file-conflict-action-keep-editing"
                 variant="ghost"
                 size="sm"
                 className="h-8 rounded-[7px] bg-white/55 dark:bg-white/10 px-2 text-xs text-amber-950 dark:text-amber-100 hover:bg-white dark:hover:bg-white/20"
@@ -521,6 +530,7 @@ export function DocumentWorkspace({
             ) : null}
             <Button
               type="button"
+              data-testid="file-conflict-action-overwrite"
               variant="ghost"
               size="sm"
               className="h-8 rounded-[7px] bg-amber-900 dark:bg-amber-600 px-2 text-xs text-white hover:bg-amber-800 dark:hover:bg-amber-500"
@@ -535,6 +545,7 @@ export function DocumentWorkspace({
       <div className="mx-auto min-h-full max-w-[1080px]">
         {documentPage ? (
           <div
+            data-testid="document-page-header"
             className={cn(
               "document-page-shell mb-2 text-[0.62rem] font-medium tracking-[0.01em] text-stone-400",
               !documentHasComments && "document-page-shell-no-comments",
@@ -547,6 +558,7 @@ export function DocumentWorkspace({
                     render={
                       <button
                         type="button"
+                        data-testid="document-editor-view-toggle"
                         className="grid h-[1.25rem] shrink-0 grid-cols-2 rounded-[999px] bg-[#DED8CE] dark:bg-slate-700 px-[2px] py-[2px] shadow-[inset_0_1px_0_rgba(255,251,245,0.72)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
                       >
                         <span
@@ -624,6 +636,7 @@ export function DocumentWorkspace({
                     }}
                   >
                     <SelectTrigger
+                      data-testid="document-mode-trigger"
                       aria-label="Document mode"
                       className="h-[1.5rem] px-1 font-mono text-[0.7rem] leading-[1.25rem] font-normal tracking-[0.01em] text-stone-400 dark:text-stone-500 hover:text-stone-500 dark:hover:text-stone-400"
                     >

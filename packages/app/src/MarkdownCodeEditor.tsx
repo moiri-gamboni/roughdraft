@@ -12,6 +12,7 @@ interface MarkdownCodeEditorProps {
   autoFocus?: boolean;
   readOnly?: boolean;
   className?: string;
+  testId?: string;
 }
 
 export function createMarkdownCodeEditorExtensions(
@@ -89,6 +90,7 @@ export function MarkdownCodeEditor({
   autoFocus = false,
   readOnly = false,
   className,
+  testId,
 }: MarkdownCodeEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const editorViewRef = useRef<EditorView | null>(null);
@@ -150,6 +152,10 @@ export function MarkdownCodeEditor({
   }, [value]);
 
   return (
-    <div ref={hostRef} className={cn("markdown-code-editor", className)} />
+    <div
+      ref={hostRef}
+      className={cn("markdown-code-editor", className)}
+      data-testid={testId}
+    />
   );
 }

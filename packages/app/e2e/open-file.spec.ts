@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+  codeEditor,
   createMarkdownProject,
   logE2eEvent,
   openMarkdownFile,
@@ -58,22 +59,21 @@ test.describe("opening local markdown files", () => {
 
     await openMarkdownFile(page, filePath);
 
+    const editor = page.getByTestId("rich-text-editor");
+    await expect(editor).toContainText("Smoke Fixture");
+    await expect(editor).toContainText("first");
+    await expect(editor).toContainText("Roughdraft");
     await expect(
-      page.getByRole("heading", { name: "Smoke Fixture" }),
-    ).toBeVisible();
-    await expect(page.getByText("first")).toBeVisible();
-    await expect(page.getByRole("cell", { name: "Roughdraft" })).toBeVisible();
-    await expect(
-      page.locator('a[data-markdown-src="./notes.md"]', {
+      editor.locator('a[data-markdown-src="./notes.md"]', {
         hasText: "local link",
       }),
     ).toBeVisible();
     await expect(
-      page.locator(
+      editor.locator(
         'img[alt="Sketch"][data-markdown-src="./images/sketch.png"]',
       ),
     ).toBeVisible();
-    await expect(page.getByText("const value = 1;")).toBeVisible();
+    await expect(editor).toContainText("const value = 1;");
 
     logE2eEvent("open-file.rendered", {
       projectDir,
@@ -91,9 +91,7 @@ test.describe("opening local markdown files", () => {
     );
 
     await openMarkdownFile(page, filePath, "code");
-    await expect(page.locator(".cm-content")).toContainText(
-      "Existing window body.",
-    );
+    await expect(codeEditor(page)).toContainText("Existing window body.");
 
     const targetUrl = `/?${new URLSearchParams({
       path: filePath,
@@ -105,9 +103,7 @@ test.describe("opening local markdown files", () => {
 
     expect(response.ok()).toBe(true);
     await expect(response.json()).resolves.toEqual({ delivered: true });
-    await expect(page.locator(".cm-content")).toContainText(
-      "Existing window body.",
-    );
+    await expect(codeEditor(page)).toContainText("Existing window body.");
 
     logE2eEvent("open-file.reused-existing-window", {
       projectDir,
