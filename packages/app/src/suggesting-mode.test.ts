@@ -417,6 +417,62 @@ function getMarks(editor: Editor): Array<{ text: string; kind: string }> {
   return marks;
 }
 
+describe("suggesting mode type-over inside an insertion", () => {
+  it("should replace addition text in-place when typing over a selection that is entirely within an addition", () => {
+    const editor = createTestEditor("<p>Hello world</p>");
+
+    editor.view.dispatch(
+      editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 6)),
+    );
+
+    for (const char of " threr") {
+      suggestingTypeChar(editor, char);
+    }
+    expect(editor.state.doc.textContent).toBe("Hello threr world");
+
+    editor.view.dispatch(
+      editor.state.tr.setSelection(
+        TextSelection.create(editor.state.doc, 9, 12),
+      ),
+    );
+
+    suggestingTypeWithSelection(editor, "ere");
+
+    expect(editor.state.doc.textContent).toBe("Hello there world");
+
+    const marks = getMarks(editor);
+    expect(
+      marks.some(
+        (mark) =>
+          mark.kind === "substitution-old" || mark.kind === "substitution-new",
+      ),
+    ).toBe(false);
+    expect(marks.some((mark) => mark.kind === "addition")).toBe(true);
+
+    editor.destroy();
+  });
+
+  it("should still create a substitution when typing over original text", () => {
+    const editor = createTestEditor("<p>Hello world</p>");
+
+    editor.view.dispatch(
+      editor.state.tr.setSelection(
+        TextSelection.create(editor.state.doc, 7, 12),
+      ),
+    );
+
+    suggestingTypeWithSelection(editor, "planet");
+
+    expect(editor.state.doc.textContent).toBe("Hello worldplanet");
+
+    const marks = getMarks(editor);
+    expect(marks.some((mark) => mark.kind === "substitution-old")).toBe(true);
+    expect(marks.some((mark) => mark.kind === "substitution-new")).toBe(true);
+
+    editor.destroy();
+  });
+});
+
 describe("suggesting mode backspace inside an insertion", () => {
   it("should delete the last character of a suggested insertion rather than marking it as a deletion", () => {
     const editor = createTestEditor("<p>Hello world</p>");
