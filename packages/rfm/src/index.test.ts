@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { validateRoughdraftMarkdown } from "./index";
+import {
+  appendRoughdraftReply,
+  extractRoughdraftReviewIndex,
+  markRoughdraftResolved,
+  validateRoughdraftMarkdown,
+} from "./index";
 
 function codes(markdown: string): string[] {
   return validateRoughdraftMarkdown(markdown).diagnostics.map(
@@ -114,5 +119,110 @@ describe("validateRoughdraftMarkdown", () => {
       line: 2,
       column: 1,
     });
+  });
+});
+
+describe("extractRoughdraftReviewIndex", () => {
+  it("extracts comments, anchored comments, replies, and suggestions", () => {
+    const index = extractRoughdraftReviewIndex(
+      [
+        'Please revisit {==this sentence==}{>>Needs a source.<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}.',
+        '{>>I added one.<<}{id="c2" by="AI" at="2026-04-28T12:02:00.000Z" re="c1"}',
+        'Add {++one concrete example++}{id="s1" by="AI" at="2026-04-28T12:05:00.000Z"}.',
+        'Use {~~rough~>specific~~}{id="s2" by="user" at="2026-04-28T12:07:00.000Z"} wording.',
+      ].join("\n"),
+    );
+
+    expect(index.summary).toMatchObject({
+      comments: 1,
+      replies: 1,
+      suggestions: 2,
+      unresolved: 4,
+    });
+    expect(index.items.map((item) => [item.id, item.kind])).toEqual([
+      ["c1", "comment"],
+      ["c2", "reply"],
+      ["s1", "suggestion"],
+      ["s2", "suggestion"],
+    ]);
+    expect(index.items[0]).toMatchObject({
+      anchorText: "this sentence",
+      author: "user",
+      line: 1,
+      column: 35,
+      text: "Needs a source.",
+    });
+    expect(index.items[3]).toMatchObject({
+      suggestionKind: "substitution",
+      originalText: "rough",
+      replacementText: "specific",
+    });
+  });
+
+  it("preserves literal CriticMarkup inside inline code and fenced code blocks", () => {
+    const index = extractRoughdraftReviewIndex(
+      [
+        "```md",
+        '{>>not a comment<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}',
+        "```",
+        'Literal `{++not a suggestion++}{id="s1" by="AI" at="2026-04-28T12:01:00.000Z"}` text.',
+      ].join("\n"),
+    );
+
+    expect(index.items).toEqual([]);
+    expect(index.summary).toMatchObject({
+      comments: 0,
+      replies: 0,
+      suggestions: 0,
+      unresolved: 0,
+    });
+  });
+});
+
+describe("RFM mutation helpers", () => {
+  it("appends a reply without rewriting unrelated Markdown", () => {
+    const markdown =
+      '# Plan\n\nKeep {==this claim==}{>>Needs proof<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"} as written.\n';
+
+    const updated = appendRoughdraftReply(markdown, {
+      parentId: "c1",
+      id: "c2",
+      author: "AI",
+      at: "2026-04-28T12:10:00.000Z",
+      message: "Added a citation in the next paragraph.",
+    });
+
+    expect(updated).toBe(
+      '# Plan\n\nKeep {==this claim==}{>>Needs proof<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}{>>Added a citation in the next paragraph.<<}{id="c2" by="AI" at="2026-04-28T12:10:00.000Z" re="c1"} as written.\n',
+    );
+  });
+
+  it("rejects reply text that would close CriticMarkup early", () => {
+    const markdown =
+      '{>>Needs proof<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}\n';
+
+    expect(() =>
+      appendRoughdraftReply(markdown, {
+        parentId: "c1",
+        id: "c2",
+        author: "AI",
+        at: "2026-04-28T12:10:00.000Z",
+        message: "This closes early <<} and corrupts the thread.",
+      }),
+    ).toThrow(/CriticMarkup close delimiter/);
+  });
+
+  it("marks a target resolved without changing unrelated markup", () => {
+    const markdown =
+      'Add {++one example++}{id="s1" by="AI" at="2026-04-28T12:05:00.000Z"} and keep {>>open question<<}{id="c1" by="user" at="2026-04-28T12:06:00.000Z"}.\n';
+
+    const updated = markRoughdraftResolved(markdown, {
+      targetId: "s1",
+      summary: "Accepted in draft.",
+    });
+
+    expect(updated).toBe(
+      'Add {++one example++}{id="s1" by="AI" at="2026-04-28T12:05:00.000Z" status="resolved" resolved="Accepted in draft."} and keep {>>open question<<}{id="c1" by="user" at="2026-04-28T12:06:00.000Z"}.\n',
+    );
   });
 });

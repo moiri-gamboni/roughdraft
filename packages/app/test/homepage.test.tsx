@@ -337,6 +337,9 @@ describe("Homepage", () => {
     expect(container.textContent).toContain("Live Preview");
     expect(container.textContent).toContain("This draft only lives in memory.");
     expect(container.textContent).toContain("Select this sentence");
+    expect(container.textContent).not.toContain("I'm done");
+    expect(container.textContent).not.toContain("Review ready");
+    expect(container.textContent).not.toContain("Copy prompt");
     expect(setItem).not.toHaveBeenCalled();
   });
 });

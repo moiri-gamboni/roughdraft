@@ -7,10 +7,18 @@ import {
   type DocumentEditorViewMode,
 } from "../src/app-navigation";
 import { DocumentWorkspace } from "../src/DocumentWorkspace";
-import type { StorageBackend, Page } from "../src/storage";
+import type {
+  CompleteReviewResult,
+  Page,
+  StorageBackend,
+} from "../src/storage";
 
-function createBackend(): StorageBackend {
-  return {
+function createBackend({
+  watcherCount,
+}: {
+  watcherCount?: number;
+} = {}): StorageBackend {
+  const backend: StorageBackend = {
     info: {
       kind: "local-storage",
       label: "Test backend",
@@ -35,6 +43,15 @@ function createBackend(): StorageBackend {
     },
     async openProject() {},
   };
+
+  if (watcherCount !== undefined) {
+    backend.getReviewWatchStatus = async () => ({
+      watching: watcherCount > 0,
+      watcherCount,
+    });
+  }
+
+  return backend;
 }
 
 function createPage(content = "Hello world"): Page {
@@ -147,6 +164,13 @@ function setupDomMocks() {
   window.scrollBy = vi.fn();
 }
 
+async function click(element: Element) {
+  await act(async () => {
+    element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
 describe("view mode toggle uses client-side state (issue 1 fix)", () => {
   afterEach(() => {
     window.history.replaceState(null, "", "/");
@@ -225,6 +249,7 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
           onReloadDocumentFromDisk={() => {}}
           onKeepEditingWithoutAutosave={() => {}}
           onOverwriteDocumentOnDisk={() => {}}
+          onCompleteReview={async () => ({ delivered: false })}
           backend={createBackend()}
         />,
       );
@@ -288,6 +313,7 @@ describe("interaction mode preserved across view toggle (issue 3 fix)", () => {
             onReloadDocumentFromDisk={() => {}}
             onKeepEditingWithoutAutosave={() => {}}
             onOverwriteDocumentOnDisk={() => {}}
+            onCompleteReview={async () => ({ delivered: false })}
             backend={createBackend()}
           />,
         );
@@ -306,5 +332,194 @@ describe("interaction mode preserved across view toggle (issue 3 fix)", () => {
     expect(
       container.querySelector('[aria-label="Document mode"]')?.textContent,
     ).toContain("editing");
+  });
+});
+
+describe("review handoff watcher affordance", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    setupDomMocks();
+    (
+      globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  async function renderWorkspace({
+    getWatcherCount,
+    onCompleteReview = async () => ({ delivered: false }),
+  }: {
+    getWatcherCount: () => number;
+    onCompleteReview?: () => Promise<CompleteReviewResult>;
+  }) {
+    await act(async () => {
+      root.render(
+        <DocumentWorkspace
+          documentPage={createPage()}
+          activeDocumentPath="test.md"
+          documentFilenameLabel="test.md"
+          documentEditorViewMode="rich-text"
+          onDocumentEditorViewModeChange={() => {}}
+          onSaveDocument={async () => {}}
+          onDocumentSaveStateChange={() => {}}
+          onDocumentDirtyStateChange={() => {}}
+          onDocumentLocalContentChange={() => {}}
+          documentDiskChangeState="clean"
+          documentForceResetKey={null}
+          onReloadDocumentFromDisk={() => {}}
+          onKeepEditingWithoutAutosave={() => {}}
+          onOverwriteDocumentOnDisk={() => {}}
+          onCompleteReview={onCompleteReview}
+          backend={createBackend({ watcherCount: getWatcherCount() })}
+        />,
+      );
+      await Promise.resolve();
+    });
+  }
+
+  it("hides the done reviewing button when no agent is watching", async () => {
+    const onCompleteReview = vi
+      .fn<() => Promise<CompleteReviewResult>>()
+      .mockResolvedValue({ delivered: false });
+
+    await renderWorkspace({ getWatcherCount: () => 0, onCompleteReview });
+
+    expect(container.textContent).not.toContain("I'm done");
+    expect(container.textContent).not.toContain("Review ready");
+    expect(container.textContent).not.toContain("Copy prompt");
+    expect(onCompleteReview).not.toHaveBeenCalled();
+  });
+
+  it("shows the done reviewing button only for an active watcher", async () => {
+    const onCompleteReview = vi
+      .fn<() => Promise<CompleteReviewResult>>()
+      .mockResolvedValue({ delivered: true });
+
+    await renderWorkspace({ getWatcherCount: () => 1, onCompleteReview });
+
+    const doneReviewingButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("I'm done"),
+    );
+    expect(doneReviewingButton).toBeDefined();
+    expect(container.textContent).toContain("Agent watching");
+
+    if (!doneReviewingButton) {
+      throw new Error("I'm done button not found");
+    }
+    await click(doneReviewingButton);
+
+    expect(onCompleteReview).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("Sent");
+    expect(container.textContent).not.toContain("Agent notified");
+    expect(container.textContent).not.toContain("Review ready");
+    expect(container.textContent).not.toContain("Copy prompt");
+  });
+
+  it("shows visible feedback when the watcher disappears before handoff delivery", async () => {
+    const onCompleteReview = vi
+      .fn<() => Promise<CompleteReviewResult>>()
+      .mockResolvedValue({ delivered: false });
+
+    await renderWorkspace({ getWatcherCount: () => 1, onCompleteReview });
+
+    const doneReviewingButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("I'm done"),
+    );
+    if (!doneReviewingButton) {
+      throw new Error("I'm done button not found");
+    }
+    await click(doneReviewingButton);
+
+    expect(onCompleteReview).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("Not sent");
+    expect(container.textContent).not.toContain("I'm done");
+  });
+
+  it("keeps visible sent feedback after the watcher receives the event", async () => {
+    let watcherCount = 1;
+    const onCompleteReview = vi
+      .fn<() => Promise<CompleteReviewResult>>()
+      .mockImplementation(async () => {
+        watcherCount = 0;
+        return { delivered: true };
+      });
+
+    await renderWorkspace({
+      getWatcherCount: () => watcherCount,
+      onCompleteReview,
+    });
+
+    const doneReviewingButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("I'm done"),
+    );
+    if (!doneReviewingButton) {
+      throw new Error("I'm done button not found");
+    }
+
+    await click(doneReviewingButton);
+    await renderWorkspace({
+      getWatcherCount: () => watcherCount,
+      onCompleteReview,
+    });
+
+    expect(onCompleteReview).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("Sent");
+    expect(container.textContent).not.toContain("Agent notified");
+    expect(container.textContent).not.toContain("I'm done");
+  });
+
+  it("lets a new watcher start another handoff after sent feedback", async () => {
+    let watcherCount = 1;
+    const onCompleteReview = vi
+      .fn<() => Promise<CompleteReviewResult>>()
+      .mockImplementation(async () => {
+        watcherCount = 0;
+        return { delivered: true };
+      });
+
+    await renderWorkspace({
+      getWatcherCount: () => watcherCount,
+      onCompleteReview,
+    });
+
+    const doneReviewingButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("I'm done"),
+    );
+    if (!doneReviewingButton) {
+      throw new Error("I'm done button not found");
+    }
+
+    await click(doneReviewingButton);
+    await renderWorkspace({
+      getWatcherCount: () => watcherCount,
+      onCompleteReview,
+    });
+
+    expect(container.textContent).toContain("Sent");
+    expect(container.textContent).not.toContain("I'm done");
+
+    watcherCount = 1;
+    await renderWorkspace({
+      getWatcherCount: () => watcherCount,
+      onCompleteReview,
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("I'm done");
+    expect(container.textContent).not.toContain("Sent");
   });
 });

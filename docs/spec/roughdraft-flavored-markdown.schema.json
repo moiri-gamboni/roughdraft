@@ -103,6 +103,12 @@
         "targetSuggestionId": {
           "$ref": "#/$defs/id"
         },
+        "status": {
+          "enum": ["resolved"]
+        },
+        "resolved": {
+          "type": "string"
+        },
         "metadata": {
           "$ref": "#/$defs/metadata"
         }
@@ -143,6 +149,12 @@
             "$ref": "#/$defs/id"
           },
           "uniqueItems": true
+        },
+        "status": {
+          "enum": ["resolved"]
+        },
+        "resolved": {
+          "type": "string"
         },
         "metadata": {
           "$ref": "#/$defs/metadata"

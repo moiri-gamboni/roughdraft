@@ -82,7 +82,23 @@ That makes an agent-friendly workflow possible:
   
 4. You read, edit, leave comments, and suggest changes.
   
-5. You tell the AI you are done, and it can respond to your comments or revise the document.
+5. You click **Done Reviewing** in Roughdraft, and the AI can respond to your comments or revise the document.
+
+Agents can watch that handoff directly:
+
+```bash
+roughdraft open ./path/to/my-essay/draft.md --json
+```
+
+`roughdraft open` starts or reuses the local server, opens the document, registers a fresh watcher, blocks until the next `review.completed` event, then prints event JSON with the document path, file version, and feedback counts. By default there is no watch timeout; pass `--timeout <seconds>` when you want one. Use `--no-watch` when you only want to open the document and return immediately. If no watcher is active when you click **Done Reviewing**, Roughdraft shows a fallback prompt you can copy into the agent.
+
+Experimental MCP clients can start the stdio server with:
+
+```bash
+roughdraft mcp
+```
+
+The MCP server exposes tools to read the review index, list pending feedback, watch review events, append replies, and mark items resolved. CriticMarkup in the Markdown file remains the durable source of truth.
   
 ## Local development
 ```bash
@@ -162,10 +178,12 @@ roughdraft <path>
 Commands:
 
 ```text
-open <path>        Open one Markdown file, starting the server if needed
+open <path>        Open one Markdown file and wait for Done Reviewing
 start              Start or reuse the background server
 status             Show server status
 stop               Stop the managed background server
+watch <path>       Wait for a Done Reviewing event
+mcp                Start the experimental stdio MCP server
 doctor [path]      Diagnose setup or validate Markdown
 help agent         Print the agent setup prompt
 help criticmarkup  Show CriticMarkup examples
@@ -188,9 +206,11 @@ Useful command flags:
 roughdraft open <path> --no-open
 roughdraft open <path> --print-url
 roughdraft open <path> --json
+roughdraft open <path> --no-watch
 roughdraft start --port <port>
 roughdraft status --json
 roughdraft stop --all
+roughdraft watch ./draft.md --json
 roughdraft doctor --json
 roughdraft doctor ./draft.md
 roughdraft doctor ./draft.md --json

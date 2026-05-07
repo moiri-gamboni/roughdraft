@@ -230,7 +230,10 @@ describe("cli", () => {
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
 
-    const exitCode = await runCli(["open", documentPath], test.deps);
+    const exitCode = await runCli(
+      ["open", documentPath, "--no-watch"],
+      test.deps,
+    );
     const persisted = JSON.parse(
       fs.readFileSync(getServerStateFilePath(test.deps.env), "utf8"),
     ) as { port: number };
@@ -248,7 +251,7 @@ describe("cli", () => {
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
 
-    const exitCode = await runCli(["open", documentPath], {
+    const exitCode = await runCli(["open", documentPath, "--no-watch"], {
       ...test.deps,
       resolveUpdateStatus: async () => ({
         packageName: "roughdraft",
@@ -270,16 +273,19 @@ describe("cli", () => {
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
 
-    const exitCode = await runCli(["open", documentPath, "--json"], {
-      ...test.deps,
-      resolveUpdateStatus: async () => ({
-        packageName: "roughdraft",
-        currentVersion: "0.1.1",
-        latestVersion: "0.1.3",
-        updateAvailable: true,
-        updateCommand: "npm i -g roughdraft@latest",
-      }),
-    });
+    const exitCode = await runCli(
+      ["open", documentPath, "--no-watch", "--json"],
+      {
+        ...test.deps,
+        resolveUpdateStatus: async () => ({
+          packageName: "roughdraft",
+          currentVersion: "0.1.1",
+          latestVersion: "0.1.3",
+          updateAvailable: true,
+          updateCommand: "npm i -g roughdraft@latest",
+        }),
+      },
+    );
     const payload = parseOnlyJsonLog<{ opened: boolean }>(test.logs);
 
     expect(exitCode).toBe(0);
@@ -291,7 +297,7 @@ describe("cli", () => {
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
 
-    const exitCode = await runCli(["open", documentPath], {
+    const exitCode = await runCli(["open", documentPath, "--no-watch"], {
       ...test.deps,
       resolveUpdateStatus: async () => {
         throw new Error("registry unavailable");
@@ -364,7 +370,7 @@ describe("cli", () => {
       error: () => {},
     });
 
-    const exitCode = await runCli(["open", documentPath], deps);
+    const exitCode = await runCli(["open", documentPath, "--no-watch"], deps);
 
     expect(exitCode).toBe(0);
     expect(postedOpenRequest).toEqual({
@@ -397,12 +403,15 @@ describe("cli", () => {
     expect(test.getLastOpenedUrl()).toBeNull();
   });
 
-  it("emits JSON from open --json without scraping human prose", async () => {
+  it("emits JSON from open --no-watch --json without scraping human prose", async () => {
     const test = createTestDependencies();
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
 
-    const exitCode = await runCli(["open", documentPath, "--json"], test.deps);
+    const exitCode = await runCli(
+      ["open", documentPath, "--no-watch", "--json"],
+      test.deps,
+    );
     const persisted = JSON.parse(
       fs.readFileSync(getServerStateFilePath(test.deps.env), "utf8"),
     ) as { port: number };
@@ -500,13 +509,112 @@ describe("cli", () => {
       error: () => {},
     });
 
-    const exitCode = await runCli(["open", documentPath], deps);
+    const exitCode = await runCli(["open", documentPath, "--no-watch"], deps);
 
     expect(exitCode).toBe(0);
     expect(spawnCount).toBe(0);
     expect(lastOpenedUrl).toBe(
       expectedOpenUrl("http://localhost:5173", documentPath),
     );
+  });
+
+  it("posts the default open watcher to the dev API behind the live frontend", async () => {
+    const documentPath = path.join(projectDir, "draft.md");
+    fs.writeFileSync(documentPath, "# Draft\n");
+    fs.writeFileSync(
+      devFrontendStateFile,
+      `${JSON.stringify(
+        {
+          apiPort: 3000,
+          appPort: 5173,
+          mode: "full-dev",
+          repoRoot: serverRoot,
+          startedAt: new Date().toISOString(),
+          url: "http://localhost:5173",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    let lastOpenedUrl: string | null = null;
+    let watchUrl: string | null = null;
+    let spawnCount = 0;
+
+    const deps = createCliDependencies({
+      env: {
+        ...process.env,
+        ROUGHDRAFT_STATE_DIR: stateDir,
+        ROUGHDRAFT_DEV_FRONTEND_STATE_FILE: devFrontendStateFile,
+      },
+      cwd: projectDir,
+      fetchImpl: async (input, _init) => {
+        const url =
+          input instanceof URL
+            ? input
+            : new URL(
+                typeof input === "string" ? input : input.url,
+                "http://localhost",
+              );
+
+        if (url.pathname === "/api/status" && url.port === "5173") {
+          return new Response(
+            JSON.stringify({
+              backend: "local-files",
+              port: 3000,
+              projectDir,
+              serverRoot,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        if (url.pathname === "/api/review-events/watch") {
+          watchUrl = url.toString();
+          return new Response(
+            JSON.stringify({
+              events: [{ documentPath, type: "review.completed" }],
+              timedOut: false,
+              nextSequence: 2,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        throw new Error(`Unexpected request: ${url.toString()}`);
+      },
+      spawnServerProcess: async () => {
+        spawnCount += 1;
+        throw new Error("should not spawn");
+      },
+      isProcessRunning: () => false,
+      stopProcess: async () => {},
+      openUrl: (url) => {
+        lastOpenedUrl = url;
+        return "disabled";
+      },
+      log: () => {},
+      error: () => {},
+      resolveUpdateStatus: noUpdateStatus,
+    });
+
+    const exitCode = await runCli(
+      ["open", documentPath, "--json", "--batch-window", "0"],
+      deps,
+    );
+
+    expect(exitCode).toBe(0);
+    expect(spawnCount).toBe(0);
+    expect(lastOpenedUrl).toBe(
+      expectedOpenUrl("http://localhost:5173", documentPath),
+    );
+    expect(watchUrl).toBe("http://localhost:3000/api/review-events/watch");
   });
 
   it("falls back to the api server URL when the dev frontend hint is stale", async () => {
@@ -529,7 +637,10 @@ describe("cli", () => {
     );
 
     const test = createTestDependencies();
-    const exitCode = await runCli(["open", documentPath], test.deps);
+    const exitCode = await runCli(
+      ["open", documentPath, "--no-watch"],
+      test.deps,
+    );
     const persisted = JSON.parse(
       fs.readFileSync(getServerStateFilePath(test.deps.env), "utf8"),
     ) as { port: number };
@@ -602,7 +713,7 @@ describe("cli", () => {
       error: () => {},
     });
 
-    const exitCode = await runCli(["open", documentPath], deps);
+    const exitCode = await runCli(["open", documentPath, "--no-watch"], deps);
 
     expect(exitCode).toBe(0);
     expect(spawnCount).toBe(0);
@@ -678,6 +789,150 @@ describe("cli", () => {
       startedAt: result.server.startedAt,
       stateFile: getServerStateFilePath(test.deps.env),
       managed: true,
+    });
+  });
+
+  it("prints watch and mcp in top-level help", async () => {
+    const test = createTestDependencies();
+
+    const exitCode = await runCli(["--help"], test.deps);
+
+    expect(exitCode).toBe(0);
+    expect(test.logs.join("\n")).toContain("watch <path>");
+    expect(test.logs.join("\n")).toContain("mcp");
+  });
+
+  it("waits for a review completed event from watch --json", async () => {
+    const test = createTestDependencies();
+    const documentPath = path.join(projectDir, "draft.md");
+    fs.writeFileSync(documentPath, "# Draft\n");
+
+    const watchPromise = runCli(
+      [
+        "watch",
+        documentPath,
+        "--json",
+        "--timeout",
+        "2",
+        "--batch-window",
+        "0",
+      ],
+      test.deps,
+    );
+
+    let persisted: { port: number } | null = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const stateFile = getServerStateFilePath(test.deps.env);
+      if (fs.existsSync(stateFile)) {
+        persisted = JSON.parse(fs.readFileSync(stateFile, "utf8")) as {
+          port: number;
+        };
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(persisted).not.toBeNull();
+    await fetch(`http://localhost:${persisted?.port}/api/review-events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath: projectDir, path: "draft.md" }),
+    });
+
+    const exitCode = await watchPromise;
+    const payload = parseOnlyJsonLog<{
+      timedOut: boolean;
+      events: Array<{ documentPath: string; type: string }>;
+    }>(test.logs);
+
+    expect(exitCode).toBe(0);
+    expect(payload.timedOut).toBe(false);
+    expect(payload.events).toHaveLength(1);
+    expect(payload.events[0]).toMatchObject({
+      documentPath,
+      type: "review.completed",
+    });
+  });
+
+  it("opens a document and waits for the next review event by default from open --json", async () => {
+    const test = createTestDependencies();
+    const documentPath = path.join(projectDir, "draft.md");
+    fs.writeFileSync(documentPath, "# Draft\n");
+    let watchRequestBody: {
+      timeoutSeconds?: number;
+      batchWindowSeconds?: number;
+    } | null = null;
+    const deps = {
+      ...test.deps,
+      fetchImpl: async (input: Parameters<typeof fetch>[0], init) => {
+        const url =
+          input instanceof URL
+            ? input
+            : new URL(
+                typeof input === "string" ? input : input.url,
+                "http://localhost",
+              );
+        if (
+          url.pathname === "/api/review-events/watch" &&
+          typeof init?.body === "string"
+        ) {
+          watchRequestBody = JSON.parse(init.body) as {
+            timeoutSeconds?: number;
+            batchWindowSeconds?: number;
+          };
+        }
+        return test.deps.fetchImpl(input, init);
+      },
+    };
+
+    const watchPromise = runCli(
+      ["open", documentPath, "--json", "--batch-window", "0"],
+      deps,
+    );
+
+    let persisted: { port: number } | null = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const stateFile = getServerStateFilePath(test.deps.env);
+      if (fs.existsSync(stateFile)) {
+        persisted = JSON.parse(fs.readFileSync(stateFile, "utf8")) as {
+          port: number;
+        };
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(persisted).not.toBeNull();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (watchRequestBody) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(watchRequestBody).toMatchObject({
+      batchWindowSeconds: 0,
+    });
+    expect(watchRequestBody).not.toHaveProperty("timeoutSeconds");
+    await fetch(`http://localhost:${persisted?.port}/api/review-events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath: projectDir, path: "draft.md" }),
+    });
+
+    const exitCode = await watchPromise;
+    const payload = parseOnlyJsonLog<{
+      timedOut: boolean;
+      events: Array<{ documentPath: string; type: string }>;
+    }>(test.logs);
+
+    expect(exitCode).toBe(0);
+    expect(test.getLastOpenedUrl()).toContain(encodeURIComponent(documentPath));
+    expect(payload).toMatchObject({
+      timedOut: false,
+      events: [
+        {
+          documentPath,
+          type: "review.completed",
+        },
+      ],
     });
   });
 
@@ -766,7 +1021,10 @@ describe("cli", () => {
     fs.writeFileSync(documentPath, "# Draft\n");
 
     const statusExitCode = await runCli(["status"], deps);
-    const openExitCode = await runCli(["open", documentPath], deps);
+    const openExitCode = await runCli(
+      ["open", documentPath, "--no-watch"],
+      deps,
+    );
 
     expect(statusExitCode).toBe(0);
     expect(openExitCode).toBe(0);
@@ -1031,7 +1289,13 @@ describe("cli", () => {
 
     expect(exitCode).toBe(0);
     expect(test.logs).toContain(
-      "  roughdraft open <path> [--no-open] [--print-url] [--port <port>]",
+      "  roughdraft open <path> [--no-open] [--no-watch] [--print-url] [--port <port>]",
+    );
+    expect(test.logs).toContain(
+      "  --no-watch           Open the file without waiting",
+    );
+    expect(test.logs).toContain(
+      "  --timeout <seconds>  Maximum watch time; omitted means no timeout",
     );
   });
 

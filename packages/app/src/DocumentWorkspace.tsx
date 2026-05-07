@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   Check,
+  CheckCheck,
   CodeXml,
   Eye,
   Loader2,
@@ -12,6 +13,11 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DocumentEditorViewMode } from "./app-navigation";
 import { Button } from "./components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "./components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -80,6 +86,7 @@ interface DocumentWorkspaceProps {
   onReloadDocumentFromDisk: () => void | Promise<void>;
   onKeepEditingWithoutAutosave: () => void;
   onOverwriteDocumentOnDisk: () => void | Promise<void>;
+  onCompleteReview: () => Promise<{ delivered: boolean }>;
   backend: StorageBackend | null;
 }
 
@@ -98,12 +105,18 @@ export function DocumentWorkspace({
   onReloadDocumentFromDisk,
   onKeepEditingWithoutAutosave,
   onOverwriteDocumentOnDisk,
+  onCompleteReview,
   backend,
 }: DocumentWorkspaceProps) {
   const [documentInteractionMode, setDocumentInteractionMode] =
     useState<DocumentInteractionMode>("editing");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [showSaved, setShowSaved] = useState(false);
+  const [reviewHandoffState, setReviewHandoffState] = useState<
+    "idle" | "notifying" | "notified" | "undelivered" | "error"
+  >("idle");
+  const [reviewWatcherCount, setReviewWatcherCount] = useState(0);
+  const sawNoWatcherAfterNotifiedRef = useRef(false);
   const wasSavingRef = useRef(false);
 
   const handleSaveStateChange = useCallback(
@@ -134,7 +147,82 @@ export function DocumentWorkspace({
       !!documentPage?.content &&
         criticMarkdownHasReviewRail(documentPage.content),
     );
-  }, [documentPage]);
+  }, [documentPage?.content]);
+
+  useEffect(() => {
+    const documentIdentity = `${activeDocumentPath ?? ""}:${documentPage?.id ?? ""}`;
+    if (!documentIdentity) return;
+    setReviewHandoffState("idle");
+  }, [activeDocumentPath, documentPage?.id]);
+
+  useEffect(() => {
+    if (!backend?.getReviewWatchStatus || !activeDocumentPath) {
+      setReviewWatcherCount(0);
+      return;
+    }
+
+    let cancelled = false;
+    const refreshWatchStatus = async () => {
+      try {
+        const status = await backend.getReviewWatchStatus?.(activeDocumentPath);
+        if (!cancelled) {
+          setReviewWatcherCount(status?.watcherCount ?? 0);
+        }
+      } catch {
+        if (!cancelled) {
+          setReviewWatcherCount(0);
+        }
+      }
+    };
+
+    void refreshWatchStatus();
+    const interval = window.setInterval(refreshWatchStatus, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [activeDocumentPath, backend]);
+
+  useEffect(() => {
+    if (reviewHandoffState === "undelivered" && reviewWatcherCount > 0) {
+      setReviewHandoffState("idle");
+      return;
+    }
+
+    if (reviewHandoffState !== "notified") {
+      sawNoWatcherAfterNotifiedRef.current = false;
+      return;
+    }
+
+    if (reviewWatcherCount === 0) {
+      sawNoWatcherAfterNotifiedRef.current = true;
+      return;
+    }
+
+    if (sawNoWatcherAfterNotifiedRef.current) {
+      sawNoWatcherAfterNotifiedRef.current = false;
+      setReviewHandoffState("idle");
+    }
+  }, [reviewHandoffState, reviewWatcherCount]);
+
+  const handleCompleteReview = useCallback(async () => {
+    if (!activeDocumentPath || reviewHandoffState === "notifying") return;
+
+    setReviewHandoffState("notifying");
+    try {
+      const result = await onCompleteReview();
+      if (result.delivered) {
+        setReviewWatcherCount(0);
+        setReviewHandoffState("notified");
+      } else {
+        setReviewWatcherCount(0);
+        setReviewHandoffState("undelivered");
+      }
+    } catch (error) {
+      console.error("Failed to complete review:", error);
+      setReviewHandoffState("error");
+    }
+  }, [activeDocumentPath, onCompleteReview, reviewHandoffState]);
 
   const editorViewModeToggleLabel =
     documentEditorViewMode === "rich-text"
@@ -149,6 +237,35 @@ export function DocumentWorkspace({
     documentDiskChangeState === "clean"
       ? null
       : conflictNoticeCopy[documentDiskChangeState];
+  const showReviewHandoffButton =
+    !!activeDocumentPath &&
+    (reviewWatcherCount > 0 || reviewHandoffState !== "idle");
+  const reviewHandoffButtonLabel =
+    reviewHandoffState === "notifying"
+      ? "Sending"
+      : reviewHandoffState === "notified"
+        ? "Sent"
+        : reviewHandoffState === "error" || reviewHandoffState === "undelivered"
+          ? "Not sent"
+          : "I'm done";
+  const ReviewHandoffButtonIcon =
+    reviewHandoffState === "notifying"
+      ? Loader2
+      : reviewHandoffState === "error" || reviewHandoffState === "undelivered"
+        ? AlertTriangle
+        : CheckCheck;
+  const reviewHandoffStatusTitle =
+    reviewHandoffState === "undelivered"
+      ? "No agent is watching now"
+      : reviewHandoffState === "error"
+        ? "Could not notify agent"
+        : "Your agent is now working";
+  const reviewHandoffStatusBody =
+    reviewHandoffState === "undelivered"
+      ? "The handoff was not delivered because the watcher is no longer connected."
+      : reviewHandoffState === "error"
+        ? "Roughdraft could not send the handoff. Check that the local server is still running."
+        : "It will take the appropriate next action, including replying to comments, questions, and suggestions, and/or directly editing the doc.";
 
   return (
     <div
@@ -158,6 +275,57 @@ export function DocumentWorkspace({
       )}
     >
       <RemoteSessionBanner backend={backend} />
+      {showReviewHandoffButton ? (
+        <div className="fixed top-3 right-3 z-[60]">
+          <Popover>
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  size="lg"
+                  className="h-9 rounded-[7px] bg-black px-3 text-sm font-bold text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] hover:bg-black/85 focus-visible:ring-black/25 dark:bg-black dark:text-white dark:hover:bg-black/85 dark:focus-visible:ring-white/30"
+                  disabled={
+                    saveState === "saving" ||
+                    reviewHandoffState !== "idle" ||
+                    documentDiskChangeState !== "clean"
+                  }
+                  onClick={() => void handleCompleteReview()}
+                >
+                  <ReviewHandoffButtonIcon
+                    className={cn(
+                      "size-4",
+                      reviewHandoffState === "notifying" && "animate-spin",
+                    )}
+                  />
+                  {reviewHandoffButtonLabel}
+                </Button>
+              }
+            />
+            <PopoverContent aria-label="Review handoff status">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-black text-white dark:bg-white dark:text-black">
+                  {reviewHandoffState === "notifying" ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : reviewHandoffState === "error" ||
+                    reviewHandoffState === "undelivered" ? (
+                    <AlertTriangle className="size-4" />
+                  ) : (
+                    <CheckCheck className="size-4" />
+                  )}
+                </span>
+                <div>
+                  <div className="text-sm font-semibold text-stone-950 dark:text-slate-50">
+                    {reviewHandoffStatusTitle}
+                  </div>
+                  <p className="mt-1 text-sm leading-6 text-stone-600 dark:text-slate-300">
+                    {reviewHandoffStatusBody}
+                  </p>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
+      ) : null}
       {conflictNotice ? (
         <div
           role="status"
@@ -287,7 +455,37 @@ export function DocumentWorkspace({
                     Saved
                   </span>
                 ) : null}
-                <div className="ml-auto inline-flex h-[1.25rem] shrink-0 items-center">
+                {activeDocumentPath ? (
+                  <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                    {reviewHandoffState !== "notified" &&
+                    (reviewHandoffState !== "idle" ||
+                      reviewWatcherCount > 0) ? (
+                      <span
+                        role="status"
+                        aria-label="Review handoff"
+                        className="inline-flex shrink-0 items-center gap-1 font-mono text-[0.6rem] tracking-[0.01em] text-stone-400 dark:text-stone-500"
+                      >
+                        {reviewHandoffState === "notifying" ? (
+                          <Loader2 className="size-[0.6rem] animate-spin" />
+                        ) : reviewHandoffState === "error" ||
+                          reviewHandoffState === "undelivered" ? (
+                          <AlertTriangle className="size-[0.6rem]" />
+                        ) : reviewWatcherCount > 0 ? (
+                          <CheckCheck className="size-[0.6rem]" />
+                        ) : (
+                          <CheckCheck className="size-[0.6rem]" />
+                        )}
+                        {reviewHandoffState === "notifying"
+                          ? "Notifying"
+                          : reviewHandoffState === "error" ||
+                              reviewHandoffState === "undelivered"
+                            ? "Review not sent"
+                            : "Agent watching"}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="inline-flex h-[1.25rem] shrink-0 items-center">
                   <Select<DocumentInteractionMode>
                     value={documentInteractionMode}
                     onValueChange={(value) => {

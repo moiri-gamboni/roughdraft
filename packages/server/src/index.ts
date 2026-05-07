@@ -5,12 +5,14 @@ import { createServer as createHttpServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
+import { extractRoughdraftReviewIndex } from "@roughdraft/rfm";
 import {
   ROUGHDRAFT_DEFAULT_PORT,
   ROUGHDRAFT_PUBLIC_HOST,
   hasNonLoopbackHost,
   resolveBindHosts,
 } from "./network.js";
+import { ReviewEventQueue } from "./review-events.js";
 import { resolveUpdateStatus } from "./update-status.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -393,6 +395,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       : null;
   const app = express();
   const openRequestClients = new Set<OpenRequestClient>();
+  const reviewEvents = new ReviewEventQueue();
   const remoteSessions = new Map<string, RemoteSession>();
 
   function isAuthorizedRemoteDocumentRequest(req: Request): boolean {
@@ -473,6 +476,34 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     }
 
     return resolvedProjectDir;
+  }
+
+  function markdownPathFromRequest(
+    req: Request,
+    res: Response,
+  ): { relativePath: string; absolutePath: string; projectDir: string } | null {
+    const projectDir = projectDirFromRequest(req, res);
+    if (!projectDir) return null;
+
+    const relativePath =
+      typeof req.query.path === "string"
+        ? req.query.path
+        : typeof req.body?.path === "string"
+          ? req.body.path
+          : "";
+    const absolutePath = ensureProjectPath(projectDir, relativePath);
+
+    if (!absolutePath?.toLowerCase().endsWith(".md")) {
+      res.status(404).json({ error: "Markdown file not found" });
+      return null;
+    }
+
+    if (!fs.existsSync(absolutePath)) {
+      res.status(404).json({ error: "Markdown file not found" });
+      return null;
+    }
+
+    return { relativePath, absolutePath, projectDir };
   }
 
   // --- API routes ---
@@ -578,6 +609,80 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
 
     req.on("close", () => {
       fs.unwatchFile(absolutePath, listener);
+    });
+  });
+
+  app.get("/api/review-index", (req, res) => {
+    const target = markdownPathFromRequest(req, res);
+    if (!target) return;
+
+    const markdown = fs.readFileSync(target.absolutePath, "utf-8");
+    res.json({
+      documentPath: target.absolutePath,
+      projectPath: target.projectDir,
+      relativePath: target.relativePath,
+      fileVersion: fileVersionFromFile(target.absolutePath),
+      ...extractRoughdraftReviewIndex(markdown),
+    });
+  });
+
+  app.post("/api/review-events", (req, res) => {
+    const target = markdownPathFromRequest(req, res);
+    if (!target) return;
+
+    const markdown = fs.readFileSync(target.absolutePath, "utf-8");
+    const index = extractRoughdraftReviewIndex(markdown);
+    const result = reviewEvents.emit({
+      documentPath: target.absolutePath,
+      projectPath: target.projectDir,
+      relativePath: target.relativePath,
+      version: fileVersionFromFile(target.absolutePath),
+      summary: index.summary,
+    });
+
+    res.status(201).json(result);
+  });
+
+  app.post("/api/review-events/watch", async (req, res) => {
+    const target = markdownPathFromRequest(req, res);
+    if (!target) return;
+
+    const fromNow = req.body?.fromNow !== false;
+    const timeoutSeconds =
+      typeof req.body?.timeoutSeconds === "number"
+        ? req.body.timeoutSeconds
+        : undefined;
+    const batchWindowSeconds =
+      typeof req.body?.batchWindowSeconds === "number"
+        ? req.body.batchWindowSeconds
+        : 0.25;
+    const afterSequence =
+      typeof req.body?.afterSequence === "number" ? req.body.afterSequence : 0;
+
+    const result = await reviewEvents.wait({
+      documentPath: target.absolutePath,
+      afterSequence: fromNow ? reviewEvents.latestSequence() : afterSequence,
+      timeoutMs:
+        timeoutSeconds !== undefined ? timeoutSeconds * 1000 : undefined,
+      batchWindowMs: batchWindowSeconds * 1000,
+    });
+
+    res.json(result);
+  });
+
+  app.get("/api/review-events/status", (req, res) => {
+    const target = markdownPathFromRequest(req, res);
+    if (!target) return;
+
+    const watcherCount = reviewEvents.waiterCountForDocument(
+      target.absolutePath,
+    );
+    res.json({
+      documentPath: target.absolutePath,
+      projectPath: target.projectDir,
+      relativePath: target.relativePath,
+      watching: watcherCount > 0,
+      watcherCount,
     });
   });
 

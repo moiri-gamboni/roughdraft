@@ -34,6 +34,8 @@ const KNOWN_COMMANDS = [
   "start",
   "status",
   "stop",
+  "watch",
+  "mcp",
   "doctor",
   "help",
   "agent-setup",
@@ -62,6 +64,11 @@ interface DevFrontendState {
   repoRoot: string;
   startedAt: string;
   url: string;
+}
+
+interface LiveDevFrontend {
+  frontendUrl: string;
+  apiUrl: string | null;
 }
 
 export interface SpawnedServer {
@@ -134,15 +141,32 @@ interface ParsedCli {
 }
 
 interface ParsedCommandOptions {
+  all: boolean;
+  batchWindowSeconds: number;
   help: boolean;
   json: boolean;
   noOpen: boolean;
+  noWatch: boolean;
   printUrl: boolean;
-  all: boolean;
   port?: string;
+  replay: boolean;
   stateDir?: string;
   stateFile?: string;
+  timeoutSeconds?: number;
+  watch: boolean;
   positionals: string[];
+}
+
+interface ParsedWatchOptions {
+  batchWindowSeconds: number;
+  help: boolean;
+  json: boolean;
+  positionals: string[];
+  replay: boolean;
+  serverUrl?: string;
+  stateDir?: string;
+  stateFile?: string;
+  timeoutSeconds?: number;
 }
 
 const currentServerRoot = path.resolve(
@@ -237,15 +261,24 @@ function takeFlagValue(
 
 function parseCommandOptions(
   args: string[],
-  options: { allowAll?: boolean; allowOpen?: boolean; allowPort?: boolean },
+  options: {
+    allowAll?: boolean;
+    allowOpen?: boolean;
+    allowPort?: boolean;
+    allowWatch?: boolean;
+  },
 ): ParsedCommandOptions {
   const parsed: ParsedCommandOptions = {
     all: false,
+    batchWindowSeconds: 0.25,
     help: false,
     json: false,
     noOpen: false,
+    noWatch: false,
     positionals: [],
     printUrl: false,
+    replay: false,
+    watch: false,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -282,6 +315,58 @@ function parseCommandOptions(
       if (!options.allowOpen) throw new Error(`Unknown flag: ${arg}`);
       parsed.printUrl = true;
       parsed.noOpen = true;
+      continue;
+    }
+
+    if (arg === "--watch") {
+      if (!options.allowWatch) throw new Error(`Unknown flag: ${arg}`);
+      parsed.watch = true;
+      continue;
+    }
+
+    if (arg === "--no-watch") {
+      if (!options.allowWatch) throw new Error(`Unknown flag: ${arg}`);
+      parsed.noWatch = true;
+      continue;
+    }
+
+    if (arg === "--replay") {
+      if (!options.allowWatch) throw new Error(`Unknown flag: ${arg}`);
+      parsed.replay = true;
+      continue;
+    }
+
+    if (arg === "--timeout") {
+      if (!options.allowWatch) throw new Error(`Unknown flag: ${arg}`);
+      const next = takeFlagValue(args, index, arg);
+      parsed.timeoutSeconds = parsePositiveNumber(next.value, arg);
+      index = next.nextIndex;
+      continue;
+    }
+
+    if (arg.startsWith("--timeout=")) {
+      if (!options.allowWatch) throw new Error(`Unknown flag: --timeout`);
+      parsed.timeoutSeconds = parsePositiveNumber(
+        arg.slice("--timeout=".length),
+        "--timeout",
+      );
+      continue;
+    }
+
+    if (arg === "--batch-window") {
+      if (!options.allowWatch) throw new Error(`Unknown flag: ${arg}`);
+      const next = takeFlagValue(args, index, arg);
+      parsed.batchWindowSeconds = parsePositiveNumber(next.value, arg);
+      index = next.nextIndex;
+      continue;
+    }
+
+    if (arg.startsWith("--batch-window=")) {
+      if (!options.allowWatch) throw new Error(`Unknown flag: --batch-window`);
+      parsed.batchWindowSeconds = parsePositiveNumber(
+        arg.slice("--batch-window=".length),
+        "--batch-window",
+      );
       continue;
     }
 
@@ -342,6 +427,126 @@ function applyCliEnvOverrides(
     env: {
       ...deps.env,
       ...(options.port ? { ROUGHDRAFT_PORT: options.port } : {}),
+      ...(options.stateDir ? { ROUGHDRAFT_STATE_DIR: options.stateDir } : {}),
+      ...(options.stateFile
+        ? { ROUGHDRAFT_STATE_FILE: options.stateFile }
+        : {}),
+    },
+  };
+}
+
+function parseWatchOptions(args: string[]): ParsedWatchOptions {
+  const parsed: ParsedWatchOptions = {
+    batchWindowSeconds: 0.25,
+    help: false,
+    json: false,
+    positionals: [],
+    replay: false,
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--") {
+      parsed.positionals.push(...args.slice(index + 1));
+      break;
+    }
+
+    if (arg === "-h" || arg === "--help") {
+      parsed.help = true;
+      continue;
+    }
+
+    if (arg === "--json") {
+      parsed.json = true;
+      continue;
+    }
+
+    if (arg === "--replay") {
+      parsed.replay = true;
+      continue;
+    }
+
+    if (arg === "--timeout") {
+      const next = takeFlagValue(args, index, arg);
+      parsed.timeoutSeconds = parsePositiveNumber(next.value, arg);
+      index = next.nextIndex;
+      continue;
+    }
+
+    if (arg.startsWith("--timeout=")) {
+      parsed.timeoutSeconds = parsePositiveNumber(
+        arg.slice("--timeout=".length),
+        "--timeout",
+      );
+      continue;
+    }
+
+    if (arg === "--batch-window") {
+      const next = takeFlagValue(args, index, arg);
+      parsed.batchWindowSeconds = parsePositiveNumber(next.value, arg);
+      index = next.nextIndex;
+      continue;
+    }
+
+    if (arg.startsWith("--batch-window=")) {
+      parsed.batchWindowSeconds = parsePositiveNumber(
+        arg.slice("--batch-window=".length),
+        "--batch-window",
+      );
+      continue;
+    }
+
+    if (arg === "--state-file") {
+      const next = takeFlagValue(args, index, arg);
+      parsed.stateFile = next.value;
+      index = next.nextIndex;
+      continue;
+    }
+
+    if (arg.startsWith("--state-file=")) {
+      parsed.stateFile = arg.slice("--state-file=".length);
+      continue;
+    }
+
+    if (arg === "--state-dir") {
+      const next = takeFlagValue(args, index, arg);
+      parsed.stateDir = next.value;
+      index = next.nextIndex;
+      continue;
+    }
+
+    if (arg.startsWith("--state-dir=")) {
+      parsed.stateDir = arg.slice("--state-dir=".length);
+      continue;
+    }
+
+    if (arg.startsWith("-")) {
+      throw new Error(`Unknown flag: ${arg}`);
+    }
+
+    parsed.positionals.push(arg);
+  }
+
+  return parsed;
+}
+
+function parsePositiveNumber(value: string, flag: string): number {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${flag} must be a positive number.`);
+  }
+  return parsed;
+}
+
+function applyWatchEnvOverrides(
+  deps: CliDependencies,
+  options: ParsedWatchOptions,
+): CliDependencies {
+  return {
+    ...deps,
+    env: {
+      ...deps.env,
       ...(options.stateDir ? { ROUGHDRAFT_STATE_DIR: options.stateDir } : {}),
       ...(options.stateFile
         ? { ROUGHDRAFT_STATE_FILE: options.stateFile }
@@ -560,12 +765,12 @@ function printHelp(log: (message: string) => void) {
   log("  roughdraft <path>");
   log("");
   log("Commands:");
-  log(
-    "  open <path>        Open a Markdown file, starting the server if needed",
-  );
+  log("  open <path>        Open a Markdown file and wait for Done Reviewing");
   log("  start              Start or reuse the background server");
   log("  status             Show server status");
   log("  stop               Stop the managed background server");
+  log("  watch <path>       Wait for a Done Reviewing event");
+  log("  mcp                Start the experimental stdio MCP server");
   log("  doctor [path]      Diagnose setup or validate Markdown");
   log("  help agent         Print the agent setup prompt");
   log("  help criticmarkup  Show CriticMarkup examples");
@@ -581,6 +786,9 @@ function printHelp(log: (message: string) => void) {
   log("Examples:");
   log("  roughdraft open ./draft.md");
   log("  roughdraft open ./draft.md --print-url");
+  log("  roughdraft open ./draft.md --json");
+  log("  roughdraft open ./draft.md --no-watch");
+  log("  roughdraft watch ./draft.md --json");
   log("  roughdraft status --json");
   log("");
   log(`Agent setup: ${AGENT_SETUP_URL}`);
@@ -593,9 +801,13 @@ function printCommandHelp(
 ) {
   if (command === "open") {
     log("Usage:");
-    log("  roughdraft open <path> [--no-open] [--print-url] [--port <port>]");
+    log(
+      "  roughdraft open <path> [--no-open] [--no-watch] [--print-url] [--port <port>]",
+    );
     log("");
-    log("Opens one Markdown file. Starts Roughdraft if needed.");
+    log(
+      "Opens one Markdown file and waits for Done Reviewing. Starts Roughdraft if needed.",
+    );
     log("");
     log("Flags:");
     log(
@@ -604,6 +816,9 @@ function printCommandHelp(
     log(
       "  --print-url          Print only the document URL and do not open it",
     );
+    log("  --no-watch           Open the file without waiting");
+    log("  --timeout <seconds>  Maximum watch time; omitted means no timeout");
+    log("  --replay             Allow watch to return retained older events");
     log("  --json               Print machine-readable output");
     log("  --port <port>        Preferred server port");
     log("  --state-file <path>  Server state file");
@@ -671,6 +886,38 @@ function printCommandHelp(
     );
     log("  --state-file <path>  Server state file");
     log("  --state-dir <dir>    Directory containing server.json");
+    return;
+  }
+
+  if (command === "watch") {
+    log("Usage:");
+    log("  roughdraft watch <path> [--json] [--timeout <seconds>]");
+    log("");
+    log(
+      "Waits until Roughdraft receives Done Reviewing for one Markdown file.",
+    );
+    log("");
+    log("Flags:");
+    log("  --json                    Print machine-readable output");
+    log(
+      "  --timeout <seconds>       Maximum wait time; omitted means no timeout",
+    );
+    log(
+      "  --batch-window <seconds>  Small event batching window, default 0.25",
+    );
+    log(
+      "  --replay                  Return retained older events if available",
+    );
+    log("  --state-file <path>       Server state file");
+    log("  --state-dir <dir>         Directory containing server.json");
+    return;
+  }
+
+  if (command === "mcp") {
+    log("Usage:");
+    log("  roughdraft mcp");
+    log("");
+    log("Starts Roughdraft's experimental stdio MCP server.");
     return;
   }
 
@@ -1283,7 +1530,7 @@ async function waitForServerToStop(
 
 async function resolveLiveDevFrontendBaseUrl(
   deps: CliDependencies,
-): Promise<string | null> {
+): Promise<LiveDevFrontend | null> {
   const state = readDevFrontendStateFromDisk(
     getDevFrontendStateFilePath(deps.env),
   );
@@ -1342,7 +1589,13 @@ async function resolveLiveDevFrontendBaseUrl(
     frontendUrl.pathname = "/";
     frontendUrl.search = "";
     frontendUrl.hash = "";
-    return frontendUrl.toString();
+    return {
+      frontendUrl: frontendUrl.toString(),
+      apiUrl:
+        mode === "full-dev" && state.apiPort !== null
+          ? buildPublicBaseUrl(state.apiPort)
+          : null,
+    };
   } catch {
     return null;
   }
@@ -1761,6 +2014,74 @@ async function runMarkdownDoctor(
   return validation.ok ? 0 : 1;
 }
 
+async function runWatch(
+  deps: CliDependencies,
+  targetPath: string,
+  options: ParsedWatchOptions,
+  json: boolean,
+): Promise<number> {
+  const target = resolveTargetPath(targetPath);
+  let serverUrl = options.serverUrl;
+  if (!serverUrl) {
+    const result = await ensureServerRunning(deps, {
+      projectDir: target.projectDir,
+    });
+    serverUrl = result.server.url;
+  }
+  const relativePath = path.relative(target.projectDir, target.openPath);
+  const body: {
+    projectPath: string;
+    path: string;
+    timeoutSeconds?: number;
+    batchWindowSeconds: number;
+    fromNow: boolean;
+  } = {
+    projectPath: target.projectDir,
+    path: relativePath,
+    batchWindowSeconds: options.batchWindowSeconds,
+    fromNow: !options.replay,
+  };
+  if (options.timeoutSeconds !== undefined) {
+    body.timeoutSeconds = options.timeoutSeconds;
+  }
+
+  const response = await deps.fetchImpl(
+    new URL("/api/review-events/watch", serverUrl),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      ...(options.timeoutSeconds !== undefined
+        ? { signal: AbortSignal.timeout((options.timeoutSeconds + 5) * 1000) }
+        : {}),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to watch review events: ${response.status}`);
+  }
+
+  const payload = (await response.json()) as {
+    events?: unknown[];
+    timedOut?: boolean;
+    nextSequence?: number;
+  };
+
+  if (json) {
+    emitJson(deps.log, payload);
+    return payload.timedOut ? 1 : 0;
+  }
+
+  if (payload.timedOut) {
+    deps.log(`No review completed event received for ${target.openPath}.`);
+    return 1;
+  }
+
+  deps.log(`Review completed for ${target.openPath}.`);
+  deps.log(`Received ${(payload.events ?? []).length} event(s).`);
+  return 0;
+}
+
 function isMarkdownPath(targetPath: string): boolean {
   const extension = path.extname(targetPath).toLowerCase();
   return extension === ".md";
@@ -2172,6 +2493,53 @@ export async function runCli(
       return 0;
     }
 
+    if (command === "watch") {
+      let options: ParsedWatchOptions;
+      try {
+        options = parseWatchOptions(rest);
+      } catch (error) {
+        deps.error(error instanceof Error ? error.message : "Invalid usage.");
+        return USAGE_ERROR;
+      }
+
+      if (options.help) {
+        printCommandHelp("watch", deps.log);
+        return 0;
+      }
+
+      if (options.positionals.length !== 1) {
+        deps.error("Usage: roughdraft watch <path> [--json]");
+        return USAGE_ERROR;
+      }
+
+      deps = applyWatchEnvOverrides(deps, options);
+      const json = parsed.global.json || options.json;
+      shouldPrintUpdateNotice = !json;
+      return runWatch(deps, options.positionals[0] ?? "", options, json);
+    }
+
+    if (command === "mcp") {
+      let options: ParsedCommandOptions;
+      try {
+        options = parseCommandOptions(rest, {});
+      } catch (error) {
+        deps.error(error instanceof Error ? error.message : "Invalid usage.");
+        return USAGE_ERROR;
+      }
+      if (options.help) {
+        printCommandHelp("mcp", deps.log);
+        return 0;
+      }
+      if (options.positionals.length > 0) {
+        deps.error("Usage: roughdraft mcp");
+        return USAGE_ERROR;
+      }
+
+      const { startMcpServer } = await import("./mcp.js");
+      startMcpServer({ env: deps.env, fetchImpl: deps.fetchImpl });
+      return new Promise<number>(() => {});
+    }
+
     if (command === "doctor") {
       let options: ParsedCommandOptions;
       try {
@@ -2207,6 +2575,7 @@ export async function runCli(
         options = parseCommandOptions(rest, {
           allowOpen: true,
           allowPort: true,
+          allowWatch: true,
         });
       } catch (error) {
         deps.error(error instanceof Error ? error.message : "Invalid usage.");
@@ -2226,6 +2595,16 @@ export async function runCli(
 
       if (options.positionals.length > 1) {
         deps.error("Usage: roughdraft open <path>");
+        return USAGE_ERROR;
+      }
+
+      if (options.watch && options.noWatch) {
+        deps.error("Use either --watch or --no-watch, not both.");
+        return USAGE_ERROR;
+      }
+
+      if (options.watch && options.printUrl) {
+        deps.error("Use either --watch or --print-url, not both.");
         return USAGE_ERROR;
       }
 
@@ -2255,12 +2634,12 @@ export async function runCli(
         });
       }
 
-      const liveDevFrontendUrl = await resolveLiveDevFrontendBaseUrl(deps);
+      const liveDevFrontend = await resolveLiveDevFrontendBaseUrl(deps);
       let result: EnsureRunningResult | null = null;
       let baseUrl: string;
 
-      if (liveDevFrontendUrl) {
-        baseUrl = liveDevFrontendUrl;
+      if (liveDevFrontend) {
+        baseUrl = liveDevFrontend.frontendUrl;
       } else {
         result = await ensureServerRunning(deps, { projectDir });
         baseUrl = buildPublicBaseUrl(result.server.port);
@@ -2291,6 +2670,37 @@ export async function runCli(
       if (options.printUrl) {
         deps.log(targetUrl);
         return 0;
+      }
+
+      const shouldWatch = !options.noWatch && !options.printUrl;
+
+      if (shouldWatch) {
+        if (!json) {
+          if (openMode === "chrome-app") {
+            deps.log(`Opened Roughdraft in a Chrome app window: ${targetUrl}`);
+          } else if (openMode === "existing-window") {
+            deps.log(`Reused an existing Roughdraft window: ${targetUrl}`);
+          } else if (openMode === "browser") {
+            deps.log(`Opened Roughdraft in the default browser: ${targetUrl}`);
+          } else {
+            deps.log(`Roughdraft is running at ${targetUrl}`);
+          }
+          deps.log("Waiting for Done Reviewing...");
+        }
+
+        const watchOptions: ParsedWatchOptions = {
+          batchWindowSeconds: options.batchWindowSeconds,
+          help: false,
+          json,
+          positionals: [target],
+          replay: options.replay,
+          serverUrl: liveDevFrontend?.apiUrl ?? undefined,
+          stateDir: options.stateDir,
+          stateFile: options.stateFile,
+          timeoutSeconds: options.timeoutSeconds,
+        };
+        shouldPrintUpdateNotice = false;
+        return runWatch(deps, target, watchOptions, json);
       }
 
       if (json) {

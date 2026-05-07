@@ -635,6 +635,12 @@ export function PreviewPage() {
     setPreviewForceResetKey(`preview-reset:${Date.now()}`);
   }, [backend]);
 
+  const handleCompletePreviewReview = useCallback(async () => {
+    return backend.completeReview
+      ? backend.completeReview(PREVIEW_DOCUMENT_PATH)
+      : { delivered: false };
+  }, [backend]);
+
   return (
     <main className="relative flex h-screen min-w-0 flex-col overflow-hidden bg-[#FCFCFC] dark:bg-background text-slate-950 dark:text-slate-50">
       <DocumentWorkspace
@@ -652,6 +658,7 @@ export function PreviewPage() {
         onReloadDocumentFromDisk={handleResetPreview}
         onKeepEditingWithoutAutosave={() => {}}
         onOverwriteDocumentOnDisk={() => {}}
+        onCompleteReview={handleCompletePreviewReview}
         backend={backend}
       />
     </main>
@@ -941,6 +948,40 @@ export function App() {
     setDocumentDiskChangeState("clean");
   }, [applyDocumentPage]);
 
+  const handleCompleteReview = useCallback(async () => {
+    const currentBackend = backendRef.current;
+    const currentPath = activeDocumentPathRef.current;
+    const currentDocument = documentPageRef.current;
+    if (!currentBackend || !currentPath || !currentDocument) {
+      return { delivered: false };
+    }
+
+    const content = documentDraftContentRef.current ?? currentDocument.content;
+    const expectedVersion = currentDocument.version;
+    const firstLine = content.split("\n")[0] || "";
+    const fallbackTitle =
+      currentDocument.id.split("/").at(-1) || currentDocument.id;
+    const title = firstLine.replace(/^#*\s*/, "") || fallbackTitle;
+
+    const savedDocument = (await currentBackend.saveMarkdownFile(
+      currentPath,
+      content,
+      expectedVersion,
+    )) ?? {
+      ...currentDocument,
+      content,
+      title,
+    };
+
+    applyDocumentPage(savedDocument);
+    documentDirtyRef.current = false;
+    setDocumentDiskChangeState("clean");
+
+    return currentBackend.completeReview
+      ? currentBackend.completeReview(currentPath)
+      : { delivered: false };
+  }, [applyDocumentPage]);
+
   useEffect(() => {
     if (!backend?.watchMarkdownFile || !activeDocumentPath) return;
 
@@ -1068,6 +1109,7 @@ export function App() {
         onReloadDocumentFromDisk={handleReloadDocumentFromDisk}
         onKeepEditingWithoutAutosave={handleKeepEditingWithoutAutosave}
         onOverwriteDocumentOnDisk={handleOverwriteDocumentOnDisk}
+        onCompleteReview={handleCompleteReview}
         backend={backend}
       />
     </main>
