@@ -1,8 +1,13 @@
-import { act } from "react";
 import type { Editor } from "@tiptap/react";
+import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PageCard, shouldDismissCommentThread } from "../src/PageCard";
+import {
+  type DocumentSaveController,
+  type ManualSaveResult,
+  PageCard,
+  shouldDismissCommentThread,
+} from "../src/PageCard";
 import type { Page, StorageBackend } from "../src/storage";
 
 function createDomRect({
@@ -251,6 +256,7 @@ type PageCardTestOptions = Partial<{
   interactionMode: "viewing" | "suggesting" | "editing";
   selected: boolean;
   focusRequestKey: string | null;
+  saveBlocked: boolean;
 }>;
 
 type RenderedPageCard = {
@@ -258,6 +264,7 @@ type RenderedPageCard = {
   onSave: ReturnType<typeof vi.fn>;
   onSaveStateChange: ReturnType<typeof vi.fn>;
   getEditor: () => Editor;
+  getSaveController: () => DocumentSaveController;
   rerender: (overrides?: PageCardTestOptions) => Promise<void>;
   unmount: () => Promise<void>;
 };
@@ -274,6 +281,7 @@ async function renderPageCard(
   const onSave = vi.fn().mockResolvedValue(undefined);
   const onSaveStateChange = vi.fn();
   let editor: Editor | null = null;
+  let saveController: DocumentSaveController | null = null;
 
   let props = {
     page: options.page ?? {
@@ -291,6 +299,10 @@ async function renderPageCard(
     onEditorReady: (nextEditor: Editor | null) => {
       editor = nextEditor;
     },
+    onSaveControllerChange: (controller: DocumentSaveController | null) => {
+      saveController = controller;
+    },
+    saveBlocked: options.saveBlocked ?? false,
   } as const;
 
   const render = async () => {
@@ -321,6 +333,10 @@ async function renderPageCard(
     getEditor() {
       expect(editor).not.toBeNull();
       return editor as Editor;
+    },
+    getSaveController() {
+      expect(saveController).not.toBeNull();
+      return saveController as DocumentSaveController;
     },
     async rerender(overrides = {}) {
       props = {
@@ -467,7 +483,91 @@ describe("PageCard editor integration", () => {
       "doc-1",
       expect.stringContaining("Start now"),
     );
-    expect(rendered.onSaveStateChange.mock.calls.at(-1)?.[0]).toBe("idle");
+    expect(rendered.onSaveStateChange.mock.calls.at(-1)?.[0]).toBe("saved");
+  });
+
+  it("manual save flushes pending rich-text autosave immediately", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-manual-save-rich-1",
+        title: "Manual Save Rich",
+        content: "Start",
+      },
+      selected: true,
+    });
+
+    vi.useFakeTimers();
+
+    await insertTextAtEnd(rendered.getEditor(), " now");
+
+    expect(rendered.onSaveStateChange.mock.calls.at(-1)?.[0]).toBe("saving");
+    expect(rendered.onSave).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await rendered.getSaveController().flushSave();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledTimes(1);
+    expect(rendered.onSave).toHaveBeenCalledWith(
+      "doc-manual-save-rich-1",
+      expect.stringContaining("Start now"),
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledTimes(1);
+    expect(rendered.onSaveStateChange.mock.calls.at(-1)?.[0]).toBe("saved");
+  });
+
+  it("manual save reports save failure without clearing dirty state", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-manual-save-failure-1",
+        title: "Manual Save Failure",
+        content: "Start",
+      },
+      selected: true,
+    });
+    rendered.onSave.mockRejectedValueOnce(new Error("disk unavailable"));
+
+    vi.useFakeTimers();
+
+    await insertTextAtEnd(rendered.getEditor(), " failed");
+
+    let result: ManualSaveResult | undefined;
+    await act(async () => {
+      result = await rendered.getSaveController().flushSave();
+    });
+
+    expect(result).toMatchObject({ status: "error" });
+    expect(rendered.onSaveStateChange.mock.calls.at(-1)?.[0]).toBe("error");
+  });
+
+  it("manual save is blocked without calling onSave when disk state blocks saves", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-manual-save-blocked-1",
+        title: "Manual Save Blocked",
+        content: "Start",
+      },
+      selected: true,
+    });
+
+    vi.useFakeTimers();
+    await insertTextAtEnd(rendered.getEditor(), " blocked");
+    await rendered.rerender({ saveBlocked: true });
+
+    let result: ManualSaveResult | undefined;
+    await act(async () => {
+      result = await rendered.getSaveController().flushSave();
+    });
+
+    expect(result).toEqual({ status: "blocked" });
+    expect(rendered.onSave).not.toHaveBeenCalled();
+    expect(rendered.onSaveStateChange.mock.calls.at(-1)?.[0]).toBe("unsaved");
   });
 
   it("rich-text edits preserve raw YAML frontmatter on autosave", async () => {

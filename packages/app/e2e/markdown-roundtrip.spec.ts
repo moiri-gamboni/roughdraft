@@ -89,4 +89,123 @@ test.describe("markdown round-trips", () => {
       size: fs.statSync(filePath).size,
     });
   });
+
+  test("initial open shows persistent saved status", async ({ page }) => {
+    const filePath = writeProjectFile(
+      projectDir,
+      "initial-saved.md",
+      "# Initial Saved\n\nBody.\n",
+    );
+
+    await openMarkdownFile(page, filePath);
+
+    await expect(page.getByRole("status", { name: "Saved" })).toBeVisible();
+
+    logE2eEvent("markdown-roundtrip.initial-saved", {
+      file: "initial-saved.md",
+    });
+  });
+
+  test("manual save shortcut flushes code-mode edits to disk @smoke", async ({
+    page,
+  }) => {
+    const initial = ["# Manual Save", "", "Initial body.", ""].join("\n");
+    const filePath = writeProjectFile(projectDir, "manual-save.md", initial);
+
+    await openMarkdownFile(page, filePath, "code");
+    await appendInCodeEditor(page, "\nSaved by shortcut.\n");
+
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+S" : "Control+S",
+    );
+
+    await expect
+      .poll(() => readProjectFile(projectDir, "manual-save.md"))
+      .toContain("Saved by shortcut.");
+    await expect(page.getByRole("status", { name: "Saved" })).toBeVisible();
+
+    logE2eEvent("markdown-roundtrip.manual-save-shortcut", {
+      file: "manual-save.md",
+      size: fs.statSync(filePath).size,
+    });
+  });
+
+  test("manual save shortcut flushes rich-text edits to disk", async ({
+    page,
+  }) => {
+    const initial = ["# Rich Save", "", "Initial body.", ""].join("\n");
+    const filePath = writeProjectFile(projectDir, "rich-save.md", initial);
+
+    await openMarkdownFile(page, filePath, "rich-text");
+    const editor = page.locator(".ProseMirror");
+    await expect(editor).toBeVisible();
+    await editor.click();
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+End" : "Control+End",
+    );
+    await page.keyboard.type(" Saved by shortcut.");
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+S" : "Control+S",
+    );
+
+    await expect
+      .poll(() => readProjectFile(projectDir, "rich-save.md"))
+      .toContain("Saved by shortcut.");
+    await expect(page.getByRole("status", { name: "Saved" })).toBeVisible();
+
+    logE2eEvent("markdown-roundtrip.rich-manual-save", {
+      file: "rich-save.md",
+      size: fs.statSync(filePath).size,
+    });
+  });
+
+  test("save shortcut prevents browser default in rich-text and code modes", async ({
+    page,
+  }) => {
+    const filePath = writeProjectFile(
+      projectDir,
+      "prevent-default.md",
+      "# Prevent Default\n\nBody.\n",
+    );
+
+    for (const editorMode of ["rich-text", "code"] as const) {
+      await openMarkdownFile(page, filePath, editorMode);
+
+      if (editorMode === "code") {
+        await page.locator(".cm-content").click();
+      } else {
+        await page.locator(".ProseMirror").click();
+      }
+
+      const events = await page.evaluate(() =>
+        [
+          { metaKey: true, ctrlKey: false },
+          { metaKey: false, ctrlKey: true },
+        ].map((init) => {
+          const event = new KeyboardEvent("keydown", {
+            key: "s",
+            ...init,
+            bubbles: true,
+            cancelable: true,
+          });
+          window.dispatchEvent(event);
+          return {
+            defaultPrevented: event.defaultPrevented,
+            metaKey: event.metaKey,
+            ctrlKey: event.ctrlKey,
+          };
+        }),
+      );
+
+      expect(events).toEqual([
+        { defaultPrevented: true, metaKey: true, ctrlKey: false },
+        { defaultPrevented: true, metaKey: false, ctrlKey: true },
+      ]);
+      await expect(page.getByRole("status", { name: "Saved" })).toBeVisible();
+    }
+
+    logE2eEvent("markdown-roundtrip.save-default-prevented", {
+      file: "prevent-default.md",
+    });
+  });
 });

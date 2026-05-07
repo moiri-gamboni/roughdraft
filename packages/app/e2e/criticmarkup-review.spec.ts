@@ -46,9 +46,11 @@ test.describe("CriticMarkup review flows", () => {
     await page
       .getByPlaceholder("Write a reply")
       .fill("Added context looks good.");
-    await page.getByLabel("Save").evaluate((element) => {
-      (element as HTMLButtonElement).click();
-    });
+    await page
+      .getByTestId("comment-rail-c2-action-save")
+      .evaluate((element) => {
+        (element as HTMLButtonElement).click();
+      });
 
     await expect
       .poll(() => readProjectFile(projectDir, "comment.md"))
@@ -80,7 +82,7 @@ test.describe("CriticMarkup review flows", () => {
     await page
       .getByRole("textbox", { name: "Add your comment" })
       .fill("Clarify this phrase.");
-    await page.locator('button[aria-label="Save"]:visible').click();
+    await page.getByTestId("comment-rail-c1-action-save").click();
 
     await expect
       .poll(() => readProjectFile(projectDir, "new-comment.md"))

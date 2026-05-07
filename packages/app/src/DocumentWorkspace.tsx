@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DocumentEditorViewMode } from "./app-navigation";
+import { RemoteSessionBanner } from "./components/RemoteSessionBanner";
 import { Button } from "./components/ui/button";
 import {
   Popover,
@@ -33,12 +34,21 @@ import {
 } from "./components/ui/tooltip";
 import { criticMarkdownHasReviewRail } from "./critic-markup";
 import { cn } from "./lib/utils";
-import { PageCard, type DocumentInteractionMode } from "./PageCard";
-import { RemoteSessionBanner } from "./components/RemoteSessionBanner";
+import {
+  type DocumentInteractionMode,
+  type DocumentSaveController,
+  type DocumentSaveState,
+  PageCard,
+} from "./PageCard";
 import type { Page, StorageBackend } from "./storage";
 
-type SaveState = "idle" | "saving" | "error";
 type DiskChangeState = "clean" | "changed" | "conflict" | "paused";
+type ReviewHandoffState =
+  | "idle"
+  | "notifying"
+  | "notified"
+  | "undelivered"
+  | "error";
 
 const documentInteractionModeOptions = [
   { value: "editing", label: "editing", Icon: PencilLine },
@@ -71,6 +81,120 @@ const conflictNoticeCopy: Record<
   },
 };
 
+function getSaveStatusViewModel(
+  saveState: DocumentSaveState,
+  diskChangeState: DiskChangeState,
+) {
+  if (diskChangeState === "conflict") {
+    return {
+      label: "Save conflict",
+      ariaLabel: "Save conflict",
+      tone: "warning" as const,
+      Icon: AlertTriangle,
+    };
+  }
+
+  if (diskChangeState === "changed") {
+    return {
+      label: "File changed on disk",
+      ariaLabel: "File changed on disk",
+      tone: "warning" as const,
+      Icon: AlertTriangle,
+    };
+  }
+
+  if (diskChangeState === "paused") {
+    return {
+      label: "Autosave paused",
+      ariaLabel: "Autosave paused",
+      tone: "warning" as const,
+      Icon: AlertTriangle,
+    };
+  }
+
+  if (saveState === "saving") {
+    return {
+      label: "Saving",
+      ariaLabel: "Saving",
+      tone: "neutral" as const,
+      Icon: Loader2,
+    };
+  }
+
+  if (saveState === "error") {
+    return {
+      label: "Save failed",
+      ariaLabel: "Save failed",
+      tone: "danger" as const,
+      Icon: AlertTriangle,
+    };
+  }
+
+  if (saveState === "unsaved") {
+    return {
+      label: "Unsaved changes",
+      ariaLabel: "Unsaved changes",
+      tone: "warning" as const,
+      Icon: AlertTriangle,
+    };
+  }
+
+  return {
+    label: "Saved",
+    ariaLabel: "Saved",
+    tone: "success" as const,
+    Icon: Check,
+  };
+}
+
+export function DocumentSaveStatusIndicator({
+  saveState,
+  diskChangeState,
+}: {
+  saveState: DocumentSaveState;
+  diskChangeState: DiskChangeState;
+}) {
+  const saveStatus = getSaveStatusViewModel(saveState, diskChangeState);
+  const SaveStatusIcon = saveStatus.Icon;
+
+  return (
+    <span
+      role="status"
+      aria-label={saveStatus.ariaLabel}
+      className={cn(
+        "inline-flex h-7 max-w-full shrink-0 items-center gap-1.5 px-1 font-mono text-[0.68rem] leading-none text-stone-400 dark:text-stone-500",
+      )}
+    >
+      <SaveStatusIcon
+        className={cn(
+          "size-3.5 shrink-0",
+          saveStatus.label === "Saving" && "animate-spin",
+        )}
+        aria-hidden="true"
+      />
+      <span className="min-w-0 truncate">{saveStatus.label}</span>
+    </span>
+  );
+}
+
+export function isReviewHandoffDisabled({
+  saveState,
+  documentDiskChangeState,
+  reviewHandoffState,
+}: {
+  saveState: DocumentSaveState;
+  documentDiskChangeState: DiskChangeState;
+  reviewHandoffState: ReviewHandoffState;
+}) {
+  return (
+    saveState === "saving" ||
+    saveState === "unsaved" ||
+    saveState === "error" ||
+    reviewHandoffState !== "idle" ||
+    documentDiskChangeState !== "clean"
+  );
+}
+
 interface DocumentWorkspaceProps {
   documentPage: Page | null;
   activeDocumentPath: string | null;
@@ -78,7 +202,7 @@ interface DocumentWorkspaceProps {
   documentEditorViewMode: DocumentEditorViewMode;
   onDocumentEditorViewModeChange: (mode: DocumentEditorViewMode) => void;
   onSaveDocument: (id: string, content: string) => Promise<void>;
-  onDocumentSaveStateChange: (state: SaveState) => void;
+  onDocumentSaveStateChange: (state: DocumentSaveState) => void;
   onDocumentDirtyStateChange: (isDirty: boolean) => void;
   onDocumentLocalContentChange: (markdown: string) => void;
   documentDiskChangeState: DiskChangeState;
@@ -110,28 +234,17 @@ export function DocumentWorkspace({
 }: DocumentWorkspaceProps) {
   const [documentInteractionMode, setDocumentInteractionMode] =
     useState<DocumentInteractionMode>("editing");
-  const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [showSaved, setShowSaved] = useState(false);
-  const [reviewHandoffState, setReviewHandoffState] = useState<
-    "idle" | "notifying" | "notified" | "undelivered" | "error"
-  >("idle");
+  const [saveState, setSaveState] = useState<DocumentSaveState>("saved");
+  const [reviewHandoffState, setReviewHandoffState] =
+    useState<ReviewHandoffState>("idle");
   const [reviewWatcherCount, setReviewWatcherCount] = useState(0);
   const sawNoWatcherAfterNotifiedRef = useRef(false);
-  const wasSavingRef = useRef(false);
+  const saveControllerRef = useRef<DocumentSaveController | null>(null);
 
   const handleSaveStateChange = useCallback(
-    (state: SaveState) => {
+    (state: DocumentSaveState) => {
       setSaveState(state);
       onDocumentSaveStateChange(state);
-      if (state === "saving") {
-        wasSavingRef.current = true;
-        setShowSaved(false);
-      } else if (state === "idle" && wasSavingRef.current) {
-        wasSavingRef.current = false;
-        setShowSaved(true);
-        const timer = setTimeout(() => setShowSaved(false), 2000);
-        return () => clearTimeout(timer);
-      }
     },
     [onDocumentSaveStateChange],
   );
@@ -205,6 +318,31 @@ export function DocumentWorkspace({
     }
   }, [reviewHandoffState, reviewWatcherCount]);
 
+  useEffect(() => {
+    if (!documentPage) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isSaveShortcut =
+        event.key.toLowerCase() === "s" &&
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey;
+
+      if (!isSaveShortcut) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (documentDiskChangeState !== "clean") return;
+
+      void saveControllerRef.current?.flushSave();
+    };
+
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
+    };
+  }, [documentDiskChangeState, documentPage]);
+
   const handleCompleteReview = useCallback(async () => {
     if (!activeDocumentPath || reviewHandoffState === "notifying") return;
 
@@ -275,8 +413,14 @@ export function DocumentWorkspace({
       )}
     >
       <RemoteSessionBanner backend={backend} />
-      {showReviewHandoffButton ? (
-        <div className="fixed top-3 right-3 z-[60]">
+      <div
+        className={cn(
+          "fixed right-3 z-[60] flex max-w-[min(16rem,calc(100vw-1rem))] flex-col items-end gap-1.5",
+          conflictNotice ? "top-[19rem] sm:top-[7rem]" : "top-3",
+        )}
+        data-document-status-stack="true"
+      >
+        {showReviewHandoffButton ? (
           <Popover>
             <PopoverTrigger
               render={
@@ -284,11 +428,11 @@ export function DocumentWorkspace({
                   type="button"
                   size="lg"
                   className="h-9 rounded-[7px] bg-black px-3 text-sm font-bold text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] hover:bg-black/85 focus-visible:ring-black/25 dark:bg-black dark:text-white dark:hover:bg-black/85 dark:focus-visible:ring-white/30"
-                  disabled={
-                    saveState === "saving" ||
-                    reviewHandoffState !== "idle" ||
-                    documentDiskChangeState !== "clean"
-                  }
+                  disabled={isReviewHandoffDisabled({
+                    saveState,
+                    documentDiskChangeState,
+                    reviewHandoffState,
+                  })}
                   onClick={() => void handleCompleteReview()}
                 >
                   <ReviewHandoffButtonIcon
@@ -324,8 +468,14 @@ export function DocumentWorkspace({
               </div>
             </PopoverContent>
           </Popover>
-        </div>
-      ) : null}
+        ) : null}
+        {documentPage ? (
+          <DocumentSaveStatusIndicator
+            saveState={saveState}
+            diskChangeState={documentDiskChangeState}
+          />
+        ) : null}
+      </div>
       {conflictNotice ? (
         <div
           role="status"
@@ -436,25 +586,6 @@ export function DocumentWorkspace({
                 >
                   {documentFilenameLabel}
                 </div>
-                {saveState === "saving" ? (
-                  <span
-                    role="status"
-                    aria-label="Saving"
-                    className="inline-flex shrink-0 items-center gap-1 font-mono text-[0.6rem] tracking-[0.01em] text-stone-400 dark:text-stone-500"
-                  >
-                    <Loader2 className="size-[0.6rem] animate-spin" />
-                    Saving
-                  </span>
-                ) : showSaved ? (
-                  <span
-                    role="status"
-                    aria-label="Saved"
-                    className="inline-flex shrink-0 items-center gap-1 font-mono text-[0.6rem] tracking-[0.01em] text-stone-400 dark:text-stone-500"
-                  >
-                    <Check className="size-[0.6rem]" />
-                    Saved
-                  </span>
-                ) : null}
                 {activeDocumentPath ? (
                   <div className="ml-auto flex shrink-0 items-center gap-1.5">
                     {reviewHandoffState !== "notified" &&
@@ -535,6 +666,9 @@ export function DocumentWorkspace({
               onCommentRailPresenceChange={setDocumentHasComments}
               onDirtyStateChange={onDocumentDirtyStateChange}
               onLocalContentChange={onDocumentLocalContentChange}
+              onSaveControllerChange={(controller) => {
+                saveControllerRef.current = controller;
+              }}
               saveBlocked={documentDiskChangeState !== "clean"}
               forceResetKey={documentForceResetKey}
             />

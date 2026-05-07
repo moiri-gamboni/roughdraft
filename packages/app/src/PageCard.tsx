@@ -1,25 +1,25 @@
 import type { JSONContent } from "@tiptap/core";
-import type { Editor } from "@tiptap/react";
-import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import type { Mark as ProseMirrorMark } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
+import type { Editor } from "@tiptap/react";
+import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { CommentEditorList } from "./CommentEditorList";
 import {
-  DocumentReviewRail,
-  type CriticChangeRailItem,
-} from "./DocumentReviewRail";
-import {
+  type CriticChangeAttrs,
+  type CriticComment,
   createCriticChange,
   createCriticComment,
   criticMarkdownHasReviewRail,
   criticMarkdownToEditorState,
   editorStateToCriticMarkdown,
   getCommentDescendantIds,
-  type CriticChangeAttrs,
-  type CriticComment,
 } from "./critic-markup";
+import {
+  type CriticChangeRailItem,
+  DocumentReviewRail,
+} from "./DocumentReviewRail";
 import { getPreferredCommentId, parseCommentIds } from "./document-comments";
 import { EditorContextMenu } from "./EditorContextMenu";
 import {
@@ -34,7 +34,17 @@ import { toHtml } from "./markdown";
 import type { Page, StorageBackend } from "./storage";
 import { useCommentAnchorLayout } from "./useCommentAnchorLayout";
 
-type SaveState = "idle" | "saving" | "error";
+export type DocumentSaveState = "saved" | "unsaved" | "saving" | "error";
+
+export type ManualSaveResult =
+  | { status: "saved" }
+  | { status: "blocked" }
+  | { status: "error"; error: unknown };
+
+export interface DocumentSaveController {
+  flushSave: () => Promise<ManualSaveResult>;
+}
+
 type EditorViewMode = "rich-text" | "code";
 export type DocumentInteractionMode = "viewing" | "suggesting" | "editing";
 
@@ -43,7 +53,7 @@ interface PageCardProps {
   selected?: boolean;
   focusRequestKey?: string | null;
   onSave: (id: string, content: string) => Promise<void>;
-  onSaveStateChange?: (state: SaveState) => void;
+  onSaveStateChange?: (state: DocumentSaveState) => void;
   editorViewMode?: EditorViewMode;
   interactionMode?: DocumentInteractionMode;
   backend: StorageBackend;
@@ -51,6 +61,7 @@ interface PageCardProps {
   onCommentRailPresenceChange?: (hasCommentRailSpace: boolean) => void;
   onDirtyStateChange?: (isDirty: boolean) => void;
   onLocalContentChange?: (markdown: string) => void;
+  onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
 }
@@ -60,7 +71,7 @@ interface PageCardEditorSurfaceProps {
   selected: boolean;
   focusRequestKey: string | null;
   onSave: (id: string, content: string) => Promise<void>;
-  onSaveStateChange: (state: SaveState) => void;
+  onSaveStateChange: (state: DocumentSaveState) => void;
   editorViewMode: EditorViewMode;
   interactionMode: DocumentInteractionMode;
   backend: StorageBackend;
@@ -68,6 +79,7 @@ interface PageCardEditorSurfaceProps {
   onCommentRailPresenceChange?: (hasCommentRailSpace: boolean) => void;
   onDirtyStateChange?: (isDirty: boolean) => void;
   onLocalContentChange?: (markdown: string) => void;
+  onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
 }
@@ -1990,10 +2002,13 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
   onCommentRailPresenceChange,
   onDirtyStateChange,
   onLocalContentChange,
+  onSaveControllerChange,
   saveBlocked = false,
   forceResetKey = null,
 }: PageCardEditorSurfaceProps) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlightSaveRef = useRef<Promise<ManualSaveResult> | null>(null);
+  const pendingMarkdownRef = useRef(page.content);
   const recentMarkdownRef = useRef<Set<string>>(new Set());
   const previousEditorViewModeRef = useRef<EditorViewMode>(editorViewMode);
   const lastAcceptedMarkdownRef = useRef(page.content);
@@ -2016,43 +2031,127 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
 
   const acceptMarkdown = useCallback(
     (nextMarkdown: string) => {
+      pendingMarkdownRef.current = nextMarkdown;
       lastAcceptedMarkdownRef.current = nextMarkdown;
       setMarkdown(nextMarkdown);
       setRichTextSourceMarkdown(nextMarkdown);
       setRichTextSourceVersion((current) => current + 1);
       onLocalContentChange?.(nextMarkdown);
       reportDirtyState(false);
+      onSaveStateChange("saved");
     },
-    [onLocalContentChange, reportDirtyState],
+    [onLocalContentChange, onSaveStateChange, reportDirtyState],
+  );
+
+  const rememberRecentMarkdown = useCallback((nextMarkdown: string) => {
+    recentMarkdownRef.current.add(nextMarkdown);
+    if (recentMarkdownRef.current.size > 10) {
+      const iterator = recentMarkdownRef.current.values();
+      recentMarkdownRef.current.delete(iterator.next().value as string);
+    }
+  }, []);
+
+  const performSave = useCallback(
+    async (nextMarkdown: string): Promise<ManualSaveResult> => {
+      if (saveBlocked) {
+        onSaveStateChange(
+          nextMarkdown === lastAcceptedMarkdownRef.current
+            ? "saved"
+            : "unsaved",
+        );
+        return { status: "blocked" };
+      }
+
+      rememberRecentMarkdown(nextMarkdown);
+      onSaveStateChange("saving");
+
+      try {
+        await onSave(page.id, nextMarkdown);
+        lastAcceptedMarkdownRef.current = nextMarkdown;
+        reportDirtyState(pendingMarkdownRef.current !== nextMarkdown);
+        onSaveStateChange(
+          pendingMarkdownRef.current === nextMarkdown ? "saved" : "saving",
+        );
+        return { status: "saved" };
+      } catch (error) {
+        console.error("Failed to save page:", error);
+        onSaveStateChange("error");
+        return { status: "error", error };
+      }
+    },
+    [
+      onSave,
+      onSaveStateChange,
+      page.id,
+      rememberRecentMarkdown,
+      reportDirtyState,
+      saveBlocked,
+    ],
   );
 
   const scheduleSave = useCallback(
     (nextMarkdown: string) => {
-      if (saveBlocked) return;
-
-      recentMarkdownRef.current.add(nextMarkdown);
-      if (recentMarkdownRef.current.size > 10) {
-        const iterator = recentMarkdownRef.current.values();
-        recentMarkdownRef.current.delete(iterator.next().value as string);
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
       }
 
-      if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (saveBlocked) {
+        onSaveStateChange(
+          nextMarkdown === lastAcceptedMarkdownRef.current
+            ? "saved"
+            : "unsaved",
+        );
+        return;
+      }
+
       onSaveStateChange("saving");
-      saveTimer.current = setTimeout(async () => {
-        try {
-          await onSave(page.id, nextMarkdown);
-          onSaveStateChange("idle");
-        } catch (error) {
-          console.error("Failed to save page:", error);
-          onSaveStateChange("error");
-        }
+      saveTimer.current = setTimeout(() => {
+        saveTimer.current = null;
+        inFlightSaveRef.current = performSave(nextMarkdown).finally(() => {
+          inFlightSaveRef.current = null;
+        });
+        void inFlightSaveRef.current;
       }, 500);
     },
-    [onSave, onSaveStateChange, page.id, saveBlocked],
+    [onSaveStateChange, performSave, saveBlocked],
   );
+
+  const flushSave = useCallback(async (): Promise<ManualSaveResult> => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+
+    const currentMarkdown = pendingMarkdownRef.current;
+
+    if (
+      currentMarkdown === lastAcceptedMarkdownRef.current &&
+      !inFlightSaveRef.current
+    ) {
+      onSaveStateChange("saved");
+      return { status: "saved" };
+    }
+
+    if (inFlightSaveRef.current) {
+      await inFlightSaveRef.current;
+      if (pendingMarkdownRef.current === lastAcceptedMarkdownRef.current) {
+        onSaveStateChange("saved");
+        return { status: "saved" };
+      }
+    }
+
+    return await performSave(pendingMarkdownRef.current);
+  }, [onSaveStateChange, performSave]);
+
+  useEffect(() => {
+    onSaveControllerChange?.({ flushSave });
+    return () => onSaveControllerChange?.(null);
+  }, [flushSave, onSaveControllerChange]);
 
   const handleMarkdownChange = useCallback(
     (nextMarkdown: string) => {
+      pendingMarkdownRef.current = nextMarkdown;
       setMarkdown(nextMarkdown);
       onLocalContentChange?.(nextMarkdown);
       reportDirtyState(nextMarkdown !== lastAcceptedMarkdownRef.current);
@@ -2074,6 +2173,7 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     if (recentMarkdownRef.current.has(page.content)) {
       recentMarkdownRef.current.delete(page.content);
       lastAcceptedMarkdownRef.current = page.content;
+      pendingMarkdownRef.current = markdown;
       reportDirtyState(markdown !== page.content);
       return;
     }
@@ -2084,6 +2184,7 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
 
     if (markdown === page.content) {
       lastAcceptedMarkdownRef.current = page.content;
+      pendingMarkdownRef.current = page.content;
       reportDirtyState(false);
       return;
     }
@@ -2095,7 +2196,11 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     if (!saveBlocked || !saveTimer.current) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = null;
-    onSaveStateChange("idle");
+    onSaveStateChange(
+      pendingMarkdownRef.current === lastAcceptedMarkdownRef.current
+        ? "saved"
+        : "unsaved",
+    );
   }, [onSaveStateChange, saveBlocked]);
 
   useEffect(() => {
@@ -2175,10 +2280,11 @@ export function PageCard({
   onCommentRailPresenceChange,
   onDirtyStateChange,
   onLocalContentChange,
+  onSaveControllerChange,
   saveBlocked,
   forceResetKey,
 }: PageCardProps) {
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [saveState, setSaveState] = useState<DocumentSaveState>("saved");
 
   useEffect(() => {
     onSaveStateChange?.(saveState);
@@ -2199,6 +2305,7 @@ export function PageCard({
         onCommentRailPresenceChange={onCommentRailPresenceChange}
         onDirtyStateChange={onDirtyStateChange}
         onLocalContentChange={onLocalContentChange}
+        onSaveControllerChange={onSaveControllerChange}
         saveBlocked={saveBlocked}
         forceResetKey={forceResetKey}
       />

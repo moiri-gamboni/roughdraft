@@ -342,6 +342,7 @@ const COMMENT_AVATAR_CENTER = 16;
 
 function CommentActionButton({
   label,
+  testId,
   tone = "neutral",
   icon,
   compact = false,
@@ -349,6 +350,7 @@ function CommentActionButton({
   onClick,
 }: {
   label: string;
+  testId?: string;
   tone?: "neutral" | "danger";
   icon: ReactNode;
   compact?: boolean;
@@ -361,6 +363,7 @@ function CommentActionButton({
         render={
           <Button
             type="button"
+            data-testid={testId}
             variant="ghost"
             size={compact ? "icon-xs" : "sm"}
             className={cn(
@@ -718,6 +721,7 @@ function CommentThreadNode({
                   <CommentActionButton
                     key={action.key}
                     label={action.label}
+                    testId={`comment-${variant}-${comment.id}-action-${action.key}`}
                     tone={action.tone}
                     icon={action.icon}
                     compact={action.compact}
