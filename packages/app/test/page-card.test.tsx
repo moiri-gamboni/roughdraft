@@ -252,6 +252,8 @@ function getToolbarButton(container: HTMLElement, label: string) {
 
 type PageCardTestOptions = Partial<{
   page: Page;
+  activeDocumentPath: string | null;
+  backend: StorageBackend;
   editorViewMode: "rich-text" | "code";
   interactionMode: "viewing" | "suggesting" | "editing";
   selected: boolean;
@@ -277,7 +279,7 @@ async function renderPageCard(
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  const backend = createBackend();
+  const backend = options.backend ?? createBackend();
   const onSave = vi.fn().mockResolvedValue(undefined);
   const onSaveStateChange = vi.fn();
   let editor: Editor | null = null;
@@ -289,6 +291,7 @@ async function renderPageCard(
       title: "Page 1",
       content: "Start",
     },
+    activeDocumentPath: options.activeDocumentPath ?? null,
     selected: options.selected ?? true,
     focusRequestKey: options.focusRequestKey ?? null,
     editorViewMode: options.editorViewMode ?? "rich-text",
@@ -455,6 +458,7 @@ describe("PageCard editor integration", () => {
 
     vi.useRealTimers();
     vi.restoreAllMocks();
+    window.history.replaceState(null, "", "/");
   });
 
   it("document mode edits trigger autosave", async () => {
@@ -709,6 +713,90 @@ describe("PageCard editor integration", () => {
     expect(
       getEditable(rendered.container).getAttribute("contenteditable"),
     ).toBe("false");
+  });
+
+  it("renders local markdown document links as Roughdraft routes", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?path=%2FUsers%2Fme%2Fproject%2Fnotes%2Fsource.md",
+    );
+    const backend = createBackend();
+    backend.info = {
+      ...backend.info,
+      projectPath: "/Users/me/project",
+    };
+
+    const rendered = await renderPageCard({
+      backend,
+      activeDocumentPath: "notes/source.md",
+      page: {
+        id: "notes/source",
+        title: "Source",
+        content: "[Target](target.md)\n\n![Diagram](diagram.png)",
+      },
+    });
+
+    expect(
+      rendered.container
+        .querySelector("a[data-markdown-src='target.md']")
+        ?.getAttribute("href"),
+    ).toBe("/?path=%2FUsers%2Fme%2Fproject%2Fnotes%2Ftarget.md");
+    expect(
+      rendered.container
+        .querySelector("img[data-markdown-src='diagram.png']")
+        ?.getAttribute("src"),
+    ).toBe("file://diagram.png");
+  });
+
+  it("opens local markdown document links through Roughdraft from the link popover", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?path=%2FUsers%2Fme%2Fproject%2Fnotes%2Fsource.md",
+    );
+    const backend = createBackend();
+    backend.info = {
+      ...backend.info,
+      projectPath: "/Users/me/project",
+    };
+    const openWindow = vi.spyOn(window, "open").mockImplementation(() => null);
+    const rendered = await renderPageCard({
+      backend,
+      activeDocumentPath: "notes/source.md",
+      page: {
+        id: "notes/source",
+        title: "Source",
+        content: "[Target](target.md)",
+      },
+    });
+
+    const link = rendered.container.querySelector(
+      "a[data-markdown-src='target.md']",
+    );
+    expect(link).not.toBeNull();
+
+    await act(async () => {
+      link?.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+      );
+    });
+    await flushAnimationFrame();
+
+    const openButton = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Open link in new tab"]',
+    );
+    expect(openButton).not.toBeNull();
+
+    await act(async () => {
+      openButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(openWindow).toHaveBeenCalledWith(
+      "/?path=%2FUsers%2Fme%2Fproject%2Fnotes%2Ftarget.md",
+      "_blank",
+      "noopener,noreferrer",
+    );
   });
 
   it("keeps focus in the editor when placing the cursor inside a link", async () => {

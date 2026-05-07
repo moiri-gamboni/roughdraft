@@ -30,6 +30,7 @@ import {
 } from "./editor-extensions";
 import { cn } from "./lib/utils";
 import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
+import { buildLocationForLinkedMarkdownDocument } from "./app-navigation";
 import { toHtml } from "./markdown";
 import type { Page, StorageBackend } from "./storage";
 import { useCommentAnchorLayout } from "./useCommentAnchorLayout";
@@ -50,6 +51,7 @@ export type DocumentInteractionMode = "viewing" | "suggesting" | "editing";
 
 interface PageCardProps {
   page: Page;
+  activeDocumentPath?: string | null;
   selected?: boolean;
   focusRequestKey?: string | null;
   onSave: (id: string, content: string) => Promise<void>;
@@ -68,6 +70,7 @@ interface PageCardProps {
 
 interface PageCardEditorSurfaceProps {
   page: Page;
+  activeDocumentPath: string | null;
   selected: boolean;
   focusRequestKey: string | null;
   onSave: (id: string, content: string) => Promise<void>;
@@ -86,6 +89,7 @@ interface PageCardEditorSurfaceProps {
 
 interface RichTextEditorSurfaceProps {
   page: Page;
+  activeDocumentPath: string | null;
   selected: boolean;
   focusRequestKey: string | null;
   sourceMarkdown: string;
@@ -582,6 +586,7 @@ export function shouldDismissCommentThread(target: EventTarget | null) {
 
 const RichTextEditorSurface = memo(function RichTextEditorSurface({
   page,
+  activeDocumentPath,
   selected,
   focusRequestKey,
   sourceMarkdown,
@@ -618,13 +623,23 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     (path: string) => backend.resolveFileUrl(path),
     [backend],
   );
+  const resolveLinkUrl = useCallback(
+    (path: string) =>
+      buildLocationForLinkedMarkdownDocument({
+        projectPath: backend.info.projectPath,
+        currentDocumentPath: activeDocumentPath,
+        href: path,
+      }),
+    [activeDocumentPath, backend],
+  );
 
   const parsedContent = useMemo(
     () =>
       criticMarkdownToEditorState(sourceMarkdown, {
         resolveFileUrl,
+        resolveLinkUrl,
       }),
-    [resolveFileUrl, sourceMarkdown],
+    [resolveFileUrl, resolveLinkUrl, sourceMarkdown],
   );
   const [comments, setComments] = useState<Map<string, CriticComment>>(
     () => parsedContent.comments,
@@ -686,11 +701,12 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
         .insertContent(
           toHtml(markdown, {
             resolveFileUrl,
+            resolveLinkUrl,
           }),
         )
         .run();
     },
-    [backend, resolveFileUrl],
+    [backend, resolveFileUrl, resolveLinkUrl],
   );
 
   const refreshCriticChanges = useCallback(() => {
@@ -1880,6 +1896,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
               <EditorContextMenu
                 editor={editor}
                 backend={backend}
+                resolveLinkUrl={resolveLinkUrl}
                 onAddComment={
                   interactionMode === "viewing" ? undefined : handleAddComment
                 }
@@ -1991,6 +2008,7 @@ const CodeEditorSurface = memo(function CodeEditorSurface({
 
 const PageCardEditorSurface = memo(function PageCardEditorSurface({
   page,
+  activeDocumentPath,
   selected,
   focusRequestKey,
   onSave,
@@ -2255,6 +2273,7 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     <RichTextEditorSurface
       key={`${page.id}:${richTextSourceVersion}:${effectiveRichTextSourceMarkdown}`}
       page={page}
+      activeDocumentPath={activeDocumentPath}
       selected={selected}
       focusRequestKey={focusRequestKey}
       sourceMarkdown={effectiveRichTextSourceMarkdown}
@@ -2269,6 +2288,7 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
 
 export function PageCard({
   page,
+  activeDocumentPath = null,
   selected = false,
   focusRequestKey = null,
   onSave,
@@ -2294,6 +2314,7 @@ export function PageCard({
     <div className="w-full">
       <PageCardEditorSurface
         page={page}
+        activeDocumentPath={activeDocumentPath}
         selected={selected}
         focusRequestKey={focusRequestKey}
         onSave={onSave}

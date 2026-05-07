@@ -29,6 +29,7 @@ import type { StorageBackend } from "./storage";
 interface EditorContextMenuProps {
   editor: Editor | null;
   backend: StorageBackend;
+  resolveLinkUrl?: (path: string) => string | null;
   onAddComment?: () => void;
   onSuggestDeletion?: () => void;
   onSuggestReplacement?: () => void;
@@ -78,10 +79,13 @@ function isLinkTarget(value: string) {
 function resolveEditableLinkTarget(
   value: string,
   backend: StorageBackend,
+  resolveLinkUrl?: (path: string) => string | null,
   fallback = value,
 ) {
   if (!value) return fallback;
   if (isLinkTarget(value)) return value;
+  const linkUrl = resolveLinkUrl?.(value);
+  if (linkUrl) return linkUrl;
   return backend.resolveFileUrl(value) ?? fallback;
 }
 
@@ -184,6 +188,7 @@ function SelectionMenuButton({
 export function EditorContextMenu({
   editor,
   backend,
+  resolveLinkUrl,
   onAddComment,
   onSuggestDeletion,
   onSuggestReplacement,
@@ -318,6 +323,7 @@ export function EditorContextMenu({
       const href = resolveEditableLinkTarget(
         rawHref,
         backend,
+        resolveLinkUrl,
         (editor.getAttributes("link").href as string | null) || anchor.href,
       );
       const next = {
@@ -335,7 +341,7 @@ export function EditorContextMenu({
         ? current
         : next;
     });
-  }, [backend, editor]);
+  }, [backend, editor, resolveLinkUrl]);
 
   const openExistingLinkPopover = useCallback(
     (anchor: HTMLAnchorElement) => {
@@ -367,6 +373,7 @@ export function EditorContextMenu({
       const href = resolveEditableLinkTarget(
         rawHref,
         backend,
+        resolveLinkUrl,
         (linkAttrs.href as string | null) || anchor.href,
       );
 
@@ -379,7 +386,7 @@ export function EditorContextMenu({
         focusInput: false,
       });
     },
-    [backend, editor],
+    [backend, editor, resolveLinkUrl],
   );
 
   const openLinkPopover = useCallback(() => {
@@ -402,14 +409,19 @@ export function EditorContextMenu({
       (editor.getAttributes("link").dataMarkdownSrc as string | null) || "";
 
     setLinkPopoverState({
-      href: resolveEditableLinkTarget(rawHref, backend, rawHref || "https://"),
+      href: resolveEditableLinkTarget(
+        rawHref,
+        backend,
+        resolveLinkUrl,
+        rawHref || "https://",
+      ),
       rawHref,
       left: rect.left + rect.width / 2,
       top: rect.top - 12,
       existingLink: false,
       focusInput: true,
     });
-  }, [backend, editor, openExistingLinkPopover]);
+  }, [backend, editor, openExistingLinkPopover, resolveLinkUrl]);
 
   const applyLink = useCallback(
     (nextValue: string) => {
@@ -428,12 +440,17 @@ export function EditorContextMenu({
         .focus()
         .extendMarkRange("link")
         .setMark("link", {
-          href: resolveEditableLinkTarget(nextHref, backend, nextHref),
+          href: resolveEditableLinkTarget(
+            nextHref,
+            backend,
+            resolveLinkUrl,
+            nextHref,
+          ),
           dataMarkdownSrc: nextHref,
         })
         .run();
     },
-    [backend, editor],
+    [backend, editor, resolveLinkUrl],
   );
 
   useEffect(() => {
@@ -576,6 +593,7 @@ export function EditorContextMenu({
           .insertContent(
             toHtml(text, {
               resolveFileUrl: (path) => backend.resolveFileUrl(path),
+              resolveLinkUrl,
             }),
           )
           .run();
@@ -583,7 +601,7 @@ export function EditorContextMenu({
     } finally {
       close();
     }
-  }, [backend, close, editor]);
+  }, [backend, close, editor, resolveLinkUrl]);
 
   return (
     <div
@@ -841,8 +859,11 @@ export function EditorContextMenu({
             onClick={() => {
               applyLink(linkDraft);
               const target =
-                resolveEditableLinkTarget(linkDraft.trim(), backend) ||
-                linkPopoverState.href;
+                resolveEditableLinkTarget(
+                  linkDraft.trim(),
+                  backend,
+                  resolveLinkUrl,
+                ) || linkPopoverState.href;
 
               if (target) {
                 window.open(target, "_blank", "noopener,noreferrer");

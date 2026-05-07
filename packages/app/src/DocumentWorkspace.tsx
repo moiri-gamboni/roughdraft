@@ -657,6 +657,7 @@ export function DocumentWorkspace({
             <PageCard
               key={`${documentPage.id}:${activeDocumentPath ?? ""}`}
               page={documentPage}
+              activeDocumentPath={activeDocumentPath}
               selected
               onSave={onSaveDocument}
               onSaveStateChange={handleSaveStateChange}

@@ -108,6 +108,65 @@ export function joinPath(basePath: string, relativePath: string) {
     );
 }
 
+function isExternalUrl(path: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith("//");
+}
+
+function linkedMarkdownPathParts(href: string) {
+  const trimmedHref = href.trim();
+  if (
+    !trimmedHref ||
+    isExternalUrl(trimmedHref) ||
+    trimmedHref.startsWith("#")
+  ) {
+    return null;
+  }
+
+  const match = trimmedHref.match(/^([^?#]*)(?:\?[^#]*)?(#.*)?$/);
+  const documentPath = match?.[1] ?? "";
+  if (!documentPath.toLowerCase().endsWith(".md")) return null;
+
+  return {
+    documentPath,
+    hash: match?.[2] ?? "",
+  };
+}
+
+function fileUrlForAbsolutePath(absolutePath: string) {
+  const normalizedPath = normalizePathSeparators(absolutePath);
+  return new URL(`file://${encodeURI(normalizedPath)}`);
+}
+
+export function buildLocationForLinkedMarkdownDocument({
+  projectPath,
+  currentDocumentPath,
+  href,
+}: {
+  projectPath?: string | null;
+  currentDocumentPath?: string | null;
+  href: string;
+}): string | null {
+  if (!projectPath || !currentDocumentPath) return null;
+
+  const linkedPath = linkedMarkdownPathParts(href);
+  if (!linkedPath) return null;
+
+  const currentAbsolutePath = joinPath(projectPath, currentDocumentPath);
+  const targetUrl = new URL(
+    encodeURI(linkedPath.documentPath),
+    fileUrlForAbsolutePath(currentAbsolutePath),
+  );
+  const targetPath = decodeURI(targetUrl.pathname);
+  const url = new URL(window.location.href);
+
+  url.pathname = "/";
+  url.search = "";
+  url.searchParams.set("path", targetPath);
+  url.hash = linkedPath.hash;
+
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 function buildLocationForPath(path?: string | null) {
   const nextPath = path?.trim() || null;
   const url = new URL(window.location.href);

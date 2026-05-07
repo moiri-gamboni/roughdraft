@@ -6,6 +6,7 @@ export const rawMarkdownBlockAttribute = "data-markdown-raw-block";
 
 export interface MarkdownOptions {
   resolveFileUrl?: (path: string) => string | null;
+  resolveLinkUrl?: (path: string) => string | null;
 }
 
 export interface YamlFrontmatterSplit {
@@ -221,6 +222,7 @@ export function createMarkedRenderer(options?: MarkdownOptions) {
   const renderer = new marked.Renderer();
   const baseRenderer = new marked.Renderer();
   const resolveFileUrl = options?.resolveFileUrl;
+  const resolveLinkUrl = options?.resolveLinkUrl;
 
   renderer.code = ({ text, lang, escaped }) => {
     const language = (lang || "").match(/\S+/)?.[0];
@@ -234,7 +236,10 @@ export function createMarkedRenderer(options?: MarkdownOptions) {
 
   renderer.link = function ({ href, title, tokens, raw }) {
     const rawHref = href || "";
-    const renderedHref = resolveRenderedUrl(rawHref, resolveFileUrl);
+    const renderedHref = resolveRenderedUrl(
+      rawHref,
+      (path) => resolveLinkUrl?.(path) ?? resolveFileUrl?.(path) ?? null,
+    );
     const text = this.parser.parseInline(tokens);
     const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
     const markdownSrcAttr = ` data-markdown-src="${escapeHtml(rawHref)}"`;

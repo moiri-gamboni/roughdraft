@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   PREVIEW_PATH,
   ROUGHDRAFT_FLAVORED_MARKDOWN_PATH,
+  buildLocationForLinkedMarkdownDocument,
   getRequestedPathState,
   syncRequestedPathInUrl,
 } from "./app-navigation";
@@ -52,5 +53,43 @@ describe("app navigation", () => {
       projectPath: null,
       documentPath: null,
     });
+  });
+
+  it("builds Roughdraft routes for linked markdown documents", () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?path=%2FUsers%2Fme%2Fproject%2F.context%2Flocal-link-source.md",
+    );
+
+    expect(
+      buildLocationForLinkedMarkdownDocument({
+        projectPath: "/Users/me/project/.context",
+        currentDocumentPath: "local-link-source.md",
+        href: "local-link-target.md",
+      }),
+    ).toBe("/?path=%2FUsers%2Fme%2Fproject%2F.context%2Flocal-link-target.md");
+  });
+
+  it("resolves nested markdown links relative to the current document", () => {
+    window.history.replaceState(null, "", "/");
+
+    expect(
+      buildLocationForLinkedMarkdownDocument({
+        projectPath: "/Users/me/project",
+        currentDocumentPath: "notes/source.md",
+        href: "../index.md#summary",
+      }),
+    ).toBe("/?path=%2FUsers%2Fme%2Fproject%2Findex.md#summary");
+  });
+
+  it("leaves non-markdown links for the file resolver", () => {
+    expect(
+      buildLocationForLinkedMarkdownDocument({
+        projectPath: "/Users/me/project",
+        currentDocumentPath: "source.md",
+        href: "diagram.png",
+      }),
+    ).toBeNull();
   });
 });

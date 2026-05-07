@@ -59,6 +59,26 @@ describe("toHtml", () => {
     );
   });
 
+  it("can resolve markdown document links separately from file assets", () => {
+    const html = toHtml(
+      "[Target](local-link-target.md)\n\n![Diagram](local-link-target.md)",
+      {
+        resolveFileUrl: (path) => `/api/files?path=${encodeURIComponent(path)}`,
+        resolveLinkUrl: (path) =>
+          path.endsWith(".md")
+            ? `/?path=${encodeURIComponent(`/project/${path}`)}`
+            : null,
+      },
+    );
+
+    expect(html).toContain(
+      '<a href="/?path=%2Fproject%2Flocal-link-target.md" data-markdown-src="local-link-target.md">Target</a>',
+    );
+    expect(html).toContain(
+      '<img src="/api/files?path=local-link-target.md" alt="Diagram" data-markdown-src="local-link-target.md">',
+    );
+  });
+
   it("renders in-page anchors, mailto links, task lists, and table fixtures", () => {
     const html = toHtml(
       `${readMarkdownFixture("links-and-images.md")}\n${readMarkdownFixture("tables-and-task-lists.md")}`,
