@@ -2,11 +2,15 @@ import {
   ArrowLeft,
   Braces,
   Check,
+  Code2,
+  CodeXml,
   Copy,
+  Eye,
   ExternalLink,
   FileText,
   MessageSquare,
   PencilLine,
+  Terminal,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -85,18 +89,42 @@ const PREVIEW_INITIAL_MARKDOWN = [
   '{==Select this sentence==}{>>Try replying to this comment or suggesting a replacement.<<}{id="preview-comment" by="Roughdraft" at="2026-04-28T12:00:00.000Z"}',
   "",
 ].join("\n");
-const HOMEPAGE_WORKFLOWS = [
+const HOMEPAGE_WORKFLOW_SCENES = [
   {
-    title: "Review an agent's draft",
+    step: "01",
+    title: "Ask for a plan",
     description:
-      "Ask your agent to write a Markdown file, open it in Roughdraft, then leave comments and suggested changes. When you are done, tell the agent to read the file again so it can reply inline or incorporate your feedback.",
-    icon: MessageSquare,
+      "Start in the same agent chat you already use. Ask for a reviewable Markdown plan before implementation begins.",
   },
   {
-    title: "Ask the agent to review yours",
+    step: "02",
+    title: "The agent works normally",
     description:
-      "Start from your own writing and have the agent leave detailed comments, questions, and suggested edits in the document. You can accept the useful parts, push back in replies, or send the file back for another pass.",
-    icon: PencilLine,
+      "It inspects files, runs tools, and drafts the plan in the background. Roughdraft does not replace your agent workflow.",
+  },
+  {
+    step: "03",
+    title: "Roughdraft opens the plan",
+    description:
+      "When the file is ready, the agent opens the Markdown plan in Roughdraft and waits while you review.",
+  },
+  {
+    step: "04",
+    title: "Leave comments and suggestions",
+    description:
+      "Ask questions, redirect priorities, and suggest exact wording inline where the agent can read it later.",
+  },
+  {
+    step: "05",
+    title: "Click I'm done",
+    description:
+      "Roughdraft hands control back to the agent once you are finished with the blocking review step.",
+  },
+  {
+    step: "06",
+    title: "The agent resumes",
+    description:
+      "The next agent turn reads the same Markdown file, sees your comments, and continues with the corrected plan.",
   },
 ] as const;
 const ROUGHDRAFT_MARKDOWN_SYNTAX = [
@@ -202,6 +230,9 @@ export function Homepage({
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
     "idle",
   );
+  const workflowStepRefs = useRef<Record<string, HTMLLIElement | null>>({});
+  const workflowStickyVisualRef = useRef<HTMLDivElement | null>(null);
+  const [homepageWorkflowStage, setHomepageWorkflowStage] = useState(1);
 
   const handleCopySetupPrompt = useCallback(async () => {
     try {
@@ -211,6 +242,55 @@ export function Homepage({
     } catch {
       setCopyState("error");
     }
+  }, []);
+
+  useEffect(() => {
+    const updateHomepageWorkflowStage = () => {
+      const pageCanScroll =
+        document.documentElement.scrollHeight > window.innerHeight + 1;
+      if (!pageCanScroll) return;
+
+      const stickyVisualRect =
+        workflowStickyVisualRef.current?.getBoundingClientRect();
+      const isMobileStoryboard =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(max-width: 899px)").matches;
+      const mobileReadableOffset = stickyVisualRect
+        ? Math.min(stickyVisualRect.height + 32, window.innerHeight * 0.35)
+        : 0;
+      const activationLine =
+        isMobileStoryboard && stickyVisualRect
+          ? Math.max(0, Math.ceil(stickyVisualRect.top - mobileReadableOffset))
+          : 0;
+
+      let nextStage = 1;
+      for (const [step, element] of Object.entries(workflowStepRefs.current)) {
+        if (!element) continue;
+
+        const stepNumber = Number(step);
+        if (
+          element.getBoundingClientRect().top <= activationLine &&
+          stepNumber > nextStage
+        ) {
+          nextStage = stepNumber;
+        }
+      }
+
+      setHomepageWorkflowStage((current) =>
+        current === nextStage ? current : nextStage,
+      );
+    };
+
+    updateHomepageWorkflowStage();
+    window.addEventListener("scroll", updateHomepageWorkflowStage, {
+      passive: true,
+    });
+    window.addEventListener("resize", updateHomepageWorkflowStage);
+
+    return () => {
+      window.removeEventListener("scroll", updateHomepageWorkflowStage);
+      window.removeEventListener("resize", updateHomepageWorkflowStage);
+    };
   }, []);
 
   return (
@@ -331,50 +411,356 @@ export function Homepage({
           />
         </div>
 
-        <RoughdraftFormatDemo />
-
         <section
           aria-labelledby="homepage-workflow-heading"
-          className="mx-auto mt-16 w-full max-w-5xl border-t border-slate-200 dark:border-slate-700 pt-10 text-left"
+          className="homepage-workflow-storyboard mx-auto mt-12 w-full max-w-6xl text-left"
+          data-homepage-workflow-storyboard=""
+          data-testid="homepage-workflow-storyboard"
         >
-          <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
-            <div>
-              <p className="text-xs font-medium tracking-[0.16em] text-stone-500 dark:text-stone-400 uppercase">
-                Review workflow
-              </p>
-              <h2
-                className="mt-3 text-3xl leading-tight font-semibold text-balance text-slate-950 dark:text-slate-50 sm:text-4xl"
-                id="homepage-workflow-heading"
-              >
-                Pass the same Markdown file back and forth with your agent.
-              </h2>
-              <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-400">
-                Roughdraft makes review state part of the document, so the next
-                agent turn can see the comments, suggestions, and replies
-                without needing access to a hosted editor.
-              </p>
+          <div className="homepage-workflow-intro">
+            <h2
+              className="text-center text-4xl leading-tight font-semibold text-balance text-slate-950 dark:text-slate-50 sm:text-5xl"
+              id="homepage-workflow-heading"
+              data-testid="homepage-workflow-heading"
+            >
+              How it works
+            </h2>
+          </div>
+
+          <div className="homepage-workflow-layout">
+            <div
+              className="homepage-workflow-sticky-visual"
+              data-homepage-workflow-sticky-visual=""
+              data-testid="homepage-workflow-sticky-visual"
+              ref={workflowStickyVisualRef}
+            >
+              <HomepageWorkflowComposite
+                workflowStage={homepageWorkflowStage}
+              />
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              {HOMEPAGE_WORKFLOWS.map(({ description, icon: Icon, title }) => (
-                <div
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.3)]"
-                  key={title}
-                >
-                  <div className="flex size-10 items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                    <Icon className="size-4" aria-hidden="true" />
-                  </div>
-                  <h3 className="mt-4 text-base font-semibold text-slate-950 dark:text-slate-50">
-                    {title}
-                  </h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
-                    {description}
-                  </p>
-                </div>
+            <ol
+              className="homepage-workflow-scene-list"
+              data-testid="homepage-workflow-scene-list"
+            >
+              {HOMEPAGE_WORKFLOW_SCENES.map((scene) => (
+                <HomepageWorkflowScene
+                  description={scene.description}
+                  key={scene.step}
+                  sceneRef={(element) => {
+                    workflowStepRefs.current[scene.step] = element;
+                  }}
+                  step={scene.step}
+                  title={scene.title}
+                />
               ))}
-            </div>
+            </ol>
           </div>
         </section>
+
+        <RoughdraftFormatDemo />
+      </div>
+    </div>
+  );
+}
+
+function HomepageWorkflowScene({
+  description,
+  sceneRef,
+  step,
+  title,
+}: {
+  description: string;
+  sceneRef?: (element: HTMLLIElement | null) => void;
+  step: string;
+  title: string;
+}) {
+  return (
+    <li
+      className="homepage-workflow-scene min-w-0"
+      data-homepage-workflow-scene=""
+      data-testid="homepage-workflow-scene"
+      ref={sceneRef}
+    >
+      <div className="homepage-workflow-scene-copy">
+        <div className="homepage-workflow-scene-marker">{step}</div>
+        <h3 className="mt-5 text-3xl leading-tight font-semibold text-balance text-slate-950 dark:text-slate-50 sm:text-4xl">
+          {title}
+        </h3>
+        <p className="mt-4 max-w-md text-base leading-7 text-slate-600 dark:text-slate-400">
+          {description}
+        </p>
+      </div>
+    </li>
+  );
+}
+
+function HomepageWorkflowComposite({
+  workflowStage,
+}: {
+  workflowStage: number;
+}) {
+  return (
+    <div className="homepage-workflow-composite">
+      <AgentChatMock workflowStage={workflowStage} />
+      <RoughdraftPopupMock workflowStage={workflowStage} />
+    </div>
+  );
+}
+
+function AgentChatMock({ workflowStage }: { workflowStage: number }) {
+  const showAgentWork = workflowStage >= 2;
+  const showRoughdraftCommand = workflowStage >= 3;
+  const showAgentResume = workflowStage >= 6;
+
+  return (
+    <div
+      className="homepage-workflow-terminal homepage-workflow-chat"
+      data-homepage-workflow-terminal-stage={workflowStage}
+      data-testid="homepage-workflow-terminal"
+    >
+      <div className="homepage-workflow-terminal-titlebar">
+        <div className="flex items-center gap-1.5" aria-hidden="true">
+          <span className="homepage-workflow-terminal-dot bg-rose-500" />
+          <span className="homepage-workflow-terminal-dot bg-amber-400" />
+          <span className="homepage-workflow-terminal-dot bg-emerald-500" />
+        </div>
+        <div className="flex min-w-0 items-center gap-2">
+          <Terminal className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="truncate">local-agent / roughdraft</span>
+        </div>
+      </div>
+
+      <div className="homepage-workflow-terminal-body">
+        <div className="homepage-workflow-terminal-meta">
+          <div className="font-semibold text-slate-100">Coding agent</div>
+          <div>workspace ~/roughdraft</div>
+        </div>
+
+        <div className="homepage-workflow-terminal-user-line">
+          <span className="text-slate-400">›</span>
+          <span>
+            Let's make the homepage more persuasive. Write a plan first.
+          </span>
+        </div>
+
+        <div
+          aria-hidden={showAgentWork ? undefined : true}
+          className="homepage-workflow-terminal-reveal-stack"
+          data-agent-work-visible={showAgentWork ? "true" : "false"}
+          data-testid="homepage-workflow-agent-work"
+        >
+          <div className="homepage-workflow-terminal-agent-line homepage-workflow-stream-item homepage-workflow-stream-item-delay-short">
+            <span className="mt-1 size-2 shrink-0 rounded-full bg-slate-100" />
+            <span>
+              I'll inspect the current homepage, draft a Markdown plan, and open
+              it in Roughdraft for review before I code.
+            </span>
+          </div>
+
+          <div
+            className="homepage-workflow-terminal-tools homepage-workflow-stream-item homepage-workflow-stream-item-delay-long"
+            data-testid="homepage-workflow-terminal-tools"
+          >
+            <div className="mb-2 flex items-center gap-1.5 font-medium text-slate-200">
+              <Code2 className="size-3.5" aria-hidden="true" />
+              Tool calls
+            </div>
+            <div>rg "It's just Markdown" packages/app/src</div>
+            <div>sed -n '1,220p' packages/app/src/App.tsx</div>
+            <div>write .context/homepage-conversion-plan.md</div>
+          </div>
+        </div>
+
+        <div
+          aria-hidden={showRoughdraftCommand ? undefined : true}
+          className="homepage-workflow-terminal-command homepage-workflow-stream-item"
+          data-terminal-line-visible={showRoughdraftCommand ? "true" : "false"}
+          data-testid="homepage-workflow-terminal-command"
+        >
+          roughdraft open "/workspace/.context/homepage-conversion-plan.md"
+          <div className="mt-2 text-slate-400">Waiting for I'm done...</div>
+        </div>
+
+        <div
+          aria-hidden={showAgentResume ? undefined : true}
+          className="homepage-workflow-terminal-agent-line homepage-workflow-stream-item"
+          data-terminal-line-visible={showAgentResume ? "true" : "false"}
+          data-testid="homepage-workflow-agent-resume"
+        >
+          <span className="mt-1 size-2 shrink-0 rounded-full bg-emerald-300" />
+          <span>
+            I read your comments. I'll move the workflow storyboard above the
+            Markdown section and use the homepage conversion example.
+          </span>
+        </div>
+
+        <div
+          aria-hidden={showAgentWork ? undefined : true}
+          className="homepage-workflow-terminal-input"
+          data-terminal-line-visible={showAgentWork ? "true" : "false"}
+          data-testid="homepage-workflow-terminal-input"
+        >
+          <span className="text-slate-100">›</span>
+          <span
+            className="homepage-workflow-terminal-caret"
+            aria-hidden="true"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
+  const visible = workflowStage >= 3;
+  const showReviewMarkup = workflowStage >= 4;
+  const showDoneButton = workflowStage >= 5;
+
+  return (
+    <div
+      aria-hidden={visible ? undefined : true}
+      className="homepage-workflow-panel homepage-workflow-popup"
+      data-homepage-workflow-popup=""
+      data-popup-visible={visible ? "true" : "false"}
+      data-testid="homepage-workflow-popup"
+    >
+      <div className="homepage-workflow-panel-header">
+        <FileText className="size-3.5" aria-hidden="true" />
+        homepage-conversion-plan.md
+      </div>
+      <div
+        className="homepage-workflow-document-workspace"
+        data-homepage-workflow-review-visible={
+          showReviewMarkup ? "true" : "false"
+        }
+        data-testid="homepage-workflow-document-workspace"
+      >
+        <div
+          className="homepage-workflow-document-scale"
+          data-testid="homepage-workflow-document-scale"
+        >
+          {showDoneButton ? (
+            <Button
+              className="homepage-workflow-handoff-button"
+              data-testid="homepage-workflow-handoff-button"
+              type="button"
+              size="sm"
+            >
+              <Check className="size-4" aria-hidden="true" />
+              I'm done
+            </Button>
+          ) : null}
+          <div
+            className={`homepage-workflow-document-shell ${
+              showReviewMarkup
+                ? "homepage-workflow-document-shell-with-comments"
+                : "homepage-workflow-document-shell-no-comments"
+            }`}
+            data-testid={
+              showReviewMarkup
+                ? "homepage-workflow-document-shell-with-comments"
+                : "homepage-workflow-document-shell-no-comments"
+            }
+          >
+            <div className="homepage-workflow-document-main">
+              <div className="homepage-workflow-document-toolbar">
+                <button
+                  aria-label="Switch editor view"
+                  className="homepage-workflow-view-toggle"
+                  type="button"
+                >
+                  <span className="homepage-workflow-view-toggle-active">
+                    <Eye className="size-3" aria-hidden="true" />
+                  </span>
+                  <span>
+                    <CodeXml className="size-3" aria-hidden="true" />
+                  </span>
+                </button>
+                <span className="homepage-workflow-document-filename">
+                  homepage-conversion-plan.md
+                </span>
+                <span className="homepage-workflow-document-mode">
+                  <PencilLine className="size-3" aria-hidden="true" />
+                  editing
+                </span>
+              </div>
+              <div className="homepage-workflow-document-page">
+                <p className="homepage-workflow-doc-kicker">Roughdraft</p>
+                <h3 data-testid="homepage-workflow-document-title">
+                  Homepage Conversion Plan
+                </h3>
+                <p>
+                  Move the workflow story above{" "}
+                  {showReviewMarkup ? (
+                    <span
+                      className="homepage-workflow-comment-highlight"
+                      data-testid="homepage-workflow-comment-highlight"
+                    >
+                      "It's just Markdown."
+                    </span>
+                  ) : (
+                    '"It\'s just Markdown."'
+                  )}
+                </p>
+                <p>
+                  Show the agent pause, the review window, and the resume
+                  signal.
+                </p>
+                <p>
+                  Keep the format section as proof that the review data is
+                  portable Markdown.
+                </p>
+                {showReviewMarkup ? (
+                  <p>
+                    <span
+                      className="homepage-workflow-suggestion-old"
+                      data-testid="homepage-workflow-suggestion-old"
+                    >
+                      Review an agent's plan
+                    </span>{" "}
+                    <span
+                      className="homepage-workflow-suggestion-new"
+                      data-testid="homepage-workflow-suggestion-new"
+                    >
+                      Review a homepage plan
+                    </span>{" "}
+                    before it starts coding.
+                  </p>
+                ) : (
+                  <p>Review an agent's plan before it starts coding.</p>
+                )}
+              </div>
+            </div>
+            {showReviewMarkup ? (
+              <div
+                className="homepage-workflow-review-rail"
+                data-testid="homepage-workflow-review-rail"
+              >
+                <div className="homepage-workflow-review-thread">
+                  <div className="homepage-workflow-review-avatar">N</div>
+                  <div>
+                    <div className="homepage-workflow-review-author">Nora</div>
+                    <p data-testid="homepage-workflow-review-comment">
+                      This should go above "It's just Markdown."
+                    </p>
+                  </div>
+                </div>
+                <div className="homepage-workflow-review-thread homepage-workflow-review-thread-ai">
+                  <div className="homepage-workflow-review-avatar">AI</div>
+                  <div>
+                    <div className="homepage-workflow-review-author">AI</div>
+                    <p>Replace: "agent's plan" with "homepage plan"</p>
+                    <div className="homepage-workflow-review-actions">
+                      <Check className="size-3.5" aria-hidden="true" />
+                      <span aria-hidden="true">×</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
       </div>
     </div>
   );

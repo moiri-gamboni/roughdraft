@@ -66,6 +66,18 @@ function getByTestId<T extends Element = HTMLElement>(
   return element as T;
 }
 
+async function renderHomepage(root: Root) {
+  await act(async () => {
+    root.render(
+      <Homepage
+        message="Roughdraft is a markdown editor with commenting and suggest changes mode, making it easier to align with AI on complex ideas."
+        updateStatus={null}
+      />,
+    );
+    await Promise.resolve();
+  });
+}
+
 describe("Homepage", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -134,15 +146,7 @@ describe("Homepage", () => {
   });
 
   it("opens the agent setup prompt from the CTA and copies it", async () => {
-    await act(async () => {
-      root.render(
-        <Homepage
-          message="Roughdraft is a markdown editor with commenting and suggest changes mode, making it easier to align with AI on complex ideas."
-          updateStatus={null}
-        />,
-      );
-      await Promise.resolve();
-    });
+    await renderHomepage(root);
 
     expect(container.textContent).toContain(
       "Easier collaboration with your coding agent",
@@ -216,18 +220,6 @@ describe("Homepage", () => {
     expect(
       container.querySelector(".critic-change[data-critic-change-id]"),
     ).not.toBeNull();
-    expect(container.textContent).toContain("Review workflow");
-    expect(container.textContent).toContain(
-      "Pass the same Markdown file back and forth with your agent.",
-    );
-    expect(container.textContent).toContain("Review an agent's draft");
-    expect(container.textContent).toContain(
-      "tell the agent to read the file again",
-    );
-    expect(container.textContent).toContain("Ask the agent to review yours");
-    expect(container.textContent).toContain(
-      "leave detailed comments, questions, and suggested edits",
-    );
     expect(container.innerHTML).not.toContain(
       'contenteditable="plaintext-only"',
     );
@@ -283,6 +275,153 @@ describe("Homepage", () => {
 
     expect(writeText).toHaveBeenCalledWith(AGENT_SETUP_PROMPT);
     expect(document.body.textContent).toContain("Copied");
+  });
+
+  it("explains the plan-review workflow with scrolling steps and a sticky visual", async () => {
+    await renderHomepage(root);
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("How it works");
+
+    const storyboard = getByTestId(container, "homepage-workflow-storyboard");
+    expect(storyboard.getAttribute("aria-labelledby")).toBe(
+      "homepage-workflow-heading",
+    );
+    expect(
+      getByTestId(storyboard, "homepage-workflow-heading").textContent,
+    ).toBe("How it works");
+
+    const markdownDemo = getByTestId(container, "rfm-format-demo");
+    expect(
+      storyboard.compareDocumentPosition(markdownDemo) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const scenes = [
+      "Ask for a plan",
+      "The agent works normally",
+      "Roughdraft opens the plan",
+      "Leave comments and suggestions",
+      "Click I'm done",
+      "The agent resumes",
+    ];
+
+    const sceneNodes = [
+      ...storyboard.querySelectorAll('[data-testid="homepage-workflow-scene"]'),
+    ];
+    expect(sceneNodes).toHaveLength(scenes.length);
+
+    const stickyVisual = getByTestId(
+      storyboard,
+      "homepage-workflow-sticky-visual",
+    );
+    expect(stickyVisual).not.toBeNull();
+    expect(
+      storyboard.querySelectorAll('[data-testid="homepage-workflow-terminal"]'),
+    ).toHaveLength(1);
+    expect(
+      getByTestId(storyboard, "homepage-workflow-terminal").getAttribute(
+        "data-homepage-workflow-terminal-stage",
+      ),
+    ).toBe("1");
+    expect(
+      getByTestId(storyboard, "homepage-workflow-agent-work").getAttribute(
+        "data-agent-work-visible",
+      ),
+    ).toBe("false");
+    expect(
+      getByTestId(
+        storyboard,
+        "homepage-workflow-terminal-command",
+      ).getAttribute("data-terminal-line-visible"),
+    ).toBe("false");
+    expect(
+      getByTestId(storyboard, "homepage-workflow-terminal-input").getAttribute(
+        "data-terminal-line-visible",
+      ),
+    ).toBe("false");
+    expect(
+      storyboard.querySelectorAll('[data-testid="homepage-workflow-popup"]'),
+    ).toHaveLength(1);
+    expect(
+      getByTestId(storyboard, "homepage-workflow-popup").getAttribute(
+        "data-popup-visible",
+      ),
+    ).toBe("false");
+    expect(
+      getByTestId(storyboard, "homepage-workflow-popup").getAttribute(
+        "aria-hidden",
+      ),
+    ).toBe("true");
+    expect(APP_STYLES).toMatch(
+      /\.homepage-workflow-sticky-visual \{[^}]*position:\s*sticky;[^}]*top:\s*2rem;/s,
+    );
+    expect(APP_STYLES).toMatch(
+      /@media \(max-width:\s*899px\) \{[\s\S]*\.homepage-workflow-sticky-visual \{[^}]*position:\s*sticky;[^}]*top:\s*calc\([^}]*100svh[^}]*var\(--homepage-workflow-dock-height\)[^}]*var\(--homepage-workflow-dock-bottom\)[^}]*\);[^}]*bottom:\s*var\(--homepage-workflow-dock-bottom\);/s,
+    );
+    expect(APP_STYLES).toMatch(
+      /@media \(max-width:\s*899px\) \{[\s\S]*\.homepage-workflow-scene-list \{[^}]*padding-bottom:\s*calc\([^}]*var\(--homepage-workflow-dock-height\)[^}]*var\(--homepage-workflow-dock-bottom\)[^}]*\+\s*2rem[^}]*\);/s,
+    );
+    expect(APP_STYLES).toMatch(
+      /@media \(max-width:\s*899px\) \{[\s\S]*\.homepage-workflow-popup \{[^}]*--homepage-workflow-popup-overhang:\s*0rem;[^}]*right:\s*0\.5rem;[^}]*left:\s*0\.5rem;/s,
+    );
+    expect(APP_STYLES).toMatch(
+      /@media \(max-width:\s*899px\) \{[\s\S]*\.homepage-workflow-document-workspace \{[^}]*--homepage-workflow-document-offset-y:\s*clamp\(7rem,\s*15svh,\s*8rem\);/s,
+    );
+    expect(APP_STYLES).toMatch(
+      /\.homepage-workflow-popup \{[^}]*position:\s*absolute;[^}]*bottom:\s*1rem;/s,
+    );
+    expect(APP_STYLES).toMatch(
+      /\.homepage-workflow-popup\[data-popup-visible="false"\] \{[^}]*opacity:\s*0;/s,
+    );
+    expect(APP_STYLES).toMatch(
+      /\.homepage-workflow-terminal-reveal-stack\[data-agent-work-visible="false"\] \{[^}]*max-height:\s*0;[^}]*opacity:\s*0;/s,
+    );
+    expect(APP_STYLES).toMatch(
+      /\.homepage-workflow-document-shell-no-comments \{[^}]*max-width:\s*39rem;/s,
+    );
+
+    scenes.forEach((scene, index) => {
+      expect(sceneNodes[index]?.textContent).toContain(
+        String(index + 1).padStart(2, "0"),
+      );
+      expect(sceneNodes[index]?.textContent).toContain(scene);
+    });
+
+    expect(storyboard.textContent).toContain(
+      "Let's make the homepage more persuasive. Write a plan first.",
+    );
+    expect(storyboard.textContent).toContain(
+      "I'll inspect the current homepage, draft a Markdown plan, and open it in Roughdraft for review before I code.",
+    );
+    expect(storyboard.textContent).toContain(
+      'rg "It\'s just Markdown" packages/app/src',
+    );
+    expect(storyboard.textContent).toContain(
+      "sed -n '1,220p' packages/app/src/App.tsx",
+    );
+    expect(storyboard.textContent).toContain(
+      "write .context/homepage-conversion-plan.md",
+    );
+    expect(storyboard.textContent).toContain("Homepage Conversion Plan");
+    expect(storyboard.textContent).toContain(
+      'Move the workflow story above "It\'s just Markdown."',
+    );
+    expect(storyboard.textContent).toContain(
+      "Show the agent pause, the review window, and the resume signal.",
+    );
+    expect(storyboard.textContent).toContain(
+      "Keep the format section as proof that the review data is portable Markdown.",
+    );
+    expect(storyboard.textContent).toContain(
+      "Review an agent's plan before it starts coding.",
+    );
+    expect(storyboard.textContent).not.toContain(
+      'This should go above "It\'s just Markdown."',
+    );
+    expect(storyboard.textContent).not.toContain("Review complete");
+    expect(storyboard.textContent).toContain("I read your comments.");
+    expect(storyboard.textContent).toContain("Waiting for I'm done...");
   });
 
   it("renders the Roughdraft flavored Markdown spec page", async () => {

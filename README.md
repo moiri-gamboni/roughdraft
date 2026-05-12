@@ -1,7 +1,7 @@
 # Roughdraft
 A local-first markdown editor and viewer for working with AI.
 
-{==Open one markdown file on your machine. Review it, comment on it, and suggest edits.==}{>>What does this mean?<<}{id="c3" by="user" at="2026-04-30T20:18:51.163Z"}{>>It means Roughdraft works with a normal local Markdown file: you open one .md file from your computer, read it in the app, leave inline comments, and propose edits that are saved back into the Markdown using CriticMarkup.<<}{id="c4" by="AI" at="2026-04-30T20:19:39.000Z" re="c3"}
+{==Open one markdown file on your machine. Review it, comment on it, and suggest edits.==}{>>What does this mean?<<}{id="c3" by="user" at="2026-04-30T20:18:51.163Z"}{>>It means Roughdraft works with a normal local Markdown file: you open one .md file from your computer, read it in the app, leave inline comments, and propose edits that are saved back into the Markdown using CriticMarkup.<<}{id="c4" by="AI" at="2026-04-30T20:19:39.000Z" re="c3"}{>>cjool<<}{id="c5" by="user" at="2026-05-07T20:38:25.621Z" re="c4"}
 
 Paste this into your coding agent:
 
@@ -83,6 +83,7 @@ That makes an agent-friendly workflow possible:
 4. You read, edit, leave comments, and suggest changes.
   
 5. You click **Done Reviewing** in Roughdraft, and the AI can respond to your comments or revise the document.
+  
 
 Agents can watch that handoff directly:
 
@@ -99,7 +100,6 @@ roughdraft mcp
 ```
 
 The MCP server exposes tools to read the review index, list pending feedback, watch review events, append replies, and mark items resolved. CriticMarkup in the Markdown file remains the durable source of truth.
-  
 ## Local development
 ```bash
 ./scripts/setup.sh
