@@ -55,6 +55,12 @@ bun .codex/skills/slog/scripts/slog.ts latest file
 
 Always use shadcn for UI work in this repo. Prefer existing components in `packages/app/src/components/ui/`; when a needed primitive is missing, add it there in the same shadcn style before wiring it into product code.
 
+## UI Screenshot Guide
+
+When changing UI behavior, routes, dialogs, popovers, banners, editor modes, review rail states, or visual error/empty states, update `docs/spec/ui-state-screenshot-guide.md` if the change adds, removes, or materially changes a state that should be captured for visual review.
+
+Keep generated screenshot runs in `.context/ui-state-screenshots/` unless the user explicitly asks to commit visual artifacts.
+
 ## Worktree-Specific CLI
 
 This repo installs a worktree-specific Roughdraft CLI wrapper during setup.
@@ -96,13 +102,14 @@ Then recompute `roughdraft_cmd` and use it.
 Before creating or updating a PR:
 
 1. Run `pnpm check`.
-2. Fix any lint, format, test, or build failures.
-3. Confirm `git status --short` only shows intended changes.
-4. Make sure the current branch name is descriptive. If it is random or unclear, rename it before pushing.
-5. Rebase the current branch on the latest `origin/main`.
-6. Commit and push.
-7. Create the PR with `gh pr create --base main`.
-8. If the PR resolves GitHub issues, include closing keywords such as `Fixes #123` in the PR body.
+2. Run `pnpm test:smoke`, especially after UI, routing, editor, file-backend, or workflow changes. This mirrors the browser smoke step in CI and is not covered by `pnpm check`.
+3. Fix any lint, format, test, smoke, or build failures.
+4. Confirm `git status --short` only shows intended changes.
+5. Make sure the current branch name is descriptive. If it is random or unclear, rename it before pushing.
+6. Rebase the current branch on the latest `origin/main`.
+7. Commit and push.
+8. Create the PR with `gh pr create --base main`.
+9. If the PR resolves GitHub issues, include closing keywords such as `Fixes #123` in the PR body.
 
 ## Plan Writing Workflow
 

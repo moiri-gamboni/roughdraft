@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -12,10 +10,6 @@ import {
 
 const AGENT_SETUP_PROMPT =
   "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.";
-const APP_STYLES = readFileSync(
-  resolve(process.cwd(), "src/style.css"),
-  "utf8",
-);
 
 function createDomRect({
   left = 0,
@@ -195,23 +189,31 @@ describe("Homepage", () => {
     expect(getByTestId(container, "rfm-result-pane").textContent).toContain(
       "Result",
     );
-    expect(APP_STYLES).toMatch(
-      /\.rfm-result-editor \.document-page-shell \{[^}]*grid-template-columns:\s*minmax\(0,\s*min\(100%,\s*42rem\)\)\s+minmax\(13rem,\s*16rem\);[^}]*justify-content:\s*start;/s,
+    expect(getByTestId(container, "rfm-source-pane").className).toContain(
+      "bg-transparent",
     );
-    expect(APP_STYLES).toMatch(
-      /\.rfm-source-pane,\s*\.rfm-result-pane \{[^}]*border:\s*0;[^}]*background-color:\s*transparent;[^}]*box-shadow:\s*none;[^}]*overflow:\s*visible;/s,
+    expect(getByTestId(container, "rfm-result-pane").className).toContain(
+      "overflow-visible",
     );
-    expect(APP_STYLES).toMatch(
-      /\.rfm-source-pane \.rfm-demo-pane-header \{[^}]*justify-content:\s*flex-end;/s,
+    expect(getByTestId(container, "rfm-source-pane").className).toContain(
+      "flex-col",
     );
-    expect(APP_STYLES).toMatch(
-      /\.rfm-source-page \{[^}]*margin:\s*1rem;[^}]*min-height:\s*calc\(70vh \+ 7rem\);[^}]*border:\s*1px solid rgb\(15 23 42 \/ 72%\);[^}]*border-radius:\s*0\.5rem;[^}]*background-color:\s*rgb\(31 35 43\);[^}]*box-shadow:\s*0 20px 48px rgb\(15 23 42 \/ 16%\);[^}]*color:\s*rgb\(248 250 252\);/s,
-    );
-    expect(APP_STYLES).toMatch(
-      /\.rfm-source-page::before \{[^}]*content:\s*"markdown source";[^}]*min-height:\s*2\.5rem;[^}]*border-bottom:\s*1px solid rgb\(148 163 184 \/ 20%\);/s,
-    );
-    expect(APP_STYLES).toMatch(
-      /\.rfm-source-editor \{[^}]*padding-top:\s*2\.5rem;[^}]*color:\s*rgb\(226 232 240\);[^}]*--cm-selection-bg:\s*rgb\(30 58 138 \/ 0\.45\);/s,
+    expect(
+      getByTestId(container, "rfm-source-pane").querySelector(
+        ".rfm-source-editor",
+      )?.className,
+    ).toContain("pt-10");
+    expect(
+      getByTestId(container, "rfm-source-pane").querySelector(
+        ".rfm-source-editor",
+      )?.className,
+    ).toContain("[--cm-selection-bg:rgb(30_58_138_/_0.45)]");
+    expect(
+      getByTestId(container, "rfm-result-editor").querySelector(
+        '[data-testid="document-page-shell"]',
+      )?.className,
+    ).toContain(
+      "min-[900px]:grid-cols-[minmax(0,min(100%,42rem))_minmax(13rem,16rem)]",
     );
     const resultDocumentCard = getByTestId(
       container,
@@ -219,7 +221,6 @@ describe("Homepage", () => {
     ).querySelector('[data-testid="document-content-card"]');
     expect(resultDocumentCard?.className).toContain("bg-white");
     expect(resultDocumentCard?.className).toContain("shadow-");
-    expect(APP_STYLES).not.toContain("rfm-token-");
     expect(queryByTestId(container, "rfm-token")).toBeNull();
     expect(
       container.querySelector(".comment-anchor[data-comment-ids]"),
@@ -365,41 +366,29 @@ describe("Homepage", () => {
         "aria-hidden",
       ),
     ).toBe("true");
-    expect(APP_STYLES).toMatch(
-      /\.homepage-workflow-sticky-visual \{[^}]*position:\s*sticky;[^}]*top:\s*2rem;/s,
+    expect(stickyVisual.className).toContain("min-[900px]:sticky");
+    expect(stickyVisual.className).toContain(
+      "max-[899px]:data-[mobile-workflow-visible=false]:opacity-0",
     );
-    expect(APP_STYLES).toMatch(
-      /@media \(max-width:\s*899px\) \{[\s\S]*\.homepage-workflow-sticky-visual \{[^}]*position:\s*sticky;[^}]*top:\s*calc\([^}]*100svh[^}]*var\(--homepage-workflow-dock-height\)[^}]*var\(--homepage-workflow-dock-bottom\)[^}]*\);[^}]*bottom:\s*var\(--homepage-workflow-dock-bottom\);/s,
+    expect(
+      getByTestId(storyboard, "homepage-workflow-scene-list").className,
+    ).toContain(
+      "max-[899px]:pb-[calc(var(--homepage-workflow-dock-height)+var(--homepage-workflow-dock-bottom)+2rem)]",
     );
-    expect(APP_STYLES).toMatch(
-      /@media \(max-width:\s*899px\) \{[\s\S]*\.homepage-workflow-sticky-visual \{[^}]*opacity:\s*1;[^}]*transition:\s*opacity 180ms ease;[^}]*\}[\s\S]*\.homepage-workflow-sticky-visual\[data-mobile-workflow-visible="false"\] \{[^}]*pointer-events:\s*none;[^}]*opacity:\s*0;/s,
-    );
-    expect(APP_STYLES).toMatch(
-      /@media \(max-width:\s*899px\) \{[\s\S]*\.homepage-workflow-scene-list \{[^}]*padding-bottom:\s*calc\([^}]*var\(--homepage-workflow-dock-height\)[^}]*var\(--homepage-workflow-dock-bottom\)[^}]*\+\s*2rem[^}]*\);/s,
-    );
-    expect(APP_STYLES).toMatch(
-      /@media \(max-width:\s*899px\) \{[\s\S]*\.homepage-workflow-popup \{[^}]*--homepage-workflow-popup-overhang:\s*0rem;[^}]*right:\s*0\.5rem;[^}]*left:\s*0\.5rem;/s,
-    );
-    expect(APP_STYLES).toMatch(
-      /@media \(max-width:\s*899px\) \{[\s\S]*\.homepage-workflow-document-workspace \{[^}]*--homepage-workflow-document-offset-y:\s*clamp\(1rem,\s*5svh,\s*2\.75rem\);/s,
-    );
-    expect(APP_STYLES).toMatch(
-      /\.homepage-workflow-popup \{[^}]*position:\s*absolute;[^}]*bottom:\s*1rem;/s,
-    );
-    expect(APP_STYLES).toMatch(
-      /\.homepage-workflow-popup\[data-popup-visible="false"\] \{[^}]*opacity:\s*0;/s,
-    );
-    expect(APP_STYLES).toMatch(
-      /\.homepage-workflow-terminal-reveal-stack\[data-agent-work-visible="false"\] \{[^}]*max-height:\s*0;[^}]*opacity:\s*0;/s,
-    );
-    expect(APP_STYLES).toMatch(
-      /\.homepage-workflow-terminal-tools-heading \{[^}]*display:\s*flex;[^}]*font-weight:\s*700;/s,
-    );
-    expect(APP_STYLES).toMatch(
-      /\.homepage-workflow-terminal-tool-action \{[^}]*color:\s*rgb\(125 211 208\);/s,
-    );
-    expect(APP_STYLES).toMatch(
-      /\.homepage-workflow-document-shell-no-comments \{[^}]*max-width:\s*39rem;/s,
+    expect(
+      getByTestId(storyboard, "homepage-workflow-popup").className,
+    ).toContain("absolute");
+    expect(
+      getByTestId(storyboard, "homepage-workflow-popup").className,
+    ).toContain("data-[popup-visible=false]:opacity-0");
+    expect(
+      getByTestId(storyboard, "homepage-workflow-agent-work").className,
+    ).toContain("data-[agent-work-visible=false]:max-h-0");
+    expect(
+      getByTestId(storyboard, "homepage-workflow-document-scale").parentElement
+        ?.className,
+    ).toContain(
+      "max-[899px]:[--homepage-workflow-document-offset-y:clamp(1rem,5svh,2.75rem)]",
     );
 
     scenes.forEach((scene, index) => {

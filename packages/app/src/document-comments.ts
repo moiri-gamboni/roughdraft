@@ -311,6 +311,16 @@ export function resolveAnchoredRailLayouts<T extends AnchoredRailItem>(
     };
   }
 
+  const firstRailTop = resolved[0]?.railTop ?? 0;
+  if (firstRailTop < 0) {
+    const offset = -firstRailTop;
+    return resolved.map((layout) => ({
+      ...layout,
+      railTop: layout.railTop + offset,
+      railBottom: layout.railBottom + offset,
+    }));
+  }
+
   return resolved;
 }
 

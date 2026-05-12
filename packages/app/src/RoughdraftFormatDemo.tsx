@@ -163,15 +163,15 @@ export function RoughdraftFormatDemo() {
         data-testid="rfm-format-demo-grid"
       >
         <div
-          className="rfm-demo-pane rfm-source-pane"
+          className="flex min-w-0 flex-col overflow-visible rounded-lg border-0 bg-transparent shadow-none"
           data-testid="rfm-source-pane"
         >
-          <div className="rfm-demo-pane-header">
+          <div className="flex h-10 items-center justify-end border-b border-transparent px-4 text-xs font-semibold tracking-[0.14em] text-slate-500 uppercase dark:text-slate-400">
             <span>Source</span>
           </div>
-          <div className="rfm-source-page">
+          <div className="relative m-4 flex min-h-[calc(70vh+7rem)] flex-col overflow-hidden rounded-lg border border-slate-950/70 bg-[#1F232B] text-slate-50 shadow-[0_20px_48px_rgba(15,23,42,0.16)] before:absolute before:top-0 before:right-0 before:left-0 before:flex before:min-h-10 before:items-center before:border-b before:border-slate-400/20 before:px-3.5 before:pl-[4.5rem] before:font-mono before:text-xs before:font-bold before:text-slate-300 before:content-['markdown_source'] after:absolute after:top-[0.925rem] after:left-3.5 after:size-[0.65rem] after:rounded-full after:bg-rose-500 after:shadow-[1rem_0_0_rgb(251,191,36),2rem_0_0_rgb(16,185,129)] focus-within:shadow-[0_20px_48px_rgba(15,23,42,0.16),0_0_0_2px_rgba(56,189,248,0.18)] dark:border-slate-950/70 dark:bg-[#1F232B] dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)]">
             <MarkdownCodeEditor
-              className="rfm-source-editor"
+              className="rfm-source-editor min-h-0 flex-1 pt-10 text-slate-200 [--cm-selection-bg:rgb(30_58_138_/_0.45)]"
               value={source}
               onChange={handleSourceChange}
             />
@@ -186,16 +186,17 @@ export function RoughdraftFormatDemo() {
         </div>
 
         <div
-          className="rfm-demo-pane rfm-result-pane"
+          className="min-w-0 overflow-visible rounded-lg border-0 bg-transparent shadow-none"
           data-testid="rfm-result-pane"
         >
-          <div className="rfm-demo-pane-header">
+          <div className="flex h-10 items-center border-b border-transparent px-4 text-xs font-semibold tracking-[0.14em] text-slate-500 uppercase dark:text-slate-400">
             <span>Result</span>
           </div>
           <div className="rfm-result-editor" data-testid="rfm-result-editor">
             <PageCard
               page={page}
               selected
+              layout="embedded-demo"
               backend={demoBackend}
               interactionMode="editing"
               onSave={async () => {}}

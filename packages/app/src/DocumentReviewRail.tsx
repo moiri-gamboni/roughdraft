@@ -1,6 +1,7 @@
 import type { Editor } from "@tiptap/react";
 import { Check, Reply, X } from "lucide-react";
 import {
+  type CSSProperties,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -53,6 +54,7 @@ interface DocumentReviewRailProps {
   hoveredChangeId: string | null;
   contentHeight: number;
   className?: string;
+  layout?: "anchored" | "flow";
   testId?: string;
   onDeleteComment: (commentId: string) => void;
   onUpdateComment: (commentId: string, nextContent: string) => void;
@@ -73,6 +75,20 @@ interface DocumentReviewRailProps {
   onApplyDraftSuggestion?: () => void;
   onCancelDraftSuggestion?: () => void;
   editor?: Editor | null;
+}
+
+function railLayoutItemClass(layout: "anchored" | "flow") {
+  return cn(
+    "left-0 right-0 rounded-xl border border-transparent bg-transparent shadow-none transition-all duration-200 ease-out will-change-transform",
+    layout === "anchored" ? "absolute" : "relative",
+  );
+}
+
+function railLayoutItemStyle(
+  layout: "anchored" | "flow",
+  railTop: number,
+): CSSProperties | undefined {
+  return layout === "anchored" ? { top: railTop } : undefined;
 }
 
 function getSuggestionPreview(suggestion: CriticChangeRailItem) {
@@ -167,6 +183,7 @@ export function DocumentReviewRail({
   hoveredChangeId,
   contentHeight,
   className,
+  layout: railLayout = "anchored",
   testId,
   onDeleteComment,
   onUpdateComment,
@@ -388,7 +405,9 @@ export function DocumentReviewRail({
   }, [draftSuggestion]);
 
   const railHeight =
-    Math.max(contentHeight, layouts.at(-1)?.railBottom ?? 0) + 24;
+    railLayout === "flow"
+      ? undefined
+      : Math.max(contentHeight, layouts.at(-1)?.railBottom ?? 0) + 24;
 
   const hasDraftOnly = layouts.length === 0 && !draftSuggestion;
   if (hasDraftOnly) {
@@ -397,7 +416,10 @@ export function DocumentReviewRail({
 
   return (
     <aside className={cn("min-w-0", className)} data-testid={testId}>
-      <div className="relative" style={{ minHeight: railHeight }}>
+      <div
+        className={cn(railLayout === "flow" ? "grid gap-3" : "relative")}
+        style={railHeight ? { minHeight: railHeight } : undefined}
+      >
         {layouts.map((layout) => {
           if (layout.type === "comment") {
             const isSelected =
@@ -417,14 +439,14 @@ export function DocumentReviewRail({
                 data-testid={`comment-thread-${layout.thread.rootCommentId}`}
                 data-comment-thread-container="true"
                 className={cn(
-                  "absolute left-0 right-0 rounded-xl border border-transparent bg-transparent shadow-none transition-all duration-200 ease-out will-change-transform",
+                  railLayoutItemClass(railLayout),
                   isSelected
                     ? "border-[#DFDFDC] dark:border-slate-600 bg-white dark:bg-card shadow-[0_20px_48px_rgba(57,47,38,0.14)] dark:shadow-[0_20px_48px_rgba(0,0,0,0.4)]"
                     : "",
                   isSelected && "-translate-x-2",
                   isExpanded ? "cursor-default" : "cursor-pointer",
                 )}
-                style={{ top: layout.railTop }}
+                style={railLayoutItemStyle(railLayout, layout.railTop)}
                 onMouseEnter={() => {
                   if (primaryCommentId) {
                     onHoverComment(primaryCommentId);
@@ -463,8 +485,11 @@ export function DocumentReviewRail({
                 ref={(node) => setItemRef(layout.key, node)}
                 data-testid="draft-suggestion-thread"
                 data-suggestion-thread-container="true"
-                className="-translate-x-2 absolute left-0 right-0 rounded-xl border border-[#DFDFDC] dark:border-slate-600 bg-white dark:bg-card px-4 py-3 shadow-[0_20px_48px_rgba(57,47,38,0.14)] dark:shadow-[0_20px_48px_rgba(0,0,0,0.4)] transition-all duration-200 ease-out will-change-transform"
-                style={{ top: layout.railTop }}
+                className={cn(
+                  railLayoutItemClass(railLayout),
+                  "-translate-x-2 border-[#DFDFDC] dark:border-slate-600 bg-white dark:bg-card px-4 py-3 shadow-[0_20px_48px_rgba(57,47,38,0.14)] dark:shadow-[0_20px_48px_rgba(0,0,0,0.4)]",
+                )}
+                style={railLayoutItemStyle(railLayout, layout.railTop)}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -616,13 +641,13 @@ export function DocumentReviewRail({
               data-testid={`suggestion-thread-${suggestion.changeId}`}
               data-suggestion-thread-container="true"
               className={cn(
-                "absolute left-0 right-0 rounded-xl border border-transparent bg-transparent shadow-none transition-all duration-200 ease-out will-change-transform",
+                railLayoutItemClass(railLayout),
                 isSelected
                   ? "-translate-x-2 border-[#DFDFDC] dark:border-slate-600 bg-white dark:bg-card shadow-[0_20px_48px_rgba(57,47,38,0.14)] dark:shadow-[0_20px_48px_rgba(0,0,0,0.4)]"
                   : "",
                 isHovered && !isSelected && "cursor-pointer",
               )}
-              style={{ top: layout.railTop }}
+              style={railLayoutItemStyle(railLayout, layout.railTop)}
               onMouseEnter={() => onHoverSuggestion(suggestion.changeId)}
               onMouseLeave={() => onHoverSuggestion(null)}
               onPointerDown={() => onSelectSuggestion(suggestion.changeId)}

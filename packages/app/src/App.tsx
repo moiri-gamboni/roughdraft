@@ -60,6 +60,7 @@ import {
 } from "./storage";
 import { UpdateNotice } from "./UpdateNotice";
 import { fetchUpdateStatus, type UpdateStatus } from "./update-status";
+import { cn } from "./lib/utils";
 
 export type DocumentDiskChangeState =
   | "clean"
@@ -258,7 +259,7 @@ const HOMEPAGE_WORKFLOW_REVIEW_ITEMS = [
 
 function getHomepageWorkflowDocumentScale(element: HTMLElement | null) {
   const scaleElement = element?.closest<HTMLElement>(
-    ".homepage-workflow-document-scale",
+    "[data-homepage-workflow-document-scale]",
   );
   const scaleTransform = scaleElement
     ? window.getComputedStyle(scaleElement).transform
@@ -479,11 +480,14 @@ export function Homepage({
 
         <section
           aria-labelledby="homepage-workflow-heading"
-          className="homepage-workflow-storyboard mx-auto mt-12 w-full max-w-6xl text-left"
+          className="mx-auto mt-12 w-full max-w-6xl overflow-visible text-left dark:text-slate-50"
           data-homepage-workflow-storyboard=""
           data-testid="homepage-workflow-storyboard"
         >
-          <div className="homepage-workflow-intro" ref={workflowIntroRef}>
+          <div
+            className="homepage-workflow-intro py-8 pb-6 min-[900px]:pt-12 min-[900px]:pb-8"
+            ref={workflowIntroRef}
+          >
             <h2
               className="text-center text-4xl leading-tight font-semibold text-balance text-slate-950 dark:text-slate-50 sm:text-5xl"
               id="homepage-workflow-heading"
@@ -493,9 +497,9 @@ export function Homepage({
             </h2>
           </div>
 
-          <div className="homepage-workflow-layout">
+          <div className="grid grid-cols-1 gap-6 [--homepage-workflow-dock-bottom:calc(0.75rem+env(safe-area-inset-bottom,0px))] [--homepage-workflow-dock-gap:clamp(1rem,4vw,1.5rem)] [--homepage-workflow-dock-height:clamp(16rem,38svh,20rem)] max-[899px]:gap-0 min-[900px]:grid-cols-[minmax(16rem,0.72fr)_minmax(0,1.28fr)] min-[900px]:items-start min-[900px]:gap-[clamp(2rem,5vw,4rem)] min-[900px]:[--homepage-workflow-dock-bottom:0rem] min-[900px]:[--homepage-workflow-dock-gap:0rem] min-[900px]:[--homepage-workflow-dock-height:auto]">
             <div
-              className="homepage-workflow-sticky-visual"
+              className="homepage-workflow-sticky-visual min-w-0 max-[899px]:sticky max-[899px]:z-[2] max-[899px]:flex max-[899px]:h-[var(--homepage-workflow-dock-height)] max-[899px]:min-h-0 max-[899px]:items-end max-[899px]:overflow-visible max-[899px]:rounded-[0.65rem] max-[899px]:shadow-[0_18px_48px_rgba(15,23,42,0.16)] max-[899px]:transition-opacity max-[899px]:duration-200 max-[899px]:[bottom:var(--homepage-workflow-dock-bottom)] max-[899px]:[top:calc(100svh-var(--homepage-workflow-dock-height)-var(--homepage-workflow-dock-bottom))] max-[899px]:data-[mobile-workflow-visible=false]:pointer-events-none max-[899px]:data-[mobile-workflow-visible=false]:opacity-0 min-[900px]:sticky min-[900px]:top-8 min-[900px]:order-2 min-[900px]:flex min-[900px]:min-h-[calc(100vh-4rem)] min-[900px]:items-center min-[900px]:overflow-visible"
               data-homepage-workflow-sticky-visual=""
               data-mobile-workflow-visible={
                 mobileWorkflowVisualVisible ? "true" : "false"
@@ -510,7 +514,7 @@ export function Homepage({
             </div>
 
             <ol
-              className="homepage-workflow-scene-list"
+              className="grid list-none grid-cols-1 gap-0 p-0 max-[899px]:pb-[calc(var(--homepage-workflow-dock-height)+var(--homepage-workflow-dock-bottom)+2rem)] min-[900px]:order-1"
               data-testid="homepage-workflow-scene-list"
             >
               {HOMEPAGE_WORKFLOW_SCENES.map((scene) => (
@@ -547,13 +551,15 @@ function HomepageWorkflowScene({
 }) {
   return (
     <li
-      className="homepage-workflow-scene min-w-0"
+      className="homepage-workflow-scene relative min-h-72 min-w-0 border-t border-slate-200 py-[clamp(1.75rem,7vw,4.5rem)] first:border-t-0 dark:border-slate-700 max-[899px]:min-h-[calc(100svh-3rem)] max-[899px]:pt-[clamp(2rem,8vw,3rem)] max-[899px]:pb-[calc(var(--homepage-workflow-dock-height)+var(--homepage-workflow-dock-bottom)+var(--homepage-workflow-dock-gap))] min-[900px]:flex min-[900px]:min-h-[min(42rem,calc(100vh-4rem))] min-[900px]:items-center"
       data-homepage-workflow-scene=""
       data-testid="homepage-workflow-scene"
       ref={sceneRef}
     >
-      <div className="homepage-workflow-scene-copy">
-        <div className="homepage-workflow-scene-marker">{step}</div>
+      <div className="min-w-0 max-w-[28rem] max-[899px]:max-w-[min(100%,27rem)]">
+        <div className="inline-flex h-9 min-w-9 items-center justify-center rounded-full border border-slate-950 bg-slate-950 text-[0.8125rem] leading-none font-bold text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950">
+          {step}
+        </div>
         <h3 className="mt-5 text-3xl leading-tight font-semibold text-balance text-slate-950 dark:text-slate-50 sm:text-4xl">
           {title}
         </h3>
@@ -573,7 +579,7 @@ function HomepageWorkflowComposite({
   workflowStage: number;
 }) {
   return (
-    <div className="homepage-workflow-composite">
+    <div className="relative min-h-[38rem] w-[min(100%,43rem)] max-[899px]:h-full max-[899px]:min-h-0 max-[899px]:w-full max-[520px]:min-h-0 min-[900px]:h-auto min-[900px]:min-h-[38rem]">
       <AgentChatMock terminalRef={terminalRef} workflowStage={workflowStage} />
       <RoughdraftPopupMock workflowStage={workflowStage} />
     </div>
@@ -593,16 +599,16 @@ function AgentChatMock({
 
   return (
     <div
-      className="homepage-workflow-terminal homepage-workflow-chat"
+      className="homepage-workflow-terminal w-full overflow-hidden rounded-lg border border-slate-950/70 bg-[#1F232B] font-mono text-slate-50 shadow-[0_20px_48px_rgba(15,23,42,0.16)] max-[899px]:h-full max-[899px]:border-slate-950/60 dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)]"
       data-homepage-workflow-terminal-stage={workflowStage}
       data-testid="homepage-workflow-terminal"
       ref={terminalRef}
     >
-      <div className="homepage-workflow-terminal-titlebar">
+      <div className="flex min-h-10 items-center justify-between gap-4 border-b border-slate-400/20 px-3.5 text-xs font-bold text-slate-300 max-[899px]:min-h-8 max-[899px]:px-3 max-[899px]:text-[0.68rem]">
         <div className="flex items-center gap-1.5" aria-hidden="true">
-          <span className="homepage-workflow-terminal-dot bg-rose-500" />
-          <span className="homepage-workflow-terminal-dot bg-amber-400" />
-          <span className="homepage-workflow-terminal-dot bg-emerald-500" />
+          <span className="inline-flex size-[0.65rem] rounded-full bg-rose-500" />
+          <span className="inline-flex size-[0.65rem] rounded-full bg-amber-400" />
+          <span className="inline-flex size-[0.65rem] rounded-full bg-emerald-500" />
         </div>
         <div className="flex min-w-0 items-center gap-2">
           <Terminal className="size-3.5 shrink-0" aria-hidden="true" />
@@ -610,13 +616,13 @@ function AgentChatMock({
         </div>
       </div>
 
-      <div className="homepage-workflow-terminal-body">
-        <div className="homepage-workflow-terminal-meta">
+      <div className="grid gap-4 py-4 pb-[7.5rem] text-sm leading-[1.55] max-[899px]:gap-2.5 max-[899px]:py-3 max-[899px]:pb-[5.75rem] max-[899px]:text-[0.72rem] max-[899px]:leading-[1.45]">
+        <div className="grid gap-0.5 px-4 text-slate-400 max-[899px]:px-3">
           <div className="font-semibold text-slate-100">Coding agent</div>
           <div>workspace ~/roughdraft</div>
         </div>
 
-        <div className="homepage-workflow-terminal-user-line">
+        <div className="flex gap-3 bg-zinc-700/75 px-4 py-[0.45rem] text-slate-50 max-[899px]:gap-2 max-[899px]:px-3 max-[899px]:py-1.5">
           <span className="text-slate-400">›</span>
           <span>
             Let's make the homepage more persuasive. Write a plan first.
@@ -625,11 +631,11 @@ function AgentChatMock({
 
         <div
           aria-hidden={showAgentWork ? undefined : true}
-          className="homepage-workflow-terminal-reveal-stack"
+          className="grid max-h-80 gap-4 overflow-hidden opacity-100 transition-[max-height,opacity,transform] duration-300 data-[agent-work-visible=false]:max-h-0 data-[agent-work-visible=false]:translate-y-[-0.35rem] data-[agent-work-visible=false]:pointer-events-none data-[agent-work-visible=false]:opacity-0"
           data-agent-work-visible={showAgentWork ? "true" : "false"}
           data-testid="homepage-workflow-agent-work"
         >
-          <div className="homepage-workflow-terminal-agent-line homepage-workflow-stream-item homepage-workflow-stream-item-delay-short">
+          <div className="flex gap-3 px-4 text-slate-50 max-[899px]:px-3">
             <span className="mt-1 size-2 shrink-0 rounded-full bg-slate-100" />
             <span>
               I'll inspect the current homepage, draft a Markdown plan, and open
@@ -638,49 +644,34 @@ function AgentChatMock({
           </div>
 
           <div
-            className="homepage-workflow-terminal-tools homepage-workflow-stream-item homepage-workflow-stream-item-delay-long"
+            className="mx-4 grid gap-1 text-xs leading-[1.55] text-slate-300 max-[899px]:mx-3 max-[899px]:text-[0.66rem]"
             data-testid="homepage-workflow-terminal-tools"
           >
-            <div className="homepage-workflow-terminal-tools-heading">
+            <div className="flex gap-3 font-bold text-slate-50">
               <span aria-hidden="true">•</span>
               <span>Explored</span>
             </div>
-            <div className="homepage-workflow-terminal-tool-list">
-              <div className="homepage-workflow-terminal-tool-row">
-                <span
-                  className="homepage-workflow-terminal-tool-branch"
-                  aria-hidden="true"
-                >
+            <div className="grid gap-0.5 pr-1 pl-[1.55rem] max-[899px]:pl-[1.35rem]">
+              <div className="grid grid-cols-[0.8rem_minmax(0,1fr)] gap-x-1.5 text-slate-50 [overflow-wrap:anywhere]">
+                <span className="font-bold text-slate-400" aria-hidden="true">
                   └
                 </span>
                 <span>
-                  <span className="homepage-workflow-terminal-tool-action">
-                    Search
-                  </span>{" "}
-                  rg "It's just Markdown" packages/app/src
+                  <span className="text-teal-300">Search</span> rg "It's just
+                  Markdown" packages/app/src
                 </span>
               </div>
-              <div className="homepage-workflow-terminal-tool-row">
-                <span
-                  className="homepage-workflow-terminal-tool-branch"
-                  aria-hidden="true"
-                />
+              <div className="grid grid-cols-[0.8rem_minmax(0,1fr)] gap-x-1.5 text-slate-50 [overflow-wrap:anywhere]">
+                <span className="font-bold text-slate-400" aria-hidden="true" />
                 <span>
-                  <span className="homepage-workflow-terminal-tool-action">
-                    Read
-                  </span>{" "}
-                  sed -n '1,220p' packages/app/src/App.tsx
+                  <span className="text-teal-300">Read</span> sed -n '1,220p'
+                  packages/app/src/App.tsx
                 </span>
               </div>
-              <div className="homepage-workflow-terminal-tool-row">
-                <span
-                  className="homepage-workflow-terminal-tool-branch"
-                  aria-hidden="true"
-                />
+              <div className="grid grid-cols-[0.8rem_minmax(0,1fr)] gap-x-1.5 text-slate-50 [overflow-wrap:anywhere]">
+                <span className="font-bold text-slate-400" aria-hidden="true" />
                 <span>
-                  <span className="homepage-workflow-terminal-tool-action">
-                    Write
-                  </span>{" "}
+                  <span className="text-teal-300">Write</span>{" "}
                   .context/homepage-conversion-plan.md
                 </span>
               </div>
@@ -690,7 +681,7 @@ function AgentChatMock({
 
         <div
           aria-hidden={showRoughdraftCommand ? undefined : true}
-          className="homepage-workflow-terminal-command homepage-workflow-stream-item"
+          className="mx-4 max-h-32 overflow-hidden rounded-lg border border-slate-400/20 bg-slate-950/30 p-3 text-xs leading-[1.55] text-slate-50 opacity-100 transition-[max-height,margin,padding,border-width,opacity,transform] duration-300 data-[terminal-line-visible=false]:mt-[-1rem] data-[terminal-line-visible=false]:max-h-0 data-[terminal-line-visible=false]:translate-y-[-0.35rem] data-[terminal-line-visible=false]:border-0 data-[terminal-line-visible=false]:py-0 data-[terminal-line-visible=false]:pointer-events-none data-[terminal-line-visible=false]:opacity-0 max-[899px]:mx-3 max-[899px]:p-2 max-[899px]:text-[0.66rem]"
           data-terminal-line-visible={showRoughdraftCommand ? "true" : "false"}
           data-testid="homepage-workflow-terminal-command"
         >
@@ -700,7 +691,7 @@ function AgentChatMock({
 
         <div
           aria-hidden={showAgentResume ? undefined : true}
-          className="homepage-workflow-terminal-agent-line homepage-workflow-stream-item"
+          className="flex max-h-32 gap-3 overflow-hidden px-4 text-slate-50 opacity-100 transition-[max-height,margin,padding,border-width,opacity,transform] duration-300 data-[terminal-line-visible=false]:mt-[-1rem] data-[terminal-line-visible=false]:max-h-0 data-[terminal-line-visible=false]:translate-y-[-0.35rem] data-[terminal-line-visible=false]:border-0 data-[terminal-line-visible=false]:py-0 data-[terminal-line-visible=false]:pointer-events-none data-[terminal-line-visible=false]:opacity-0 max-[899px]:px-3"
           data-terminal-line-visible={showAgentResume ? "true" : "false"}
           data-testid="homepage-workflow-agent-resume"
         >
@@ -713,13 +704,13 @@ function AgentChatMock({
 
         <div
           aria-hidden={showAgentWork ? undefined : true}
-          className="homepage-workflow-terminal-input"
+          className="flex min-h-[2.65rem] max-h-32 items-center gap-3 overflow-hidden border-y border-slate-300/60 px-4 text-slate-50 opacity-100 transition-[max-height,margin,padding,border-width,opacity,transform] duration-300 data-[terminal-line-visible=false]:mt-[-1rem] data-[terminal-line-visible=false]:max-h-0 data-[terminal-line-visible=false]:translate-y-[-0.35rem] data-[terminal-line-visible=false]:border-0 data-[terminal-line-visible=false]:py-0 data-[terminal-line-visible=false]:pointer-events-none data-[terminal-line-visible=false]:opacity-0"
           data-terminal-line-visible={showAgentWork ? "true" : "false"}
           data-testid="homepage-workflow-terminal-input"
         >
           <span className="text-slate-100">›</span>
           <span
-            className="homepage-workflow-terminal-caret"
+            className="inline-flex h-5 w-2.5 bg-slate-50"
             aria-hidden="true"
           />
         </div>
@@ -903,29 +894,30 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
   return (
     <div
       aria-hidden={visible ? undefined : true}
-      className="homepage-workflow-panel homepage-workflow-popup"
+      className="absolute right-[calc(-1*var(--homepage-workflow-popup-overhang))] bottom-4 left-[clamp(0.5rem,3vw,1.5rem)] z-[2] w-auto min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 shadow-[0_18px_44px_rgba(15,23,42,0.08)] transition-[opacity,transform] duration-200 [--homepage-workflow-popup-overhang:clamp(0rem,calc((100vw-72rem)*0.5),4rem)] data-[popup-visible=false]:translate-y-3 data-[popup-visible=false]:scale-[0.98] data-[popup-visible=false]:pointer-events-none data-[popup-visible=false]:opacity-0 data-[popup-visible=true]:translate-y-0 data-[popup-visible=true]:scale-100 data-[popup-visible=true]:opacity-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50 dark:shadow-[0_18px_44px_rgba(0,0,0,0.28)] max-[899px]:right-2 max-[899px]:bottom-2 max-[899px]:left-2 max-[899px]:[--homepage-workflow-popup-overhang:0rem] max-[520px]:right-1.5 max-[520px]:bottom-1.5 max-[520px]:left-1.5"
       data-homepage-workflow-popup=""
       data-popup-visible={visible ? "true" : "false"}
       data-testid="homepage-workflow-popup"
     >
-      <div className="homepage-workflow-panel-header">
+      <div className="flex h-10 items-center gap-1.5 border-b border-slate-200 px-4 text-xs font-bold text-slate-500 dark:border-slate-700 dark:text-slate-400 max-[520px]:px-3">
         <FileText className="size-3.5" aria-hidden="true" />
         homepage-conversion-plan.md
       </div>
       <div
-        className="homepage-workflow-document-workspace"
+        className="relative min-h-[28rem] overflow-hidden bg-stone-50 p-4 [--homepage-workflow-document-offset-y:0rem] [--homepage-workflow-document-scale:1] dark:bg-slate-900 min-[780px]:min-h-[25.5rem] min-[780px]:[--homepage-workflow-document-scale:0.6] max-[899px]:min-h-[14.5rem] max-[899px]:p-2.5 max-[899px]:[--homepage-workflow-document-offset-y:clamp(1rem,5svh,2.75rem)] max-[899px]:[--homepage-workflow-document-scale:0.66] max-[520px]:p-3 max-[520px]:[--homepage-workflow-document-scale:0.6]"
         data-homepage-workflow-review-visible={
           showUserFeedback ? "true" : "false"
         }
         data-testid="homepage-workflow-document-workspace"
       >
         <div
-          className="homepage-workflow-document-scale"
+          className="relative w-full min-w-0 origin-top-left transform-[translateY(var(--homepage-workflow-document-offset-y))_scale(var(--homepage-workflow-document-scale))] min-[780px]:w-[calc(100%/var(--homepage-workflow-document-scale))] max-[899px]:w-[calc(100%/var(--homepage-workflow-document-scale))]"
+          data-homepage-workflow-document-scale=""
           data-testid="homepage-workflow-document-scale"
         >
           {showDoneButton ? (
             <Button
-              className="homepage-workflow-handoff-button"
+              className="absolute top-3 right-3 z-[3] h-8 rounded-[7px] bg-black px-3 text-xs font-bold text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] hover:bg-black/85"
               data-testid="homepage-workflow-handoff-button"
               type="button"
               size="sm"
@@ -935,11 +927,12 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
             </Button>
           ) : null}
           <div
-            className={`homepage-workflow-document-shell ${
+            className={cn(
+              "mx-auto grid max-w-[39rem] min-w-0 items-start gap-4 transition-[max-width,grid-template-columns] duration-200",
               showUserFeedback
-                ? "homepage-workflow-document-shell-with-comments"
-                : "homepage-workflow-document-shell-no-comments"
-            }`}
+                ? "max-w-full min-[780px]:max-w-[56rem] min-[780px]:grid-cols-[minmax(0,1fr)_minmax(11rem,0.48fr)] min-[780px]:gap-5 max-[899px]:max-w-[46rem] max-[899px]:grid-cols-[minmax(0,1fr)_minmax(10rem,0.44fr)] max-[899px]:gap-[0.85rem]"
+                : "max-w-[39rem]",
+            )}
             data-testid={
               showUserFeedback
                 ? "homepage-workflow-document-shell-with-comments"
@@ -947,41 +940,46 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
             }
             ref={documentShellRef}
           >
-            <div className="homepage-workflow-document-main">
-              <div className="homepage-workflow-document-toolbar">
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2 px-1 pb-3 font-mono text-[0.7rem] font-medium text-stone-400 dark:text-slate-400">
                 <button
                   aria-label="Switch editor view"
-                  className="homepage-workflow-view-toggle"
+                  className="grid h-[1.375rem] grid-cols-[repeat(2,1.625rem)] items-center rounded-full bg-[#DED8CE] p-0.5 shadow-[inset_0_1px_0_rgba(255,251,245,0.72)] dark:bg-slate-700 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
                   type="button"
                 >
-                  <span className="homepage-workflow-view-toggle-active">
+                  <span className="flex h-[1.125rem] items-center justify-center rounded-full bg-[#FFFDFC] text-stone-700 shadow-[0_1px_2px_rgba(41,37,36,0.12)] dark:bg-slate-500 dark:text-white">
                     <Eye className="size-3" aria-hidden="true" />
                   </span>
-                  <span>
+                  <span className="flex h-[1.125rem] items-center justify-center rounded-full text-stone-500 dark:text-slate-400">
                     <CodeXml className="size-3" aria-hidden="true" />
                   </span>
                 </button>
-                <span className="homepage-workflow-document-filename">
+                <span className="min-w-0 truncate text-stone-600 dark:text-slate-400">
                   homepage-conversion-plan.md
                 </span>
-                <span className="homepage-workflow-document-mode">
+                <span className="ml-auto inline-flex items-center gap-1 text-stone-400 dark:text-slate-400 max-[520px]:hidden">
                   <PencilLine className="size-3" aria-hidden="true" />
                   editing
                 </span>
               </div>
               <div
-                className="homepage-workflow-document-page"
+                className="min-h-[25rem] rounded-xl border border-[#E9E9E8] bg-white p-[clamp(2rem,6vw,3.5rem)] shadow-[0_18px_44px_rgba(57,47,38,0.08)] dark:border-slate-700 dark:bg-slate-900 dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)] max-[899px]:min-h-[19rem] max-[899px]:p-6"
                 ref={documentPageRef}
               >
-                <p className="homepage-workflow-doc-kicker">Roughdraft</p>
-                <h3 data-testid="homepage-workflow-document-title">
+                <p className="m-0 mb-4 text-[0.72rem] leading-none font-semibold tracking-[0.14em] text-stone-600 uppercase dark:text-slate-400">
+                  Roughdraft
+                </p>
+                <h3
+                  className="m-0 mb-6 text-[clamp(1.6rem,4vw,2.35rem)] leading-[1.1] font-semibold text-slate-950 dark:text-slate-50"
+                  data-testid="homepage-workflow-document-title"
+                >
                   Homepage Conversion Plan
                 </h3>
-                <p>
+                <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-slate-700 dark:text-slate-300">
                   Move the workflow story above{" "}
                   {showUserFeedback ? (
                     <span
-                      className="homepage-workflow-comment-highlight"
+                      className="bg-[#FFF5C7] decoration-clone box-decoration-clone dark:bg-amber-900/35"
                       data-comment-ids='["nora-comment"]'
                       data-testid="homepage-workflow-comment-highlight"
                     >
@@ -991,25 +989,25 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
                     '"It\'s just Markdown."'
                   )}
                 </p>
-                <p>
+                <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-slate-700 dark:text-slate-300">
                   Show the agent pause, the review window, and the resume
                   signal.
                 </p>
-                <p>
+                <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-slate-700 dark:text-slate-300">
                   Keep the format section as proof that the review data is
                   portable Markdown.
                 </p>
                 {showUserFeedback ? (
-                  <p>
+                  <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-slate-700 dark:text-slate-300">
                     <span
-                      className="homepage-workflow-suggestion-old"
+                      className="rounded-[0.2rem] bg-rose-50 text-rose-900 line-through decoration-rose-600/75 dark:bg-rose-900/35 dark:text-rose-300"
                       data-comment-ids='["nora-suggestion"]'
                       data-testid="homepage-workflow-suggestion-old"
                     >
                       Review an agent's plan
                     </span>{" "}
                     <span
-                      className="homepage-workflow-suggestion-new"
+                      className="rounded-[0.2rem] bg-emerald-50 text-emerald-800 underline decoration-emerald-500/75 underline-offset-[0.16em] dark:bg-emerald-950/50 dark:text-emerald-300"
                       data-comment-ids='["nora-suggestion"]'
                       data-testid="homepage-workflow-suggestion-new"
                     >
@@ -1018,15 +1016,19 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
                     before it starts coding.
                   </p>
                 ) : showIncorporatedPlan ? (
-                  <p>Review a homepage plan before it starts coding.</p>
+                  <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-slate-700 dark:text-slate-300">
+                    Review a homepage plan before it starts coding.
+                  </p>
                 ) : (
-                  <p>Review an agent's plan before it starts coding.</p>
+                  <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-slate-700 dark:text-slate-300">
+                    Review an agent's plan before it starts coding.
+                  </p>
                 )}
               </div>
             </div>
             {showUserFeedback ? (
               <div
-                className="homepage-workflow-review-rail"
+                className="relative min-h-[25rem] min-w-0 text-slate-700"
                 data-testid="homepage-workflow-review-rail"
                 ref={reviewRailRef}
               >
@@ -1037,17 +1039,20 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
 
                   return (
                     <div
-                      className="homepage-workflow-review-thread"
+                      className="homepage-workflow-review-thread absolute right-0 left-0 grid grid-cols-[2rem_minmax(0,1fr)] items-start gap-3 transition-[top] duration-200"
                       key={item.key}
                       ref={(node) => setThreadRef(item.key, node)}
                       style={layout ? { top: layout.railTop } : undefined}
                     >
-                      <div className="homepage-workflow-review-avatar">N</div>
+                      <div className="flex size-8 items-center justify-center rounded-full border border-stone-300 bg-[#E7E0D5] text-[0.72rem] font-bold text-stone-700">
+                        N
+                      </div>
                       <div>
-                        <div className="homepage-workflow-review-author">
+                        <div className="mb-1 text-[0.85rem] font-bold text-slate-950 dark:text-slate-50">
                           {item.author}
                         </div>
                         <p
+                          className="m-0 text-[0.8rem] leading-[1.65] text-slate-700 dark:text-slate-300"
                           data-testid={
                             item.kind === "comment"
                               ? "homepage-workflow-review-comment"
@@ -1059,23 +1064,25 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
                         {showAgentReply
                           ? item.replies?.map((reply) => (
                               <div
-                                className="homepage-workflow-review-reply homepage-workflow-review-thread-ai"
+                                className="mt-3 grid grid-cols-[1.65rem_minmax(0,1fr)] gap-2.5 border-t border-stone-200 pt-3"
                                 key={`${item.key}-${reply.author}`}
                               >
-                                <div className="homepage-workflow-review-avatar">
+                                <div className="flex size-[1.65rem] items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-[0.62rem] font-bold text-sky-700">
                                   {reply.author}
                                 </div>
                                 <div>
-                                  <div className="homepage-workflow-review-author">
+                                  <div className="mb-0.5 text-[0.76rem] font-bold text-slate-950 dark:text-slate-50">
                                     {reply.author}
                                   </div>
-                                  <p>{reply.body}</p>
+                                  <p className="m-0 text-[0.8rem] leading-[1.65] text-slate-700 dark:text-slate-300">
+                                    {reply.body}
+                                  </p>
                                 </div>
                               </div>
                             ))
                           : null}
                         {item.kind === "suggestion" ? (
-                          <div className="homepage-workflow-review-actions">
+                          <div className="mt-2 flex gap-3 text-[0.95rem] text-stone-400">
                             <Check className="size-3.5" aria-hidden="true" />
                             <span aria-hidden="true">×</span>
                           </div>

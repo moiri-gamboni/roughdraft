@@ -547,11 +547,12 @@ export function DocumentWorkspace({
           <div
             data-testid="document-page-header"
             className={cn(
-              "document-page-shell mb-2 text-[0.62rem] font-medium tracking-[0.01em] text-stone-400",
-              !documentHasComments && "document-page-shell-no-comments",
+              "document-page-shell mb-2 flex flex-col gap-6 text-[0.62rem] font-medium tracking-[0.01em] text-stone-400 min-[1100px]:grid min-[1100px]:grid-cols-[minmax(0,46.5rem)_minmax(24rem,1fr)] min-[1100px]:items-start min-[1100px]:justify-between min-[1100px]:gap-8",
+              !documentHasComments &&
+                "document-page-shell-no-comments min-[1100px]:grid-cols-[minmax(0,46.5rem)] min-[1100px]:justify-center",
             )}
           >
-            <div className="document-page-main min-w-0">
+            <div className="document-page-main w-full max-w-[46.5rem] min-w-0">
               <div className="flex w-full flex-wrap items-center gap-1.5 px-1">
                 <Tooltip>
                   <TooltipTrigger
@@ -659,7 +660,7 @@ export function DocumentWorkspace({
             </div>
             {documentHasComments ? (
               <div
-                className="document-comment-rail pointer-events-none invisible"
+                className="document-comment-rail pointer-events-none invisible hidden min-[1100px]:block"
                 aria-hidden="true"
               />
             ) : null}
