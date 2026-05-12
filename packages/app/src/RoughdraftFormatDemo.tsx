@@ -13,16 +13,16 @@ interface FormatExample {
 
 const FORMAT_EXAMPLES: FormatExample[] = [
   {
+    id: "plan-review",
+    label: "Review a plan",
+    markdown:
+      '# Homepage Conversion Plan\nGoal: make the homepage workflow story and Markdown proof feel like one continuous example.\n\nMove the workflow story above {=="It\'s just Markdown."==}{>>This should go above "It\'s just Markdown."<<}{id="c1" by="Nora" at="2026-04-28T12:10:00.000Z"}{>>Sounds good. I\'ll move it above that section.<<}{id="c2" by="AI" at="2026-04-28T12:11:00.000Z" re="c1"}\n\n{~~Review an agent\'s plan~>Review a homepage plan~~}{id="s1" by="Nora" at="2026-04-28T12:12:00.000Z"} before it starts coding.\n\nKeep the format section as proof that the review data is portable Markdown.\n',
+  },
+  {
     id: "spec-review",
     label: "Review a spec",
     markdown:
       '# Checkout Spec Review\nGoal: reduce trial checkout abandonment by 8%. Scope: ship {==guest checkout for returning teams==}{>>PM: confirm whether this excludes SSO-only workspaces.<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"} in the first beta.\n\nMetric: replace {~~activation~>first successful team purchase~~}{id="s1" by="user" at="2026-04-28T12:03:00.000Z"} before engineering sizing.\n',
-  },
-  {
-    id: "plan-review",
-    label: "Review a plan",
-    markdown:
-      '# Agent Plan Review\nPlan: scaffold the settings page, wire save/load through `settings.ts`, then {==run the full suite after styling==}{>>Can we add the failing state test before implementation so the agent has a guardrail?<<}{id="c1" by="user" at="2026-04-28T12:10:00.000Z"}.\n\nAdd {++a rollback note for the migration step++}{id="s1" by="user" at="2026-04-28T12:12:00.000Z"}{>>I want to keep this easy to undo if the vibe pass gets messy.<<}{id="c2" by="user" at="2026-04-28T12:13:00.000Z" re="s1"} before implementation starts.\n',
   },
   {
     id: "writing-edit",

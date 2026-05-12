@@ -2,7 +2,6 @@ import {
   ArrowLeft,
   Braces,
   Check,
-  Code2,
   CodeXml,
   Copy,
   Eye,
@@ -12,7 +11,15 @@ import {
   PencilLine,
   Terminal,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type Ref,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   buildLocationForDocumentEditorViewMode,
   type DocumentEditorViewMode,
@@ -36,6 +43,12 @@ import {
   DialogTrigger,
 } from "./components/ui/dialog";
 import { DocumentWorkspace } from "./DocumentWorkspace";
+import {
+  getCommentAnchorMeasurements,
+  groupCommentAnchorMeasurements,
+  normalizeCommentMeasurement,
+  resolveAnchoredRailLayouts,
+} from "./document-comments";
 import { detectBackend } from "./detect-backend";
 import type { DocumentSaveState } from "./PageCard";
 import { PreviewBackend } from "./preview-backend";
@@ -124,7 +137,7 @@ const HOMEPAGE_WORKFLOW_SCENES = [
     step: "06",
     title: "The agent resumes",
     description:
-      "The next agent turn reads the same Markdown file, sees your comments, and continues with the corrected plan.",
+      "The next agent turn reads the same Markdown file, sees your comments and suggestions, and continues with the corrected plan.",
   },
 ] as const;
 const ROUGHDRAFT_MARKDOWN_SYNTAX = [
@@ -219,6 +232,42 @@ const ROUGHDRAFT_MARKDOWN_EXTENSION_DETAILS = [
     body: "CriticMarkup inside inline code and fenced code blocks is preserved as example text instead of becoming live review feedback.",
   },
 ] as const;
+const HOMEPAGE_WORKFLOW_REVIEW_ITEMS = [
+  {
+    key: "nora-comment",
+    commentIds: ["nora-comment"],
+    author: "Nora",
+    body: 'This should go above "It\'s just Markdown."',
+    kind: "comment",
+    replies: [
+      {
+        author: "AI",
+        body: "Sounds good. I'll move it above that section.",
+      },
+    ],
+  },
+  {
+    key: "nora-suggestion",
+    commentIds: ["nora-suggestion"],
+    author: "Nora",
+    body: 'Replace: "agent\'s plan" with "homepage plan"',
+    kind: "suggestion",
+    replies: [],
+  },
+] as const;
+
+function getHomepageWorkflowDocumentScale(element: HTMLElement | null) {
+  const scaleElement = element?.closest<HTMLElement>(
+    ".homepage-workflow-document-scale",
+  );
+  const scaleTransform = scaleElement
+    ? window.getComputedStyle(scaleElement).transform
+    : "none";
+  const matrix =
+    scaleTransform === "none" ? null : new DOMMatrixReadOnly(scaleTransform);
+
+  return matrix?.a || 1;
+}
 
 export function Homepage({
   message,
@@ -231,8 +280,12 @@ export function Homepage({
     "idle",
   );
   const workflowStepRefs = useRef<Record<string, HTMLLIElement | null>>({});
+  const workflowIntroRef = useRef<HTMLDivElement | null>(null);
   const workflowStickyVisualRef = useRef<HTMLDivElement | null>(null);
+  const workflowTerminalRef = useRef<HTMLDivElement | null>(null);
   const [homepageWorkflowStage, setHomepageWorkflowStage] = useState(1);
+  const [mobileWorkflowVisualVisible, setMobileWorkflowVisualVisible] =
+    useState(false);
 
   const handleCopySetupPrompt = useCallback(async () => {
     try {
@@ -246,22 +299,35 @@ export function Homepage({
 
   useEffect(() => {
     const updateHomepageWorkflowStage = () => {
+      const isMobileStoryboard =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(max-width: 899px)").matches;
+      const workflowIntroRect =
+        workflowIntroRef.current?.getBoundingClientRect();
+      const nextMobileWorkflowVisualVisible =
+        !isMobileStoryboard ||
+        (workflowIntroRect ? workflowIntroRect.bottom <= 0 : false);
+
+      setMobileWorkflowVisualVisible((current) =>
+        current === nextMobileWorkflowVisualVisible
+          ? current
+          : nextMobileWorkflowVisualVisible,
+      );
+
       const pageCanScroll =
         document.documentElement.scrollHeight > window.innerHeight + 1;
       if (!pageCanScroll) return;
 
       const stickyVisualRect =
         workflowStickyVisualRef.current?.getBoundingClientRect();
-      const isMobileStoryboard =
-        typeof window.matchMedia === "function" &&
-        window.matchMedia("(max-width: 899px)").matches;
+      const terminalRect = workflowTerminalRef.current?.getBoundingClientRect();
       const mobileReadableOffset = stickyVisualRect
         ? Math.min(stickyVisualRect.height + 32, window.innerHeight * 0.35)
         : 0;
       const activationLine =
         isMobileStoryboard && stickyVisualRect
           ? Math.max(0, Math.ceil(stickyVisualRect.top - mobileReadableOffset))
-          : 0;
+          : (terminalRect?.top ?? 0);
 
       let nextStage = 1;
       for (const [step, element] of Object.entries(workflowStepRefs.current)) {
@@ -417,7 +483,7 @@ export function Homepage({
           data-homepage-workflow-storyboard=""
           data-testid="homepage-workflow-storyboard"
         >
-          <div className="homepage-workflow-intro">
+          <div className="homepage-workflow-intro" ref={workflowIntroRef}>
             <h2
               className="text-center text-4xl leading-tight font-semibold text-balance text-slate-950 dark:text-slate-50 sm:text-5xl"
               id="homepage-workflow-heading"
@@ -431,11 +497,15 @@ export function Homepage({
             <div
               className="homepage-workflow-sticky-visual"
               data-homepage-workflow-sticky-visual=""
+              data-mobile-workflow-visible={
+                mobileWorkflowVisualVisible ? "true" : "false"
+              }
               data-testid="homepage-workflow-sticky-visual"
               ref={workflowStickyVisualRef}
             >
               <HomepageWorkflowComposite
                 workflowStage={homepageWorkflowStage}
+                terminalRef={workflowTerminalRef}
               />
             </div>
 
@@ -496,19 +566,27 @@ function HomepageWorkflowScene({
 }
 
 function HomepageWorkflowComposite({
+  terminalRef,
   workflowStage,
 }: {
+  terminalRef?: Ref<HTMLDivElement>;
   workflowStage: number;
 }) {
   return (
     <div className="homepage-workflow-composite">
-      <AgentChatMock workflowStage={workflowStage} />
+      <AgentChatMock terminalRef={terminalRef} workflowStage={workflowStage} />
       <RoughdraftPopupMock workflowStage={workflowStage} />
     </div>
   );
 }
 
-function AgentChatMock({ workflowStage }: { workflowStage: number }) {
+function AgentChatMock({
+  terminalRef,
+  workflowStage,
+}: {
+  terminalRef?: Ref<HTMLDivElement>;
+  workflowStage: number;
+}) {
   const showAgentWork = workflowStage >= 2;
   const showRoughdraftCommand = workflowStage >= 3;
   const showAgentResume = workflowStage >= 6;
@@ -518,6 +596,7 @@ function AgentChatMock({ workflowStage }: { workflowStage: number }) {
       className="homepage-workflow-terminal homepage-workflow-chat"
       data-homepage-workflow-terminal-stage={workflowStage}
       data-testid="homepage-workflow-terminal"
+      ref={terminalRef}
     >
       <div className="homepage-workflow-terminal-titlebar">
         <div className="flex items-center gap-1.5" aria-hidden="true">
@@ -562,13 +641,50 @@ function AgentChatMock({ workflowStage }: { workflowStage: number }) {
             className="homepage-workflow-terminal-tools homepage-workflow-stream-item homepage-workflow-stream-item-delay-long"
             data-testid="homepage-workflow-terminal-tools"
           >
-            <div className="mb-2 flex items-center gap-1.5 font-medium text-slate-200">
-              <Code2 className="size-3.5" aria-hidden="true" />
-              Tool calls
+            <div className="homepage-workflow-terminal-tools-heading">
+              <span aria-hidden="true">•</span>
+              <span>Explored</span>
             </div>
-            <div>rg "It's just Markdown" packages/app/src</div>
-            <div>sed -n '1,220p' packages/app/src/App.tsx</div>
-            <div>write .context/homepage-conversion-plan.md</div>
+            <div className="homepage-workflow-terminal-tool-list">
+              <div className="homepage-workflow-terminal-tool-row">
+                <span
+                  className="homepage-workflow-terminal-tool-branch"
+                  aria-hidden="true"
+                >
+                  └
+                </span>
+                <span>
+                  <span className="homepage-workflow-terminal-tool-action">
+                    Search
+                  </span>{" "}
+                  rg "It's just Markdown" packages/app/src
+                </span>
+              </div>
+              <div className="homepage-workflow-terminal-tool-row">
+                <span
+                  className="homepage-workflow-terminal-tool-branch"
+                  aria-hidden="true"
+                />
+                <span>
+                  <span className="homepage-workflow-terminal-tool-action">
+                    Read
+                  </span>{" "}
+                  sed -n '1,220p' packages/app/src/App.tsx
+                </span>
+              </div>
+              <div className="homepage-workflow-terminal-tool-row">
+                <span
+                  className="homepage-workflow-terminal-tool-branch"
+                  aria-hidden="true"
+                />
+                <span>
+                  <span className="homepage-workflow-terminal-tool-action">
+                    Write
+                  </span>{" "}
+                  .context/homepage-conversion-plan.md
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -590,8 +706,8 @@ function AgentChatMock({ workflowStage }: { workflowStage: number }) {
         >
           <span className="mt-1 size-2 shrink-0 rounded-full bg-emerald-300" />
           <span>
-            I read your comments. I'll move the workflow storyboard above the
-            Markdown section and use the homepage conversion example.
+            I read your comments. I accepted your wording suggestion and moved
+            the workflow story above the Markdown section.
           </span>
         </div>
 
@@ -614,8 +730,175 @@ function AgentChatMock({ workflowStage }: { workflowStage: number }) {
 
 function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
   const visible = workflowStage >= 3;
-  const showReviewMarkup = workflowStage >= 4;
-  const showDoneButton = workflowStage >= 5;
+  const showUserFeedback = workflowStage >= 4;
+  const showAgentReply = workflowStage >= 6;
+  const showIncorporatedPlan = workflowStage >= 6;
+  const showDoneButton = workflowStage >= 5 && workflowStage < 6;
+  const documentShellRef = useRef<HTMLDivElement | null>(null);
+  const documentPageRef = useRef<HTMLDivElement | null>(null);
+  const reviewRailRef = useRef<HTMLDivElement | null>(null);
+  const threadRefs = useRef(new Map<string, HTMLDivElement>());
+  const [commentAnchorGroups, setCommentAnchorGroups] = useState<
+    Array<{
+      key: string;
+      commentIds: string[];
+      anchorTop: number;
+      anchorBottom: number;
+    }>
+  >([]);
+  const [threadHeights, setThreadHeights] = useState<Record<string, number>>(
+    {},
+  );
+
+  const measureHomepageReviewLayout = useCallback(() => {
+    const shellElement = documentShellRef.current;
+    const pageElement = documentPageRef.current;
+    const railElement = reviewRailRef.current;
+
+    if (!showUserFeedback || !shellElement || !pageElement || !railElement) {
+      setCommentAnchorGroups([]);
+      return;
+    }
+
+    const railRect = railElement.getBoundingClientRect();
+    const measurementScale = getHomepageWorkflowDocumentScale(shellElement);
+    const anchorElements =
+      pageElement.querySelectorAll<HTMLElement>("[data-comment-ids]");
+
+    setCommentAnchorGroups(
+      groupCommentAnchorMeasurements(
+        getCommentAnchorMeasurements(
+          anchorElements,
+          railRect.top,
+          measurementScale,
+        ),
+      ),
+    );
+  }, [showUserFeedback]);
+
+  useLayoutEffect(() => {
+    measureHomepageReviewLayout();
+
+    if (!showUserFeedback) return;
+
+    const shellElement = documentShellRef.current;
+    const pageElement = documentPageRef.current;
+    const railElement = reviewRailRef.current;
+    if (!shellElement || !pageElement || !railElement) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      measureHomepageReviewLayout();
+    });
+
+    resizeObserver.observe(shellElement);
+    resizeObserver.observe(pageElement);
+    resizeObserver.observe(railElement);
+    window.addEventListener("resize", measureHomepageReviewLayout);
+
+    if (document.fonts) {
+      void document.fonts.ready.then(measureHomepageReviewLayout);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", measureHomepageReviewLayout);
+    };
+  }, [measureHomepageReviewLayout, showUserFeedback]);
+
+  const setThreadRef = useCallback(
+    (key: string, node: HTMLDivElement | null) => {
+      if (node) {
+        threadRefs.current.set(key, node);
+      } else {
+        threadRefs.current.delete(key);
+      }
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
+    if (!showUserFeedback) {
+      setThreadHeights({});
+      return;
+    }
+
+    const updateThreadHeights = () => {
+      const measurementScale = getHomepageWorkflowDocumentScale(
+        documentShellRef.current,
+      );
+
+      setThreadHeights((current) => {
+        const next: Record<string, number> = {};
+        let changed = false;
+
+        for (const item of HOMEPAGE_WORKFLOW_REVIEW_ITEMS) {
+          const element = threadRefs.current.get(item.key);
+          const measuredHeight = Math.ceil(
+            element?.getBoundingClientRect().height ?? 0,
+          );
+          const height =
+            measuredHeight > 0
+              ? Math.ceil(
+                  normalizeCommentMeasurement(measuredHeight, measurementScale),
+                )
+              : (current[item.key] ?? 0);
+          next[item.key] = height;
+          changed ||= current[item.key] !== height;
+        }
+
+        if (
+          !changed &&
+          Object.keys(current).length === Object.keys(next).length
+        ) {
+          return current;
+        }
+
+        return next;
+      });
+    };
+
+    updateThreadHeights();
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateThreadHeights();
+    });
+
+    for (const item of HOMEPAGE_WORKFLOW_REVIEW_ITEMS) {
+      const element = threadRefs.current.get(item.key);
+      if (element) resizeObserver.observe(element);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [showUserFeedback]);
+
+  const reviewLayouts = useMemo(() => {
+    const railItems = HOMEPAGE_WORKFLOW_REVIEW_ITEMS.map((item) => {
+      const anchorGroup = commentAnchorGroups.find((group) =>
+        item.commentIds.every((commentId) =>
+          group.commentIds.includes(commentId),
+        ),
+      );
+
+      if (!anchorGroup) return null;
+
+      return {
+        ...item,
+        anchorTop: anchorGroup.anchorTop,
+        anchorBottom: anchorGroup.anchorBottom,
+      };
+    }).filter(
+      (
+        item,
+      ): item is (typeof HOMEPAGE_WORKFLOW_REVIEW_ITEMS)[number] & {
+        anchorTop: number;
+        anchorBottom: number;
+      } => Boolean(item),
+    );
+
+    return resolveAnchoredRailLayouts(railItems, threadHeights, null, 14, 72);
+  }, [commentAnchorGroups, threadHeights]);
 
   return (
     <div
@@ -632,7 +915,7 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
       <div
         className="homepage-workflow-document-workspace"
         data-homepage-workflow-review-visible={
-          showReviewMarkup ? "true" : "false"
+          showUserFeedback ? "true" : "false"
         }
         data-testid="homepage-workflow-document-workspace"
       >
@@ -653,15 +936,16 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
           ) : null}
           <div
             className={`homepage-workflow-document-shell ${
-              showReviewMarkup
+              showUserFeedback
                 ? "homepage-workflow-document-shell-with-comments"
                 : "homepage-workflow-document-shell-no-comments"
             }`}
             data-testid={
-              showReviewMarkup
+              showUserFeedback
                 ? "homepage-workflow-document-shell-with-comments"
                 : "homepage-workflow-document-shell-no-comments"
             }
+            ref={documentShellRef}
           >
             <div className="homepage-workflow-document-main">
               <div className="homepage-workflow-document-toolbar">
@@ -685,16 +969,20 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
                   editing
                 </span>
               </div>
-              <div className="homepage-workflow-document-page">
+              <div
+                className="homepage-workflow-document-page"
+                ref={documentPageRef}
+              >
                 <p className="homepage-workflow-doc-kicker">Roughdraft</p>
                 <h3 data-testid="homepage-workflow-document-title">
                   Homepage Conversion Plan
                 </h3>
                 <p>
                   Move the workflow story above{" "}
-                  {showReviewMarkup ? (
+                  {showUserFeedback ? (
                     <span
                       className="homepage-workflow-comment-highlight"
+                      data-comment-ids='["nora-comment"]'
                       data-testid="homepage-workflow-comment-highlight"
                     >
                       "It's just Markdown."
@@ -711,52 +999,91 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
                   Keep the format section as proof that the review data is
                   portable Markdown.
                 </p>
-                {showReviewMarkup ? (
+                {showUserFeedback ? (
                   <p>
                     <span
                       className="homepage-workflow-suggestion-old"
+                      data-comment-ids='["nora-suggestion"]'
                       data-testid="homepage-workflow-suggestion-old"
                     >
                       Review an agent's plan
                     </span>{" "}
                     <span
                       className="homepage-workflow-suggestion-new"
+                      data-comment-ids='["nora-suggestion"]'
                       data-testid="homepage-workflow-suggestion-new"
                     >
                       Review a homepage plan
                     </span>{" "}
                     before it starts coding.
                   </p>
+                ) : showIncorporatedPlan ? (
+                  <p>Review a homepage plan before it starts coding.</p>
                 ) : (
                   <p>Review an agent's plan before it starts coding.</p>
                 )}
               </div>
             </div>
-            {showReviewMarkup ? (
+            {showUserFeedback ? (
               <div
                 className="homepage-workflow-review-rail"
                 data-testid="homepage-workflow-review-rail"
+                ref={reviewRailRef}
               >
-                <div className="homepage-workflow-review-thread">
-                  <div className="homepage-workflow-review-avatar">N</div>
-                  <div>
-                    <div className="homepage-workflow-review-author">Nora</div>
-                    <p data-testid="homepage-workflow-review-comment">
-                      This should go above "It's just Markdown."
-                    </p>
-                  </div>
-                </div>
-                <div className="homepage-workflow-review-thread homepage-workflow-review-thread-ai">
-                  <div className="homepage-workflow-review-avatar">AI</div>
-                  <div>
-                    <div className="homepage-workflow-review-author">AI</div>
-                    <p>Replace: "agent's plan" with "homepage plan"</p>
-                    <div className="homepage-workflow-review-actions">
-                      <Check className="size-3.5" aria-hidden="true" />
-                      <span aria-hidden="true">×</span>
+                {HOMEPAGE_WORKFLOW_REVIEW_ITEMS.map((item) => {
+                  const layout = reviewLayouts.find(
+                    (reviewLayout) => reviewLayout.key === item.key,
+                  );
+
+                  return (
+                    <div
+                      className="homepage-workflow-review-thread"
+                      key={item.key}
+                      ref={(node) => setThreadRef(item.key, node)}
+                      style={layout ? { top: layout.railTop } : undefined}
+                    >
+                      <div className="homepage-workflow-review-avatar">N</div>
+                      <div>
+                        <div className="homepage-workflow-review-author">
+                          {item.author}
+                        </div>
+                        <p
+                          data-testid={
+                            item.kind === "comment"
+                              ? "homepage-workflow-review-comment"
+                              : undefined
+                          }
+                        >
+                          {item.body}
+                        </p>
+                        {showAgentReply
+                          ? item.replies?.map((reply) => (
+                              <div
+                                className="homepage-workflow-review-reply homepage-workflow-review-thread-ai"
+                                key={`${item.key}-${reply.author}`}
+                              >
+                                <div className="homepage-workflow-review-avatar">
+                                  {reply.author}
+                                </div>
+                                <div>
+                                  <div className="homepage-workflow-review-author">
+                                    {reply.author}
+                                  </div>
+                                  <p>{reply.body}</p>
+                                </div>
+                              </div>
+                            ))
+                          : null}
+                        {item.kind === "suggestion" ? (
+                          <div className="homepage-workflow-review-actions">
+                            <Check className="size-3.5" aria-hidden="true" />
+                            <span aria-hidden="true">×</span>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })}
               </div>
             ) : null}
           </div>

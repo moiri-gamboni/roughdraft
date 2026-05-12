@@ -61,11 +61,22 @@ test.describe("homepage workflow storyboard", () => {
       pointerEvents: "none",
     });
 
+    const getDesktopActivationOffset = async () =>
+      storyboard
+        .getByTestId("homepage-workflow-terminal")
+        .evaluate((element) => element.getBoundingClientRect().top);
+
     await scenes.nth(1).evaluate((element) => {
       window.scrollTo({
-        top: element.getBoundingClientRect().top + window.scrollY - 1,
+        top: element.getBoundingClientRect().top + window.scrollY,
       });
     });
+    await page.evaluate(
+      (activationOffset) => {
+        window.scrollBy(0, -activationOffset - 1);
+      },
+      await getDesktopActivationOffset(),
+    );
     await expect(agentWorkTranscript).toHaveAttribute(
       "data-agent-work-visible",
       "false",
@@ -76,6 +87,12 @@ test.describe("homepage workflow storyboard", () => {
         top: element.getBoundingClientRect().top + window.scrollY,
       });
     });
+    await page.evaluate(
+      (activationOffset) => {
+        window.scrollBy(0, -activationOffset);
+      },
+      await getDesktopActivationOffset(),
+    );
     await expect(agentWorkTranscript).toHaveAttribute(
       "data-agent-work-visible",
       "true",
@@ -85,7 +102,10 @@ test.describe("homepage workflow storyboard", () => {
     );
     await expect(
       storyboard.getByTestId("homepage-workflow-terminal-tools"),
-    ).toContainText("Tool calls");
+    ).toContainText("Explored");
+    await expect(
+      storyboard.getByTestId("homepage-workflow-terminal-tools"),
+    ).toContainText('Search rg "It\'s just Markdown" packages/app/src');
     await expect(roughdraftPopup).toHaveAttribute(
       "data-popup-visible",
       "false",
@@ -157,6 +177,48 @@ test.describe("homepage workflow storyboard", () => {
     await expect(
       roughdraftPopup.getByTestId("homepage-workflow-review-comment"),
     ).toBeVisible();
+    await expect(
+      roughdraftPopup.getByTestId("homepage-workflow-review-rail"),
+    ).toContainText("Nora");
+    await expect(
+      roughdraftPopup.getByTestId("homepage-workflow-review-rail"),
+    ).not.toContainText("AI");
+    await expect(
+      roughdraftPopup.getByTestId("homepage-workflow-review-rail"),
+    ).toContainText('Replace: "agent\'s plan" with "homepage plan"');
+    await expect
+      .poll(async () =>
+        storyboard.evaluate((element) => {
+          const highlight = element.querySelector(
+            '[data-testid="homepage-workflow-comment-highlight"]',
+          );
+          const suggestion = element.querySelector(
+            '[data-testid="homepage-workflow-suggestion-old"]',
+          );
+          const threads = element.querySelectorAll(
+            ".homepage-workflow-review-thread",
+          );
+
+          if (!highlight || !suggestion || threads.length < 2) {
+            throw new Error("Expected review anchors and Nora review threads");
+          }
+
+          return Math.max(
+            Math.abs(
+              threads[0].getBoundingClientRect().top -
+                highlight.getBoundingClientRect().top,
+            ),
+            Math.abs(
+              threads[1].getBoundingClientRect().top -
+                suggestion.getBoundingClientRect().top,
+            ),
+          );
+        }),
+      )
+      .toBeLessThanOrEqual(8);
+    await expect(
+      storyboard.getByTestId("homepage-workflow-agent-resume"),
+    ).toHaveAttribute("data-terminal-line-visible", "false");
     const commentsLayout = await storyboard.evaluate((element) => {
       const popup = element.querySelector(
         '[data-testid="homepage-workflow-popup"]',
@@ -220,6 +282,33 @@ test.describe("homepage workflow storyboard", () => {
     expect(stickyLayout.stickyLeft).toBeGreaterThan(
       stickyLayout.sceneListRight,
     );
+
+    await scenes.nth(5).evaluate((element) => {
+      window.scrollTo({
+        top: element.getBoundingClientRect().top + window.scrollY,
+      });
+    });
+    await expect(
+      storyboard.getByTestId("homepage-workflow-handoff-button"),
+    ).toHaveCount(0);
+    await expect(
+      storyboard.getByTestId("homepage-workflow-agent-resume"),
+    ).toHaveAttribute("data-terminal-line-visible", "true");
+    await expect(storyboard).toContainText(
+      "I accepted your wording suggestion and moved the workflow story above the Markdown section.",
+    );
+    await expect(storyboard).toContainText(
+      "Review a homepage plan before it starts coding.",
+    );
+    await expect(
+      roughdraftPopup.getByTestId("homepage-workflow-review-comment"),
+    ).toBeVisible();
+    await expect(
+      roughdraftPopup.getByTestId("homepage-workflow-review-rail"),
+    ).toContainText('This should go above "It\'s just Markdown."');
+    await expect(
+      roughdraftPopup.getByTestId("homepage-workflow-review-rail"),
+    ).toContainText("Sounds good. I'll move it above that section.");
 
     const sceneLayout = await scenes.evaluateAll((elements) =>
       elements.map((element) => {
@@ -332,6 +421,11 @@ test.describe("homepage workflow storyboard", () => {
         sceneListPaddingBottom: Number.parseFloat(
           sceneListStyles.paddingBottom,
         ),
+        stickyMobileVisible: sticky.getAttribute(
+          "data-mobile-workflow-visible",
+        ),
+        stickyOpacity: stickyStyles.opacity,
+        stickyPointerEvents: stickyStyles.pointerEvents,
         stickyBottomGap: window.innerHeight - stickyRect.bottom,
         stickyHeight: stickyRect.height,
         stickyTop: stickyRect.top,
@@ -343,6 +437,9 @@ test.describe("homepage workflow storyboard", () => {
     });
 
     expect(layoutAtStart.position).toBe("sticky");
+    expect(layoutAtStart.stickyMobileVisible).toBe("false");
+    expect(layoutAtStart.stickyOpacity).toBe("0");
+    expect(layoutAtStart.stickyPointerEvents).toBe("none");
     expect(layoutAtStart.stickyBottomGap).toBeGreaterThanOrEqual(8);
     expect(layoutAtStart.stickyBottomGap).toBeLessThan(40);
     expect(layoutAtStart.stickyHeight).toBeGreaterThan(200);
@@ -358,8 +455,11 @@ test.describe("homepage workflow storyboard", () => {
     const stageLayouts: Array<{
       copyBottom: number;
       copyTop: number;
+      documentSurfaceGap: number | null;
       documentTitleBottom: number | null;
       documentTitleTop: number | null;
+      popupHeaderIsPaintedAboveDock: boolean | null;
+      popupHeaderTop: number | null;
       stage: number;
       stickyBottom: number;
       stickyTop: number;
@@ -394,6 +494,10 @@ test.describe("homepage workflow storyboard", () => {
       await expect(
         storyboard.getByTestId("homepage-workflow-terminal"),
       ).toHaveAttribute("data-homepage-workflow-terminal-stage", targetStage);
+      await expect(stickyVisual).toHaveAttribute(
+        "data-mobile-workflow-visible",
+        "true",
+      );
 
       stageLayouts.push(
         await scenes.nth(index).evaluate((element, stage) => {
@@ -406,20 +510,55 @@ test.describe("homepage workflow storyboard", () => {
           const documentTitle = document.querySelector(
             '[data-testid="homepage-workflow-document-title"]',
           );
-          if (!sticky || !sceneCopy || !documentTitle) {
+          const documentScale = document.querySelector(
+            '[data-testid="homepage-workflow-document-scale"]',
+          );
+          const documentWorkspace = document.querySelector(
+            '[data-testid="homepage-workflow-document-workspace"]',
+          );
+          const popupHeader = document.querySelector(
+            ".homepage-workflow-popup .homepage-workflow-panel-header",
+          );
+          if (
+            !sticky ||
+            !sceneCopy ||
+            !documentTitle ||
+            !documentScale ||
+            !documentWorkspace
+          ) {
             throw new Error(
-              "Expected sticky visual, scene copy, and document title",
+              "Expected sticky visual, scene copy, and document preview",
             );
           }
 
           const stickyRect = sticky.getBoundingClientRect();
           const copyRect = sceneCopy.getBoundingClientRect();
+          const scaleRect = documentScale.getBoundingClientRect();
           const titleRect = documentTitle.getBoundingClientRect();
+          const workspaceRect = documentWorkspace.getBoundingClientRect();
+          const popupHeaderRect = popupHeader?.getBoundingClientRect() ?? null;
+          const headerHitTarget = popupHeaderRect
+            ? document.elementFromPoint(
+                popupHeaderRect.left + popupHeaderRect.width / 2,
+                popupHeaderRect.top + popupHeaderRect.height / 2,
+              )
+            : null;
           return {
             copyBottom: copyRect.bottom,
             copyTop: copyRect.top,
+            documentSurfaceGap:
+              stage >= 3 ? scaleRect.top - workspaceRect.top : null,
             documentTitleBottom: stage >= 3 ? titleRect.bottom : null,
             documentTitleTop: stage >= 3 ? titleRect.top : null,
+            popupHeaderIsPaintedAboveDock:
+              stage >= 3 && popupHeaderRect
+                ? popupHeaderRect.top < stickyRect.top &&
+                  headerHitTarget?.closest(
+                    ".homepage-workflow-popup .homepage-workflow-panel-header",
+                  ) !== null
+                : null,
+            popupHeaderTop:
+              stage >= 3 && popupHeaderRect ? popupHeaderRect.top : null,
             stage,
             stickyBottom: stickyRect.bottom,
             stickyTop: stickyRect.top,
@@ -440,14 +579,15 @@ test.describe("homepage workflow storyboard", () => {
       if (
         stageLayout.stage >= 3 &&
         stageLayout.documentTitleTop !== null &&
-        stageLayout.documentTitleBottom !== null
+        stageLayout.documentTitleBottom !== null &&
+        stageLayout.documentSurfaceGap !== null
       ) {
-        expect(stageLayout.documentTitleTop).toBeGreaterThanOrEqual(
-          stageLayout.stickyTop + 8,
-        );
         expect(stageLayout.documentTitleBottom).toBeLessThanOrEqual(
           stageLayout.stickyBottom - 8,
         );
+        expect(stageLayout.documentSurfaceGap).toBeLessThanOrEqual(72);
+        expect(stageLayout.popupHeaderTop).toBeLessThan(stageLayout.stickyTop);
+        expect(stageLayout.popupHeaderIsPaintedAboveDock).toBe(true);
       }
     }
 
