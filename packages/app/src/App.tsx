@@ -12,6 +12,7 @@ import {
   Terminal,
 } from "lucide-react";
 import {
+  type ReactNode,
   type Ref,
   useCallback,
   useEffect,
@@ -90,7 +91,7 @@ export function shouldWarnBeforeUnload({
 }
 
 const AGENT_SETUP_PROMPT =
-  "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.";
+  "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.md/setup.md and set yourself up to use it.";
 const PREVIEW_DOCUMENT_PATH = "preview.md";
 const PREVIEW_INITIAL_MARKDOWN = [
   "# Live Preview",
@@ -105,37 +106,37 @@ const PREVIEW_INITIAL_MARKDOWN = [
 ].join("\n");
 const HOMEPAGE_WORKFLOW_SCENES = [
   {
-    step: "01",
+    step: "1",
     title: "Ask for a plan",
     description:
       "Start in the same agent chat you already use. Ask for a reviewable Markdown plan before implementation begins.",
   },
   {
-    step: "02",
+    step: "2",
     title: "The agent works normally",
     description:
       "It inspects files, runs tools, and drafts the plan in the background. Roughdraft does not replace your agent workflow.",
   },
   {
-    step: "03",
+    step: "3",
     title: "Roughdraft opens the plan",
     description:
       "When the file is ready, the agent opens the Markdown plan in Roughdraft and waits while you review.",
   },
   {
-    step: "04",
+    step: "4",
     title: "Leave comments and suggestions",
     description:
       "Ask questions, redirect priorities, and suggest exact wording inline where the agent can read it later.",
   },
   {
-    step: "05",
+    step: "5",
     title: "Click I'm done",
     description:
       "Roughdraft hands control back to the agent once you are finished with the blocking review step.",
   },
   {
-    step: "06",
+    step: "6",
     title: "The agent resumes",
     description:
       "The next agent turn reads the same Markdown file, sees your comments and suggestions, and continues with the corrected plan.",
@@ -257,6 +258,29 @@ const HOMEPAGE_WORKFLOW_REVIEW_ITEMS = [
   },
 ] as const;
 
+export function HomepageSubtitle() {
+  return (
+    <>
+      Refine complex ideas with{" "}
+      <span
+        className="rounded-sm bg-[#fff5c7] px-1 text-slate-950 dark:bg-amber-500/35 dark:text-slate-50"
+        data-testid="homepage-subtitle-comment"
+      >
+        comments
+      </span>{" "}
+      <span
+        className="rounded-sm bg-emerald-50 px-1 text-emerald-950 underline decoration-emerald-500/75 underline-offset-[0.16em] dark:bg-emerald-950/50 dark:text-emerald-200"
+        data-testid="homepage-subtitle-addition"
+      >
+        and suggestions
+      </span>
+      .
+      <br data-testid="homepage-subtitle-break" />
+      Free, open source, local.
+    </>
+  );
+}
+
 function getHomepageWorkflowDocumentScale(element: HTMLElement | null) {
   const scaleElement = element?.closest<HTMLElement>(
     "[data-homepage-workflow-document-scale]",
@@ -274,7 +298,7 @@ export function Homepage({
   message,
   updateStatus,
 }: {
-  message: string;
+  message: ReactNode;
   updateStatus: UpdateStatus | null;
 }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
@@ -362,7 +386,7 @@ export function Homepage({
 
   return (
     <div
-      className="flex min-h-screen items-center justify-center bg-[#FCFCFC] dark:bg-background px-6 py-12 text-slate-950 dark:text-slate-50"
+      className="flex min-h-screen items-start justify-center bg-[#FCFCFC] dark:bg-background px-6 pt-8 pb-12 text-slate-950 dark:text-slate-50"
       data-testid="homepage"
     >
       {updateStatus ? (
@@ -370,106 +394,102 @@ export function Homepage({
           <UpdateNotice updateStatus={updateStatus} />
         </div>
       ) : null}
-      <div className="w-full text-center">
-        <div className="mx-auto max-w-2xl">
-          <p className="mb-3 text-xs font-medium tracking-[0.16em] text-slate-500 dark:text-slate-400 uppercase">
-            Roughdraft
+      <div className="w-full">
+        <div className="font-die-grotesk-a mx-auto max-w-[100rem] text-left">
+          <p
+            className="text-[clamp(1.125rem,0.9rem+0.35vw,1.375rem)] font-bold text-stone-500 dark:text-stone-500"
+            data-testid="homepage-logo"
+          >
+            roughdraft.md
           </p>
-          <h1 className="text-4xl leading-tight font-semibold tracking-[-0.025em] text-balance text-slate-950 dark:text-slate-50 sm:text-5xl">
-            Easier collaboration with your coding agent
-          </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-lg leading-8 text-balance text-slate-600 dark:text-slate-400">
-            {message}
-          </p>
+          <div className="mt-20 sm:mt-28">
+            <h1
+              className="font-die-grotesk-b text-[clamp(4.5rem,2.8rem+4vw,5rem)] leading-[0.88] font-bold text-slate-950 dark:text-slate-50"
+              data-testid="homepage-heading"
+            >
+              Easier collaboration
+              <br data-testid="homepage-heading-break" />
+              with your agent
+            </h1>
+            <p className="mt-5 max-w-5xl text-[clamp(1.25rem,0.9rem+1vw,1.75rem)] leading-none text-slate-950 dark:text-slate-50">
+              {message}
+            </p>
 
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-2.5 text-xs font-medium leading-none text-stone-500 dark:text-stone-400">
-            {["Free", "Open-source", "Runs locally"].map((item) => (
-              <div
-                className="inline-flex h-7 items-center gap-1.5 rounded-full border border-[#DCD6CC]/70 dark:border-stone-600 bg-transparent px-2.5"
-                key={item}
-              >
-                <span className="inline-flex size-3.5 items-center justify-center rounded-full bg-transparent text-stone-500">
-                  <Check className="size-2.5 stroke-[2.5]" aria-hidden="true" />
-                </span>
-                <span>{item}</span>
-              </div>
-            ))}
-          </div>
+            <div className="mt-7 flex flex-col items-start justify-start gap-3">
+              <Dialog>
+                <DialogTrigger
+                  render={
+                    <Button
+                      className="h-14 gap-2 px-5 text-[clamp(1.25rem,1rem+0.6vw,1.5rem)]"
+                      data-testid="homepage-install-button"
+                      size="lg"
+                    >
+                      Install Now
+                    </Button>
+                  }
+                />
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Give this to your coding agent</DialogTitle>
+                    <DialogDescription>
+                      This prompt tells the agent how to install Roughdraft and
+                      set up the review workflow.
+                    </DialogDescription>
+                  </DialogHeader>
 
-          <div className="mt-7 flex flex-col items-center justify-center gap-3">
-            <Dialog>
-              <DialogTrigger
-                render={
-                  <Button
-                    className="h-12 gap-2 px-6 text-base"
-                    data-testid="homepage-install-button"
-                    size="lg"
-                  >
-                    Install Now
-                  </Button>
-                }
-              />
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Give this to your coding agent</DialogTitle>
-                  <DialogDescription>
-                    This prompt tells the agent how to install Roughdraft and
-                    set up the review workflow.
-                  </DialogDescription>
-                </DialogHeader>
-
-                <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4">
-                  <p className="break-words text-sm leading-6 text-slate-800 dark:text-slate-200">
-                    {AGENT_SETUP_PROMPT}
-                  </p>
-                  {copyState === "error" ? (
-                    <p className="mt-3 text-sm text-red-600">
-                      Copy failed. Select the instruction text and copy it
-                      manually.
+                  <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4">
+                    <p className="break-words text-sm leading-6 text-stone-800 dark:text-stone-200">
+                      {AGENT_SETUP_PROMPT}
                     </p>
-                  ) : null}
-                </div>
+                    {copyState === "error" ? (
+                      <p className="mt-3 text-sm text-red-600">
+                        Copy failed. Select the instruction text and copy it
+                        manually.
+                      </p>
+                    ) : null}
+                  </div>
 
-                <DialogFooter>
-                  <Button
-                    className="h-9 gap-2 px-3 text-sm"
-                    data-testid="homepage-copy-prompt-button"
-                    type="button"
-                    onClick={handleCopySetupPrompt}
-                  >
-                    {copyState === "copied" ? (
-                      <Check className="size-4" aria-hidden="true" />
-                    ) : (
-                      <Copy className="size-4" aria-hidden="true" />
-                    )}
-                    {copyState === "copied" ? "Copied" : "Copy prompt"}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+                  <DialogFooter>
+                    <Button
+                      className="h-9 gap-2 px-3 text-sm"
+                      data-testid="homepage-copy-prompt-button"
+                      type="button"
+                      onClick={handleCopySetupPrompt}
+                    >
+                      {copyState === "copied" ? (
+                        <Check className="size-4" aria-hidden="true" />
+                      ) : (
+                        <Copy className="size-4" aria-hidden="true" />
+                      )}
+                      {copyState === "copied" ? "Copied" : "Copy prompt"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
 
-            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-xs font-medium text-stone-500">
-              <Button
-                className="h-6 gap-1.5 px-1 text-xs text-stone-500 hover:bg-transparent hover:text-stone-700"
-                nativeButton={false}
-                size="sm"
-                variant="ghost"
-                render={
-                  <a
-                    href="https://github.com/Lex-Inc/roughdraft"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <ExternalLink className="size-3.5" aria-hidden="true" />
-                    View on GitHub
-                  </a>
-                }
-              />
+              <div className="flex flex-wrap items-center justify-start gap-x-4 gap-y-1.5 text-xs text-stone-500">
+                <Button
+                  className="h-6 gap-1.5 px-1 text-xs text-stone-500 hover:bg-transparent hover:text-stone-700"
+                  nativeButton={false}
+                  size="sm"
+                  variant="ghost"
+                  render={
+                    <a
+                      href="https://github.com/Lex-Inc/roughdraft"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <ExternalLink className="size-3.5" aria-hidden="true" />
+                      View on GitHub
+                    </a>
+                  }
+                />
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="mx-auto mt-10 w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-[0_20px_60px_rgba(15,23,42,0.12)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.4)]">
+        <div className="mt-10 w-screen max-w-none -translate-x-6 overflow-hidden border-y border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-[0_20px_60px_rgba(15,23,42,0.12)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.4)] min-[1000px]:mx-auto min-[1000px]:w-full min-[1000px]:max-w-[100rem] min-[1000px]:translate-x-0 min-[1000px]:rounded-lg min-[1000px]:border">
           <img
             data-testid="homepage-sneak-peek-image"
             src="/sneak-peek.png"
@@ -485,11 +505,11 @@ export function Homepage({
           data-testid="homepage-workflow-storyboard"
         >
           <div
-            className="homepage-workflow-intro py-8 pb-6 min-[900px]:pt-12 min-[900px]:pb-8"
+            className="homepage-workflow-intro font-die-grotesk-a py-8 pb-6 font-bold min-[900px]:pt-12 min-[900px]:pb-8"
             ref={workflowIntroRef}
           >
             <h2
-              className="text-center text-4xl leading-tight font-semibold text-balance text-slate-950 dark:text-slate-50 sm:text-5xl"
+              className="font-die-grotesk-b text-center text-[clamp(4rem,2.8rem+3vw,4.5rem)] font-bold text-slate-950 dark:text-slate-50"
               id="homepage-workflow-heading"
               data-testid="homepage-workflow-heading"
             >
@@ -556,14 +576,14 @@ function HomepageWorkflowScene({
       data-testid="homepage-workflow-scene"
       ref={sceneRef}
     >
-      <div className="min-w-0 max-w-[28rem] max-[899px]:max-w-[min(100%,27rem)]">
-        <div className="inline-flex h-9 min-w-9 items-center justify-center rounded-full border border-slate-950 bg-slate-950 text-[0.8125rem] leading-none font-bold text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950">
+      <div className="font-die-grotesk-a min-w-0 max-w-[28rem] font-bold max-[899px]:max-w-[min(100%,27rem)]">
+        <div className="inline-flex h-12 min-w-12 items-center justify-center rounded-full border border-slate-950 bg-slate-950 px-2 text-[2.25rem] leading-none font-bold text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950">
           {step}
         </div>
-        <h3 className="mt-5 text-3xl leading-tight font-semibold text-balance text-slate-950 dark:text-slate-50 sm:text-4xl">
+        <h3 className="font-die-grotesk-b mt-5 text-[clamp(2rem,1.5rem+1.5vw,2.5rem)] leading-tight font-bold text-balance text-slate-950 dark:text-slate-50">
           {title}
         </h3>
-        <p className="mt-4 max-w-md text-base leading-7 text-slate-600 dark:text-slate-400">
+        <p className="mt-4 max-w-md text-base leading-7 text-stone-600 dark:text-stone-400">
           {description}
         </p>
       </div>
@@ -899,7 +919,7 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
       data-popup-visible={visible ? "true" : "false"}
       data-testid="homepage-workflow-popup"
     >
-      <div className="flex h-10 items-center gap-1.5 border-b border-slate-200 px-4 text-xs font-bold text-slate-500 dark:border-slate-700 dark:text-slate-400 max-[520px]:px-3">
+      <div className="flex h-10 items-center gap-1.5 border-b border-slate-200 px-4 text-xs font-bold text-stone-500 dark:border-slate-700 dark:text-slate-400 max-[520px]:px-3">
         <FileText className="size-3.5" aria-hidden="true" />
         homepage-conversion-plan.md
       </div>
@@ -975,7 +995,7 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
                 >
                   Homepage Conversion Plan
                 </h3>
-                <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-slate-700 dark:text-slate-300">
+                <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-stone-700 dark:text-stone-300">
                   Move the workflow story above{" "}
                   {showUserFeedback ? (
                     <span
@@ -989,16 +1009,16 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
                     '"It\'s just Markdown."'
                   )}
                 </p>
-                <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-slate-700 dark:text-slate-300">
+                <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-stone-700 dark:text-stone-300">
                   Show the agent pause, the review window, and the resume
                   signal.
                 </p>
-                <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-slate-700 dark:text-slate-300">
+                <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-stone-700 dark:text-stone-300">
                   Keep the format section as proof that the review data is
                   portable Markdown.
                 </p>
                 {showUserFeedback ? (
-                  <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-slate-700 dark:text-slate-300">
+                  <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-stone-700 dark:text-stone-300">
                     <span
                       className="rounded-[0.2rem] bg-rose-50 text-rose-900 line-through decoration-rose-600/75 dark:bg-rose-900/35 dark:text-rose-300"
                       data-comment-ids='["nora-suggestion"]'
@@ -1016,11 +1036,11 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
                     before it starts coding.
                   </p>
                 ) : showIncorporatedPlan ? (
-                  <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-slate-700 dark:text-slate-300">
+                  <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-stone-700 dark:text-stone-300">
                     Review a homepage plan before it starts coding.
                   </p>
                 ) : (
-                  <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-slate-700 dark:text-slate-300">
+                  <p className="m-0 mb-4 text-[clamp(0.95rem,2.25vw,1.12rem)] leading-[1.65] text-stone-700 dark:text-stone-300">
                     Review an agent's plan before it starts coding.
                   </p>
                 )}
@@ -1028,7 +1048,7 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
             </div>
             {showUserFeedback ? (
               <div
-                className="relative min-h-[25rem] min-w-0 text-slate-700"
+                className="relative min-h-[25rem] min-w-0 text-stone-700"
                 data-testid="homepage-workflow-review-rail"
                 ref={reviewRailRef}
               >
@@ -1052,7 +1072,7 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
                           {item.author}
                         </div>
                         <p
-                          className="m-0 text-[0.8rem] leading-[1.65] text-slate-700 dark:text-slate-300"
+                          className="m-0 text-[0.8rem] leading-[1.65] text-stone-700 dark:text-stone-300"
                           data-testid={
                             item.kind === "comment"
                               ? "homepage-workflow-review-comment"
@@ -1074,7 +1094,7 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
                                   <div className="mb-0.5 text-[0.76rem] font-bold text-slate-950 dark:text-slate-50">
                                     {reply.author}
                                   </div>
-                                  <p className="m-0 text-[0.8rem] leading-[1.65] text-slate-700 dark:text-slate-300">
+                                  <p className="m-0 text-[0.8rem] leading-[1.65] text-stone-700 dark:text-stone-300">
                                     {reply.body}
                                   </p>
                                 </div>
@@ -1123,7 +1143,7 @@ export function RoughdraftFlavoredMarkdownPage() {
           <h1 className="mt-3 text-4xl leading-tight font-semibold text-balance text-slate-950 dark:text-slate-50 sm:text-5xl">
             Markdown with review comments and suggested changes
           </h1>
-          <p className="mt-5 text-lg leading-8 text-slate-600 dark:text-slate-400">
+          <p className="mt-5 text-lg leading-8 text-stone-600 dark:text-stone-400">
             Roughdraft Flavored Markdown is regular Markdown plus portable
             review markup. It builds on{" "}
             <a
@@ -1164,11 +1184,11 @@ export function RoughdraftFlavoredMarkdownPage() {
                     {title}
                   </h2>
                   <ExternalLink
-                    className="size-4 text-slate-400 dark:text-slate-500 transition group-hover:text-slate-700 dark:group-hover:text-slate-300"
+                    className="size-4 text-stone-400 dark:text-stone-500 transition group-hover:text-stone-700 dark:group-hover:text-stone-300"
                     aria-hidden="true"
                   />
                 </div>
-                <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
+                <p className="mt-2 text-sm leading-6 text-stone-600 dark:text-stone-400">
                   {description}
                 </p>
               </a>
@@ -1201,13 +1221,13 @@ export function RoughdraftFlavoredMarkdownPage() {
               className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.3)]"
               key={title}
             >
-              <div className="flex size-10 items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+              <div className="flex size-10 items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-stone-700 dark:text-stone-300">
                 <Icon className="size-4" aria-hidden="true" />
               </div>
               <h2 className="mt-4 text-base font-semibold text-slate-950 dark:text-slate-50">
                 {title}
               </h2>
-              <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
+              <p className="mt-2 text-sm leading-6 text-stone-600 dark:text-stone-400">
                 {description}
               </p>
             </div>
@@ -1222,7 +1242,7 @@ export function RoughdraftFlavoredMarkdownPage() {
             <h2 className="mt-3 text-3xl leading-tight font-semibold text-slate-950 dark:text-slate-50">
               Review data lives where agents can inspect it
             </h2>
-            <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-400">
+            <p className="mt-4 text-base leading-7 text-stone-600 dark:text-stone-400">
               Roughdraft treats the Markdown file as the durable source of
               truth. The rich editor can add affordances around the text, but
               the saved representation needs to be readable in a terminal,
@@ -1240,7 +1260,7 @@ export function RoughdraftFlavoredMarkdownPage() {
                 <h3 className="text-sm font-semibold text-slate-950 dark:text-slate-50">
                   {title}
                 </h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
+                <p className="mt-2 text-sm leading-6 text-stone-600 dark:text-stone-400">
                   {description}
                 </p>
               </div>
@@ -1256,7 +1276,7 @@ export function RoughdraftFlavoredMarkdownPage() {
             <h2 className="mt-3 text-3xl leading-tight font-semibold text-slate-950 dark:text-slate-50">
               The review layer is small on purpose
             </h2>
-            <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-400">
+            <p className="mt-4 text-base leading-7 text-stone-600 dark:text-stone-400">
               Roughdraft uses CriticMarkup-compatible markers for comments,
               highlights, insertions, deletions, and substitutions. Roughdraft
               extends those markers with document-local metadata so review
@@ -1274,17 +1294,17 @@ export function RoughdraftFlavoredMarkdownPage() {
                 >
                   <div className="flex items-center gap-2">
                     <Braces
-                      className="size-4 text-slate-500 dark:text-slate-400"
+                      className="size-4 text-stone-500 dark:text-stone-400"
                       aria-hidden="true"
                     />
                     <h3 className="text-sm font-semibold text-slate-950 dark:text-slate-50">
                       {label}
                     </h3>
                   </div>
-                  <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
+                  <p className="mt-2 text-sm leading-6 text-stone-600 dark:text-stone-400">
                     {description}
                   </p>
-                  <code className="mt-3 block overflow-x-auto rounded-md border border-slate-200 dark:border-slate-700 bg-[#FAFAF8] dark:bg-slate-800 px-3 py-2 text-xs text-slate-700 dark:text-slate-300">
+                  <code className="mt-3 block overflow-x-auto rounded-md border border-slate-200 dark:border-slate-700 bg-[#FAFAF8] dark:bg-slate-800 px-3 py-2 text-xs text-stone-700 dark:text-stone-300">
                     {syntax}
                   </code>
                 </div>
@@ -1301,7 +1321,7 @@ export function RoughdraftFlavoredMarkdownPage() {
             <h2 className="mt-3 text-3xl leading-tight font-semibold text-slate-950 dark:text-slate-50">
               The extra fields make review state portable
             </h2>
-            <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-400">
+            <p className="mt-4 text-base leading-7 text-stone-600 dark:text-stone-400">
               Standard CriticMarkup captures the visible annotation. Roughdraft
               keeps the same readable markers and adds a small attribute block
               after comments and suggestions when it needs stable review state.
@@ -1317,7 +1337,7 @@ export function RoughdraftFlavoredMarkdownPage() {
                 <h3 className="text-sm font-semibold text-slate-950 dark:text-slate-50">
                   {title}
                 </h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
+                <p className="mt-2 text-sm leading-6 text-stone-600 dark:text-stone-400">
                   {body}
                 </p>
               </div>
@@ -1329,7 +1349,7 @@ export function RoughdraftFlavoredMarkdownPage() {
           <h2 className="text-2xl font-semibold text-slate-950 dark:text-slate-50">
             What this is not
           </h2>
-          <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-400">
+          <p className="mt-4 text-base leading-7 text-stone-600 dark:text-stone-400">
             It is not a new replacement for Markdown, and it is not a hidden app
             state format. If Roughdraft adds review information, that
             information should stay visible, portable, and understandable in the
@@ -1860,10 +1880,7 @@ export function App() {
   if (!requestedPathState.rawPath || loadError) {
     return (
       <Homepage
-        message={
-          loadError ??
-          "Roughdraft is a markdown editor with commenting and suggest changes mode, making it easier to align with AI on complex ideas."
-        }
+        message={loadError ?? <HomepageSubtitle />}
         updateStatus={updateStatus}
       />
     );

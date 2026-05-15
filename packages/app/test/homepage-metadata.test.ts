@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const indexHtmlPath = resolve("index.html");
-const previewImageUrl = "https://roughdraft.page/sneak-peek.png";
+const previewImageUrl = "https://roughdraft.md/sneak-peek.png";
 const pageTitle = "Roughdraft - Markdown reviews for coding agents";
 const pageDescription =
   "A local-first Markdown review app for commenting, suggesting edits, and collaborating with your coding agent.";
@@ -32,7 +32,7 @@ describe("homepage metadata", () => {
     );
     expect(
       document.querySelector('link[rel="canonical"]')?.getAttribute("href"),
-    ).toBe("https://roughdraft.page/");
+    ).toBe("https://roughdraft.md/");
 
     expect(metaContent(document, 'meta[property="og:title"]')).toBe(pageTitle);
     expect(metaContent(document, 'meta[property="og:description"]')).toBe(
@@ -40,7 +40,7 @@ describe("homepage metadata", () => {
     );
     expect(metaContent(document, 'meta[property="og:type"]')).toBe("website");
     expect(metaContent(document, 'meta[property="og:url"]')).toBe(
-      "https://roughdraft.page/",
+      "https://roughdraft.md/",
     );
     expect(metaContent(document, 'meta[property="og:image"]')).toBe(
       previewImageUrl,

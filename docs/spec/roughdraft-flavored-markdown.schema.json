@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://roughdraft.page/spec/roughdraft-flavored-markdown.schema.json",
+  "$id": "https://roughdraft.md/spec/roughdraft-flavored-markdown.schema.json",
   "title": "Roughdraft Flavored Markdown Review Index",
   "description": "A JSON review index for comments and suggestions parsed from Roughdraft Flavored Markdown. The Markdown source remains the normative storage format.",
   "type": "object",

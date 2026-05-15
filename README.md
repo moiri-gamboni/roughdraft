@@ -6,7 +6,7 @@ A local-first markdown editor and viewer for working with AI.
 Paste this into your coding agent:
 
 ```text
-Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.
+Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.md/setup.md and set yourself up to use it.
 ```
 
 Or install and open a file yourself:
@@ -165,7 +165,7 @@ Roughdraft reads and writes the markdown file directly.
 If you want your local agent to remember the Roughdraft workflow, ask it to read the live setup prompt:
 
 ```text
-Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.
+Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.md/setup.md and set yourself up to use it.
 ```
 
 Use `roughdraft help`, `roughdraft help agent`, or `roughdraft help criticmarkup` if you need a local refresher.
@@ -250,7 +250,7 @@ ROUGHDRAFT_DEV_WRAPPER_REPO_ROOT
 ## Roughdraft-flavored CriticMarkup
 Roughdraft uses [CriticMarkup](https://criticmarkup.com) as the readable review layer inside normal Markdown files. It supports the standard markers for comments, highlights, insertions, deletions, and substitutions:
 
-The canonical Roughdraft Flavored Markdown spec is published at [roughdraft.page/spec/roughdraft-flavored-markdown.md](https://roughdraft.page/spec/roughdraft-flavored-markdown.md). The review-index JSON Schema is published at [roughdraft.page/spec/roughdraft-flavored-markdown.schema.json](https://roughdraft.page/spec/roughdraft-flavored-markdown.schema.json).
+The canonical Roughdraft Flavored Markdown spec is published at [roughdraft.md/spec/roughdraft-flavored-markdown.md](https://roughdraft.md/spec/roughdraft-flavored-markdown.md). The review-index JSON Schema is published at [roughdraft.md/spec/roughdraft-flavored-markdown.schema.json](https://roughdraft.md/spec/roughdraft-flavored-markdown.schema.json).
 
 ```markdown
 This is {--deleted--} text.
@@ -312,7 +312,7 @@ This matters because the main workflow is often:
 - The AI reads those comments and responds in the same markdown file
   
 ## Try the demo
-Don't want to install anything? Try the [live demo](https://roughdraft.page) — it runs entirely in your browser using local storage.
+Don't want to install anything? Try the [live demo](https://roughdraft.md) — it runs entirely in your browser using local storage.
 ## License
 MIT
 

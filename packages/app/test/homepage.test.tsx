@@ -4,12 +4,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   Homepage,
+  HomepageSubtitle,
   PreviewPage,
   RoughdraftFlavoredMarkdownPage,
 } from "../src/App";
 
 const AGENT_SETUP_PROMPT =
-  "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.page/setup.md and set yourself up to use it.";
+  "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.md/setup.md and set yourself up to use it.";
 
 function createDomRect({
   left = 0,
@@ -63,10 +64,7 @@ function getByTestId<T extends Element = HTMLElement>(
 async function renderHomepage(root: Root) {
   await act(async () => {
     root.render(
-      <Homepage
-        message="Roughdraft is a markdown editor with commenting and suggest changes mode, making it easier to align with AI on complex ideas."
-        updateStatus={null}
-      />,
+      <Homepage message={<HomepageSubtitle />} updateStatus={null} />,
     );
     await Promise.resolve();
   });
@@ -144,14 +142,65 @@ describe("Homepage", () => {
     await renderHomepage(root);
 
     expect(container.textContent).toContain(
-      "Easier collaboration with your coding agent",
+      "Easier collaborationwith your agent",
     );
+    expect(getByTestId(container, "homepage").className).toContain("pt-8");
+    expect(getByTestId(container, "homepage").className).toContain(
+      "items-start",
+    );
+    expect(container.textContent).toContain("roughdraft.md");
+    const homepageLogo = getByTestId(container, "homepage-logo");
+    expect(homepageLogo?.textContent).toBe("roughdraft.md");
+    expect(homepageLogo?.className).toContain("text-[clamp(");
+    expect(homepageLogo?.className).not.toContain("tracking-");
     expect(container.textContent).toContain(
-      "making it easier to align with AI on complex ideas",
+      "Refine complex ideas with comments and suggestions.",
     );
-    expect(container.textContent).toContain("Free");
-    expect(container.textContent).toContain("Open-source");
-    expect(container.textContent).toContain("Runs locally");
+    expect(container.textContent).toContain("Free, open source, local.");
+    expect(getByTestId(container, "homepage-subtitle-break")).not.toBeNull();
+    expect(
+      getByTestId(container, "homepage-subtitle-comment").className,
+    ).toContain("bg-[#fff5c7]");
+    expect(
+      getByTestId(container, "homepage-subtitle-addition").className,
+    ).toContain("bg-emerald-50");
+    expect(
+      getByTestId(container, "homepage-subtitle-addition").className,
+    ).toContain("underline");
+    const homepageHeading = getByTestId(container, "homepage-heading");
+    expect(getByTestId(container, "homepage-heading-break")).not.toBeNull();
+    const homepageTextWrapper = homepageHeading?.parentElement?.parentElement;
+    expect(homepageHeading?.parentElement?.className).toContain("mt-20");
+    expect(homepageHeading?.parentElement?.className).toContain("sm:mt-28");
+    expect(homepageTextWrapper?.className).toContain("text-left");
+    expect(homepageTextWrapper?.className).toContain("max-w-[100rem]");
+    expect(homepageTextWrapper?.className).not.toContain("font-bold");
+    expect(homepageHeading?.className).not.toContain("max-w-");
+    expect(homepageHeading?.className).toContain("text-[clamp(");
+    expect(homepageHeading?.className).toContain("leading-[0.88]");
+    expect(homepageHeading?.className).not.toContain("text-balance");
+    expect(homepageHeading?.nextElementSibling?.className).toContain(
+      "text-[clamp(",
+    );
+    expect(homepageHeading?.nextElementSibling?.className).toContain(
+      "leading-none",
+    );
+    expect(homepageHeading?.nextElementSibling?.className).toContain(
+      "max-w-5xl",
+    );
+    expect(homepageHeading?.nextElementSibling?.className).not.toContain(
+      "mx-auto",
+    );
+    expect(homepageHeading?.nextElementSibling?.className).not.toContain(
+      "text-balance",
+    );
+    expect(homepageHeading?.nextElementSibling?.className).toContain(
+      "text-slate-950",
+    );
+    expect(homepageHeading?.nextElementSibling?.className).toContain(
+      "dark:text-slate-50",
+    );
+    expect(container.textContent).not.toContain("Open-source");
     expect(container.textContent).toContain("Roughdraft flavored Markdown");
     expect(container.textContent).toContain("It's just Markdown");
     expect(container.textContent).toContain(
@@ -234,12 +283,27 @@ describe("Homepage", () => {
     expect(
       getByTestId(container, "homepage-sneak-peek-image").getAttribute("src"),
     ).toBe("/sneak-peek.png");
+    expect(
+      getByTestId(container, "homepage-sneak-peek-image").parentElement
+        ?.className,
+    ).toContain("w-screen");
+    expect(
+      getByTestId(container, "homepage-sneak-peek-image").parentElement
+        ?.className,
+    ).toContain("-translate-x-6");
+    expect(
+      getByTestId(container, "homepage-sneak-peek-image").parentElement
+        ?.className,
+    ).toContain("max-w-[100rem]");
     expect(document.body.textContent).not.toContain(AGENT_SETUP_PROMPT);
 
     const cta = getByTestId<HTMLButtonElement>(
       container,
       "homepage-install-button",
     );
+    expect(cta.className).toContain("h-14");
+    expect(cta.className).toContain("px-5");
+    expect(cta.className).toContain("text-[clamp(");
     const githubLink = container.querySelector(
       'a[href="https://github.com/Lex-Inc/roughdraft"]',
     );
@@ -300,6 +364,21 @@ describe("Homepage", () => {
     expect(
       getByTestId(storyboard, "homepage-workflow-heading").textContent,
     ).toBe("How it works");
+    expect(
+      getByTestId(storyboard, "homepage-workflow-heading").className,
+    ).toContain("text-[clamp(");
+    expect(
+      getByTestId(storyboard, "homepage-workflow-heading").className,
+    ).toContain("text-slate-950");
+    expect(
+      getByTestId(storyboard, "homepage-workflow-heading").className,
+    ).toContain("dark:text-slate-50");
+    expect(
+      getByTestId(storyboard, "homepage-workflow-heading").className,
+    ).not.toContain("leading-");
+    expect(
+      getByTestId(storyboard, "homepage-workflow-heading").className,
+    ).not.toContain("text-balance");
 
     const markdownDemo = getByTestId(container, "rfm-format-demo");
     expect(
@@ -392,9 +471,7 @@ describe("Homepage", () => {
     );
 
     scenes.forEach((scene, index) => {
-      expect(sceneNodes[index]?.textContent).toContain(
-        String(index + 1).padStart(2, "0"),
-      );
+      expect(sceneNodes[index]?.textContent).toContain(String(index + 1));
       expect(sceneNodes[index]?.textContent).toContain(scene);
     });
 

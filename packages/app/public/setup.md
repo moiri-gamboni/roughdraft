@@ -75,15 +75,15 @@ mkdir -p "$HOME/.claude"
 
 Use imports or symlinks only when the target agent supports normal Markdown files at that path. For UI-only settings such as Cursor User Rules or GitHub Copilot personal instructions, tell the user what text to add rather than editing an unknown file.
 
-The canonical Roughdraft instruction block is hosted at https://roughdraft.page/prompt.md. After you identify or create the right instruction file, prefer appending or merging that exact block:
+The canonical Roughdraft instruction block is hosted at https://roughdraft.md/prompt.md. After you identify or create the right instruction file, prefer appending or merging that exact block:
 
 ```bash
 agent_instructions_file="/absolute/path/to/AGENTS.md"
 printf "\n\n" >> "$agent_instructions_file"
-curl -fsSL https://roughdraft.page/prompt.md >> "$agent_instructions_file"
+curl -fsSL https://roughdraft.md/prompt.md >> "$agent_instructions_file"
 ```
 
-If the instruction file already has Roughdraft guidance, merge in any missing guidance from https://roughdraft.page/prompt.md instead of duplicating the section.
+If the instruction file already has Roughdraft guidance, merge in any missing guidance from https://roughdraft.md/prompt.md instead of duplicating the section.
 
 If you cannot use `curl`, add guidance like this:
 
@@ -133,7 +133,7 @@ After updating your instructions, briefly tell the user which file you changed.
 
 Roughdraft uses CriticMarkup for inline comments and suggested changes while keeping all review state in the Markdown file.
 
-For exact syntax, metadata, and round-trip behavior, read the official Roughdraft Flavored Markdown spec at https://roughdraft.page/spec/roughdraft-flavored-markdown.md. The review-index JSON Schema is available at https://roughdraft.page/spec/roughdraft-flavored-markdown.schema.json.
+For exact syntax, metadata, and round-trip behavior, read the official Roughdraft Flavored Markdown spec at https://roughdraft.md/spec/roughdraft-flavored-markdown.md. The review-index JSON Schema is available at https://roughdraft.md/spec/roughdraft-flavored-markdown.schema.json.
 
 Base markers:
 

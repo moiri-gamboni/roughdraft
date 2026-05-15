@@ -102,23 +102,23 @@ export function RoughdraftFormatDemo() {
       className="rfm-format-demo mx-auto mt-20 w-full max-w-none border-t border-slate-200 pt-10 text-left dark:border-slate-700 sm:mt-24"
     >
       <div
-        className="rfm-format-demo-intro mx-auto w-full px-4"
+        className="rfm-format-demo-intro font-die-grotesk-a mx-auto w-full px-4 font-bold"
         data-testid="rfm-format-demo-intro"
       >
         <div className="max-w-3xl">
-          <p className="text-xs font-medium tracking-[0.16em] text-stone-500 uppercase dark:text-stone-400">
+          <p className="text-xs font-bold tracking-[0.16em] text-stone-500 uppercase dark:text-stone-400">
             Roughdraft flavored Markdown
           </p>
           <h2
-            className="mt-3 text-3xl leading-tight font-semibold text-balance text-slate-950 dark:text-slate-50 sm:text-4xl"
+            className="font-die-grotesk-b mt-3 text-3xl leading-tight font-bold text-balance text-slate-950 dark:text-slate-50 sm:text-4xl"
             id="roughdraft-markdown-heading"
           >
             It's just Markdown
           </h2>
-          <p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-400">
+          <p className="mt-4 text-base leading-7 text-stone-600 dark:text-stone-400">
             We extended the markdown format, building on prior art like{" "}
             <a
-              className="font-medium text-slate-950 underline decoration-slate-300 underline-offset-4 hover:decoration-slate-950 dark:text-slate-50 dark:decoration-slate-600 dark:hover:decoration-slate-50"
+              className="font-bold text-slate-950 underline decoration-slate-300 underline-offset-4 hover:decoration-slate-950 dark:text-slate-50 dark:decoration-slate-600 dark:hover:decoration-slate-50"
               href="https://criticmarkup.com/"
               target="_blank"
               rel="noreferrer"
@@ -127,7 +127,7 @@ export function RoughdraftFormatDemo() {
             </a>
             , to support full comment threads, and suggesting changes. Read the{" "}
             <a
-              className="font-medium text-slate-950 underline decoration-slate-300 underline-offset-4 hover:decoration-slate-950 dark:text-slate-50 dark:decoration-slate-600 dark:hover:decoration-slate-50"
+              className="font-bold text-slate-950 underline decoration-slate-300 underline-offset-4 hover:decoration-slate-950 dark:text-slate-50 dark:decoration-slate-600 dark:hover:decoration-slate-50"
               href="/roughdraft-flavored-markdown"
             >
               spec
@@ -166,7 +166,7 @@ export function RoughdraftFormatDemo() {
           className="flex min-w-0 flex-col overflow-visible rounded-lg border-0 bg-transparent shadow-none"
           data-testid="rfm-source-pane"
         >
-          <div className="flex h-10 items-center justify-end border-b border-transparent px-4 text-xs font-semibold tracking-[0.14em] text-slate-500 uppercase dark:text-slate-400">
+          <div className="flex h-10 items-center justify-end border-b border-transparent px-4 text-xs font-semibold tracking-[0.14em] text-stone-500 uppercase dark:text-slate-400">
             <span>Source</span>
           </div>
           <div className="relative m-4 flex min-h-[calc(70vh+7rem)] flex-col overflow-hidden rounded-lg border border-slate-950/70 bg-[#1F232B] text-slate-50 shadow-[0_20px_48px_rgba(15,23,42,0.16)] before:absolute before:top-0 before:right-0 before:left-0 before:flex before:min-h-10 before:items-center before:border-b before:border-slate-400/20 before:px-3.5 before:pl-[4.5rem] before:font-mono before:text-xs before:font-bold before:text-slate-300 before:content-['markdown_source'] after:absolute after:top-[0.925rem] after:left-3.5 after:size-[0.65rem] after:rounded-full after:bg-rose-500 after:shadow-[1rem_0_0_rgb(251,191,36),2rem_0_0_rgb(16,185,129)] focus-within:shadow-[0_20px_48px_rgba(15,23,42,0.16),0_0_0_2px_rgba(56,189,248,0.18)] dark:border-slate-950/70 dark:bg-[#1F232B] dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)]">
@@ -179,7 +179,7 @@ export function RoughdraftFormatDemo() {
         </div>
 
         <div
-          className="hidden items-start justify-center pt-3 text-slate-400 dark:text-slate-500 lg:flex"
+          className="hidden items-start justify-center pt-3 text-stone-400 dark:text-stone-500 lg:flex"
           data-testid="rfm-format-demo-arrow"
         >
           <ArrowRight className="size-5" aria-hidden="true" />
@@ -189,7 +189,7 @@ export function RoughdraftFormatDemo() {
           className="min-w-0 overflow-visible rounded-lg border-0 bg-transparent shadow-none"
           data-testid="rfm-result-pane"
         >
-          <div className="flex h-10 items-center border-b border-transparent px-4 text-xs font-semibold tracking-[0.14em] text-slate-500 uppercase dark:text-slate-400">
+          <div className="flex h-10 items-center border-b border-transparent px-4 text-xs font-semibold tracking-[0.14em] text-stone-500 uppercase dark:text-slate-400">
             <span>Result</span>
           </div>
           <div className="rfm-result-editor" data-testid="rfm-result-editor">
