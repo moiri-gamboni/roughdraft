@@ -140,6 +140,19 @@ roughdraft_cmd="roughdraft-dev-$worktree_name"
 
 After the user finishes reviewing in Roughdraft, read the plan file from disk and address any CriticMarkup feedback before implementing.
 
+## Implementation Notes Workflow
+
+When implementing a plan or spec, keep a running implementation notes file in `.context/` by default, such as `.context/implementation-notes.md` or a task-specific filename like `.context/markdown-smoke-tests-implementation-notes.md`.
+
+Use the notes file to record how reality diverged from the plan or what the plan did not cover:
+
+- Decisions you had to make that were not specified.
+- Product, design, architecture, or testing tradeoffs you made.
+- Parts of the plan or spec that had to change once you read or ran the code.
+- Important constraints, follow-up work, or risks the user should know about.
+
+Update the notes as you implement, not only at the end. In the final response, mention the implementation notes file and summarize the most important deviations or decisions.
+
 ## Roughdraft Workflow
 
 Use Roughdraft when the user wants to open, review, or comment on a Markdown file.
