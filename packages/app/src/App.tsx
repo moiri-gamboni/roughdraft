@@ -420,11 +420,11 @@ export function Homepage({
                 <DialogTrigger
                   render={
                     <Button
-                      className="h-14 gap-2 px-5 text-[clamp(1.25rem,1rem+0.6vw,1.5rem)]"
+                      className="h-14 cursor-pointer gap-2 px-5 text-[clamp(1.25rem,1rem+0.6vw,1.5rem)]"
                       data-testid="homepage-install-button"
                       size="lg"
                     >
-                      Install Now
+                      Install now
                     </Button>
                   }
                 />
@@ -919,9 +919,31 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
       data-popup-visible={visible ? "true" : "false"}
       data-testid="homepage-workflow-popup"
     >
-      <div className="flex h-10 items-center gap-1.5 border-b border-slate-200 px-4 text-xs font-bold text-stone-500 dark:border-slate-700 dark:text-slate-400 max-[520px]:px-3">
-        <FileText className="size-3.5" aria-hidden="true" />
-        homepage-conversion-plan.md
+      <div
+        className="flex h-10 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 text-xs font-bold text-stone-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400 max-[520px]:px-3"
+        data-testid="homepage-workflow-popup-header"
+      >
+        <div
+          className="flex items-center gap-1.5"
+          aria-hidden="true"
+          data-testid="homepage-workflow-popup-traffic-lights"
+        >
+          <span
+            className="inline-flex size-[0.65rem] rounded-full bg-rose-500"
+            data-testid="homepage-workflow-popup-traffic-light"
+          />
+          <span
+            className="inline-flex size-[0.65rem] rounded-full bg-amber-400"
+            data-testid="homepage-workflow-popup-traffic-light"
+          />
+          <span
+            className="inline-flex size-[0.65rem] rounded-full bg-emerald-500"
+            data-testid="homepage-workflow-popup-traffic-light"
+          />
+        </div>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <FileText className="size-3.5 shrink-0" aria-hidden="true" />
+        </div>
       </div>
       <div
         className="relative min-h-[28rem] overflow-hidden bg-stone-50 p-4 [--homepage-workflow-document-offset-y:0rem] [--homepage-workflow-document-scale:1] dark:bg-slate-900 min-[780px]:min-h-[25.5rem] min-[780px]:[--homepage-workflow-document-scale:0.6] max-[899px]:min-h-[14.5rem] max-[899px]:p-2.5 max-[899px]:[--homepage-workflow-document-offset-y:clamp(1rem,5svh,2.75rem)] max-[899px]:[--homepage-workflow-document-scale:0.66] max-[520px]:p-3 max-[520px]:[--homepage-workflow-document-scale:0.6]"
@@ -937,12 +959,12 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
         >
           {showDoneButton ? (
             <Button
-              className="absolute top-3 right-3 z-[3] h-8 rounded-[7px] bg-black px-3 text-xs font-bold text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] hover:bg-black/85"
+              className="absolute top-3 right-3 z-[3] h-12 rounded-[7px] bg-black px-4.5 text-base font-bold text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] hover:bg-black/85"
               data-testid="homepage-workflow-handoff-button"
               type="button"
               size="sm"
             >
-              <Check className="size-4" aria-hidden="true" />
+              <Check className="size-6" aria-hidden="true" />
               I'm done
             </Button>
           ) : null}

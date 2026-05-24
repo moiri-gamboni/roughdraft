@@ -360,33 +360,35 @@ function CommentActionButton({
   className?: string;
   onClick: (event: MouseEvent) => void;
 }) {
+  const button = (
+    <Button
+      type="button"
+      aria-label={compact ? label : undefined}
+      data-testid={testId}
+      variant="ghost"
+      size={compact ? "icon-xs" : "sm"}
+      className={cn(
+        compact
+          ? "rounded-full border border-transparent transition-colors duration-150"
+          : "h-7 rounded-full border border-transparent px-2.5 text-[11px] font-medium tracking-[0.08em] uppercase transition-colors duration-150",
+        tone === "danger"
+          ? "text-stone-400 hover:bg-rose-100 hover:text-rose-700 dark:text-stone-500 dark:hover:bg-rose-900/40 dark:hover:text-rose-400"
+          : "text-stone-400 hover:bg-[#DED8CE]/45 hover:text-stone-600 dark:text-stone-500 dark:hover:bg-slate-700 dark:hover:text-stone-300",
+        className,
+      )}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={onClick}
+    >
+      {icon}
+      {compact ? null : <span>{label}</span>}
+    </Button>
+  );
+
+  if (!compact) return button;
+
   return (
     <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            data-testid={testId}
-            variant="ghost"
-            size={compact ? "icon-xs" : "sm"}
-            className={cn(
-              compact
-                ? "rounded-full border border-transparent transition-colors duration-150"
-                : "h-7 rounded-full border border-transparent px-2.5 text-[11px] font-medium tracking-[0.08em] uppercase transition-colors duration-150",
-              tone === "danger"
-                ? "text-stone-400 hover:bg-rose-100 hover:text-rose-700 dark:text-stone-500 dark:hover:bg-rose-900/40 dark:hover:text-rose-400"
-                : "text-stone-400 hover:bg-[#DED8CE]/45 hover:text-stone-600 dark:text-stone-500 dark:hover:bg-slate-700 dark:hover:text-stone-300",
-              className,
-            )}
-          >
-            {icon}
-            {compact ? null : <span>{label}</span>}
-          </Button>
-        }
-        aria-label={label}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={onClick}
-      />
+      <TooltipTrigger render={button} />
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );

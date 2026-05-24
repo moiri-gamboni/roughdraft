@@ -592,7 +592,8 @@ describe("review handoff watcher affordance", () => {
       "review-handoff-button",
     );
     expect(doneReviewingButton).toBeDefined();
-    expect(container.textContent).toContain("Agent watching");
+    expect(container.textContent).not.toContain("Agent waiting");
+    expect(queryByTestId(container, "review-handoff-status")).toBeNull();
 
     if (!doneReviewingButton) {
       throw new Error("I'm done button not found");
@@ -601,6 +602,7 @@ describe("review handoff watcher affordance", () => {
 
     expect(onCompleteReview).toHaveBeenCalledOnce();
     expect(container.textContent).toContain("Sent");
+    expect(queryByTestId(container, "review-handoff-status")).toBeNull();
     expect(container.textContent).not.toContain("Agent notified");
     expect(container.textContent).not.toContain("Review ready");
     expect(container.textContent).not.toContain("Copy prompt");

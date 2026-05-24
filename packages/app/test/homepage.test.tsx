@@ -301,7 +301,9 @@ describe("Homepage", () => {
       container,
       "homepage-install-button",
     );
+    expect(cta.textContent).toBe("Install now");
     expect(cta.className).toContain("h-14");
+    expect(cta.className).toContain("cursor-pointer");
     expect(cta.className).toContain("px-5");
     expect(cta.className).toContain("text-[clamp(");
     const githubLink = container.querySelector(
@@ -435,6 +437,10 @@ describe("Homepage", () => {
     expect(
       storyboard.querySelectorAll('[data-testid="homepage-workflow-popup"]'),
     ).toHaveLength(1);
+    expect(
+      getByTestId(storyboard, "homepage-workflow-popup-traffic-lights")
+        .children,
+    ).toHaveLength(3);
     expect(
       getByTestId(storyboard, "homepage-workflow-popup").getAttribute(
         "data-popup-visible",

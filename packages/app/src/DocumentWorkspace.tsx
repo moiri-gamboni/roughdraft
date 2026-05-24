@@ -15,11 +15,6 @@ import type { DocumentEditorViewMode } from "./app-navigation";
 import { RemoteSessionBanner } from "./components/RemoteSessionBanner";
 import { Button } from "./components/ui/button";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "./components/ui/popover";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -393,18 +388,6 @@ export function DocumentWorkspace({
       : reviewHandoffState === "error" || reviewHandoffState === "undelivered"
         ? AlertTriangle
         : CheckCheck;
-  const reviewHandoffStatusTitle =
-    reviewHandoffState === "undelivered"
-      ? "No agent is watching now"
-      : reviewHandoffState === "error"
-        ? "Could not notify agent"
-        : "Your agent is now working";
-  const reviewHandoffStatusBody =
-    reviewHandoffState === "undelivered"
-      ? "The handoff was not delivered because the watcher is no longer connected."
-      : reviewHandoffState === "error"
-        ? "Roughdraft could not send the handoff. Check that the local server is still running."
-        : "It will take the appropriate next action, including replying to comments, questions, and suggestions, and/or directly editing the doc.";
 
   return (
     <div
@@ -422,59 +405,30 @@ export function DocumentWorkspace({
         data-testid="document-status-stack"
         data-document-status-stack="true"
       >
-        {showReviewHandoffButton ? (
-          <Popover>
-            <PopoverTrigger
-              render={
-                <Button
-                  type="button"
-                  data-testid="review-handoff-button"
-                  size="lg"
-                  className="h-9 rounded-[7px] bg-black px-3 text-sm font-bold text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] hover:bg-black/85 focus-visible:ring-black/25 dark:bg-black dark:text-white dark:hover:bg-black/85 dark:focus-visible:ring-white/30"
-                  disabled={isReviewHandoffDisabled({
-                    saveState,
-                    documentDiskChangeState,
-                    reviewHandoffState,
-                  })}
-                  onClick={() => void handleCompleteReview()}
-                >
-                  <ReviewHandoffButtonIcon
-                    className={cn(
-                      "size-4",
-                      reviewHandoffState === "notifying" && "animate-spin",
-                    )}
-                  />
-                  {reviewHandoffButtonLabel}
-                </Button>
-              }
-            />
-            <PopoverContent
-              aria-label="Review handoff status"
-              data-testid="review-handoff-status"
+        <div className="flex max-w-full items-center justify-end gap-1.5">
+          {showReviewHandoffButton ? (
+            <Button
+              type="button"
+              data-testid="review-handoff-button"
+              size="lg"
+              className="h-9 rounded-[7px] bg-black px-3 text-sm font-bold text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] hover:bg-black/85 focus-visible:ring-black/25 dark:bg-black dark:text-white dark:hover:bg-black/85 dark:focus-visible:ring-white/30"
+              disabled={isReviewHandoffDisabled({
+                saveState,
+                documentDiskChangeState,
+                reviewHandoffState,
+              })}
+              onClick={() => void handleCompleteReview()}
             >
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-black text-white dark:bg-white dark:text-black">
-                  {reviewHandoffState === "notifying" ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : reviewHandoffState === "error" ||
-                    reviewHandoffState === "undelivered" ? (
-                    <AlertTriangle className="size-4" />
-                  ) : (
-                    <CheckCheck className="size-4" />
-                  )}
-                </span>
-                <div>
-                  <div className="text-sm font-semibold text-stone-950 dark:text-slate-50">
-                    {reviewHandoffStatusTitle}
-                  </div>
-                  <p className="mt-1 text-sm leading-6 text-stone-600 dark:text-slate-300">
-                    {reviewHandoffStatusBody}
-                  </p>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
-        ) : null}
+              <ReviewHandoffButtonIcon
+                className={cn(
+                  "size-4",
+                  reviewHandoffState === "notifying" && "animate-spin",
+                )}
+              />
+              {reviewHandoffButtonLabel}
+            </Button>
+          ) : null}
+        </div>
         {documentPage ? (
           <DocumentSaveStatusIndicator
             saveState={saveState}
@@ -599,37 +553,7 @@ export function DocumentWorkspace({
                 >
                   {documentFilenameLabel}
                 </div>
-                {activeDocumentPath ? (
-                  <div className="ml-auto flex shrink-0 items-center gap-1.5">
-                    {reviewHandoffState !== "notified" &&
-                    (reviewHandoffState !== "idle" ||
-                      reviewWatcherCount > 0) ? (
-                      <span
-                        role="status"
-                        aria-label="Review handoff"
-                        className="inline-flex shrink-0 items-center gap-1 font-mono text-[0.6rem] tracking-[0.01em] text-stone-400 dark:text-stone-500"
-                      >
-                        {reviewHandoffState === "notifying" ? (
-                          <Loader2 className="size-[0.6rem] animate-spin" />
-                        ) : reviewHandoffState === "error" ||
-                          reviewHandoffState === "undelivered" ? (
-                          <AlertTriangle className="size-[0.6rem]" />
-                        ) : reviewWatcherCount > 0 ? (
-                          <CheckCheck className="size-[0.6rem]" />
-                        ) : (
-                          <CheckCheck className="size-[0.6rem]" />
-                        )}
-                        {reviewHandoffState === "notifying"
-                          ? "Notifying"
-                          : reviewHandoffState === "error" ||
-                              reviewHandoffState === "undelivered"
-                            ? "Review not sent"
-                            : "Agent watching"}
-                      </span>
-                    ) : null}
-                  </div>
-                ) : null}
-                <div className="inline-flex h-[1.25rem] shrink-0 items-center">
+                <div className="ml-auto inline-flex h-[1.25rem] shrink-0 items-center">
                   <Select<DocumentInteractionMode>
                     value={documentInteractionMode}
                     onValueChange={(value) => {
