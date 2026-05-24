@@ -17,7 +17,7 @@ export interface RfmValidationSummary {
 
 export interface RfmValidationResult {
   format: "roughdraft-flavored-markdown";
-  version: "0.1";
+  version: "0.2";
   ok: boolean;
   diagnostics: RfmDiagnostic[];
   errors: RfmDiagnostic[];
@@ -55,7 +55,7 @@ export interface RfmReviewIndexSummary {
 
 export interface RfmReviewIndex {
   format: "roughdraft-flavored-markdown";
-  version: "0.1";
+  version: "0.2";
   items: RfmReviewItem[];
   diagnostics: RfmDiagnostic[];
   summary: RfmReviewIndexSummary;
@@ -76,7 +76,7 @@ export interface MarkRoughdraftResolvedOptions {
 
 interface Metadata {
   attrs: Map<string, string>;
-  kind: "canonical" | "legacy";
+  kind: "canonical" | "legacy" | "reference";
   offset: number;
   endOffset: number;
 }
@@ -119,6 +119,26 @@ interface ParsedSuggestion {
   endOffset: number;
 }
 
+interface YamlMetadataEntry {
+  body?: string;
+  by?: string;
+  at?: string;
+  re?: string;
+  status?: string;
+  resolved?: string;
+  [key: string]: unknown;
+}
+
+interface RoughdraftEndmatter {
+  comments: Map<string, YamlMetadataEntry>;
+  suggestions: Map<string, YamlMetadataEntry>;
+  data: Record<string, unknown> | null;
+  raw: string | null;
+  offset: number | null;
+  diagnostics: Array<{ code: string; message: string; offset: number }>;
+}
+
+const RFM_VERSION = "0.2" as const;
 const requiredMetadataAttributes = ["id", "by", "at"] as const;
 const dateTimePattern =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -128,6 +148,7 @@ export function validateRoughdraftMarkdown(
   markdown: string,
 ): RfmValidationResult {
   const lineStarts = createLineStarts(markdown);
+  const endmatter = parseRoughdraftEndmatter(markdown);
   const diagnostics: RfmDiagnostic[] = [];
   const ids = new Map<string, IdReference>();
   const replies: ReplyReference[] = [];
@@ -152,6 +173,15 @@ export function validateRoughdraftMarkdown(
     });
   };
 
+  for (const diagnostic of endmatter.diagnostics) {
+    addDiagnostic(
+      "error",
+      diagnostic.code,
+      diagnostic.message,
+      diagnostic.offset,
+    );
+  }
+
   const validateMetadata = (
     metadata: Metadata | null,
     kind: "comment" | "suggestion",
@@ -166,6 +196,39 @@ export function validateRoughdraftMarkdown(
           markerOffset,
         );
       }
+      return;
+    }
+
+    if (metadata.kind === "reference") {
+      const id = metadata.attrs.get("id");
+      const entry =
+        kind === "comment"
+          ? endmatter.comments.get(id ?? "")
+          : endmatter.suggestions.get(id ?? "");
+
+      if (!id || !entry) {
+        addDiagnostic(
+          "error",
+          "missing-endmatter-entry",
+          `Missing YAML endmatter entry for review id \`${id ?? ""}\`.`,
+          metadata.offset,
+        );
+        return;
+      }
+
+      const existing = ids.get(id);
+      if (existing) {
+        addDiagnostic(
+          "error",
+          "duplicate-id",
+          `Duplicate review id \`${id}\`.`,
+          metadata.offset,
+        );
+      } else {
+        ids.set(id, { id, kind, offset: metadata.offset });
+      }
+
+      validateEndmatterEntry(id, entry, metadata.offset, addDiagnostic, false);
       return;
     }
 
@@ -222,9 +285,10 @@ export function validateRoughdraftMarkdown(
   };
 
   let offset = 0;
+  const scanEndOffset = endmatter.offset ?? markdown.length;
   let fence: FenceState | null = null;
 
-  while (offset < markdown.length) {
+  while (offset < scanEndOffset) {
     if (isLineStart(markdown, offset)) {
       const fenceMatch = matchFence(markdown, offset, fence);
       if (fenceMatch) {
@@ -294,6 +358,36 @@ export function validateRoughdraftMarkdown(
     offset += 1;
   }
 
+  for (const [id, entry] of endmatter.comments) {
+    if (!entry.body && !entry.re) continue;
+
+    const existing = ids.get(id);
+    if (existing) {
+      addDiagnostic(
+        "error",
+        "duplicate-id",
+        `Duplicate review id \`${id}\`.`,
+        endmatter.offset ?? 0,
+      );
+      continue;
+    }
+
+    ids.set(id, { id, kind: "comment", offset: endmatter.offset ?? 0 });
+    summary.comments += 1;
+    validateEndmatterEntry(
+      id,
+      entry,
+      endmatter.offset ?? 0,
+      addDiagnostic,
+      true,
+    );
+    replies.push({
+      id,
+      parentId: String(entry.re ?? ""),
+      offset: endmatter.offset ?? 0,
+    });
+  }
+
   for (const reply of replies) {
     if (reply.id === reply.parentId) {
       addDiagnostic(
@@ -305,12 +399,23 @@ export function validateRoughdraftMarkdown(
       continue;
     }
 
-    if (!ids.has(reply.parentId)) {
+    if (reply.parentId && !ids.has(reply.parentId)) {
       addDiagnostic(
         "warning",
         "missing-reply-target",
         `Comment reply \`re="${reply.parentId}"\` points to a missing id.`,
         reply.offset,
+      );
+    }
+  }
+
+  for (const [id] of endmatter.suggestions) {
+    if (endmatter.comments.has(id)) {
+      addDiagnostic(
+        "error",
+        "duplicate-id",
+        `Duplicate review id \`${id}\` across comments and suggestions endmatter.`,
+        endmatter.offset ?? 0,
       );
     }
   }
@@ -325,7 +430,7 @@ export function validateRoughdraftMarkdown(
 
   return {
     format: "roughdraft-flavored-markdown",
-    version: "0.1",
+    version: RFM_VERSION,
     ok: errors.length === 0,
     diagnostics,
     errors,
@@ -337,21 +442,22 @@ export function validateRoughdraftMarkdown(
 export function extractRoughdraftReviewIndex(markdown: string): RfmReviewIndex {
   const lineStarts = createLineStarts(markdown);
   const validation = validateRoughdraftMarkdown(markdown);
+  const endmatter = parseRoughdraftEndmatter(markdown);
   const items: RfmReviewItem[] = [];
   const noopDiagnostic = () => {};
 
   const addComment = (parsed: ParsedComment, anchorText?: string) => {
-    const id =
-      parsed.metadata?.attrs.get("id") ?? `comment-${parsed.offset.toString()}`;
-    const parentId = parsed.metadata?.attrs.get("re") ?? null;
+    const attrs = hydrateMetadataAttrs(parsed.metadata, endmatter, "comment");
+    const id = attrs.get("id") ?? `comment-${parsed.offset.toString()}`;
+    const parentId = attrs.get("re") ?? null;
 
     items.push({
       id,
       kind: parentId ? "reply" : "comment",
       parentId,
-      author: parsed.metadata?.attrs.get("by") ?? null,
-      createdAt: parsed.metadata?.attrs.get("at") ?? null,
-      status: parsed.metadata?.attrs.get("status") ?? null,
+      author: attrs.get("by") ?? null,
+      createdAt: attrs.get("at") ?? null,
+      status: attrs.get("status") ?? null,
       text: parsed.content,
       anchorText,
       offset: parsed.offset,
@@ -361,18 +467,21 @@ export function extractRoughdraftReviewIndex(markdown: string): RfmReviewIndex {
   };
 
   const addSuggestion = (parsed: ParsedSuggestion) => {
-    const id =
-      parsed.metadata?.attrs.get("id") ??
-      `suggestion-${parsed.offset.toString()}`;
+    const attrs = hydrateMetadataAttrs(
+      parsed.metadata,
+      endmatter,
+      "suggestion",
+    );
+    const id = attrs.get("id") ?? `suggestion-${parsed.offset.toString()}`;
 
     items.push({
       id,
       kind: "suggestion",
       suggestionKind: parsed.suggestionKind,
       parentId: null,
-      author: parsed.metadata?.attrs.get("by") ?? null,
-      createdAt: parsed.metadata?.attrs.get("at") ?? null,
-      status: parsed.metadata?.attrs.get("status") ?? null,
+      author: attrs.get("by") ?? null,
+      createdAt: attrs.get("at") ?? null,
+      status: attrs.get("status") ?? null,
       text: parsed.text,
       originalText: parsed.originalText,
       replacementText: parsed.replacementText,
@@ -383,9 +492,10 @@ export function extractRoughdraftReviewIndex(markdown: string): RfmReviewIndex {
   };
 
   let offset = 0;
+  const scanEndOffset = endmatter.offset ?? markdown.length;
   let fence: FenceState | null = null;
 
-  while (offset < markdown.length) {
+  while (offset < scanEndOffset) {
     if (isLineStart(markdown, offset)) {
       const fenceMatch = matchFence(markdown, offset, fence);
       if (fenceMatch) {
@@ -447,9 +557,26 @@ export function extractRoughdraftReviewIndex(markdown: string): RfmReviewIndex {
     offset += 1;
   }
 
+  for (const [id, entry] of endmatter.comments) {
+    if (!entry.body || !entry.re) continue;
+
+    items.push({
+      id,
+      kind: "reply",
+      parentId: String(entry.re),
+      author: typeof entry.by === "string" ? entry.by : null,
+      createdAt: typeof entry.at === "string" ? entry.at : null,
+      status: typeof entry.status === "string" ? entry.status : null,
+      text: String(entry.body),
+      offset: endmatter.offset ?? markdown.length,
+      endOffset: endmatter.offset ?? markdown.length,
+      ...locationForOffset(lineStarts, endmatter.offset ?? markdown.length),
+    });
+  }
+
   return {
     format: "roughdraft-flavored-markdown",
-    version: "0.1",
+    version: RFM_VERSION,
     items,
     diagnostics: validation.diagnostics,
     summary: {
@@ -471,6 +598,22 @@ export function appendRoughdraftReply(
   const parent = index.items.find((item) => item.id === options.parentId);
   if (!parent) {
     throw new Error(`Review item not found: ${options.parentId}`);
+  }
+
+  const endmatter = parseRoughdraftEndmatter(markdown);
+  if (isEndmatterBackedItem(markdown, parent)) {
+    const replyId = options.id ?? nextCommentId(index.items);
+    const comments = new Map(endmatter.comments);
+    comments.set(replyId, {
+      body: options.message,
+      by: options.author ?? "AI",
+      at: options.at ?? new Date().toISOString(),
+      re: options.parentId,
+    });
+    return writeRoughdraftEndmatter(markdown, {
+      comments,
+      suggestions: endmatter.suggestions,
+    });
   }
 
   const reply = `{>>${options.message}<<}${serializeMetadataAttributes({
@@ -500,6 +643,26 @@ export function markRoughdraftResolved(
   const target = index.items.find((item) => item.id === options.targetId);
   if (!target) {
     throw new Error(`Review item not found: ${options.targetId}`);
+  }
+
+  const endmatter = parseRoughdraftEndmatter(markdown);
+  const endmatterKind = endmatter.comments.has(options.targetId)
+    ? "comment"
+    : endmatter.suggestions.has(options.targetId)
+      ? "suggestion"
+      : null;
+
+  if (endmatterKind) {
+    const comments = new Map(endmatter.comments);
+    const suggestions = new Map(endmatter.suggestions);
+    const map = endmatterKind === "comment" ? comments : suggestions;
+    const current = map.get(options.targetId) ?? {};
+    map.set(options.targetId, {
+      ...current,
+      status: "resolved",
+      ...(options.summary ? { resolved: options.summary } : {}),
+    });
+    return writeRoughdraftEndmatter(markdown, { comments, suggestions });
   }
 
   const metadataStart = findCanonicalMetadataStart(markdown, target.endOffset);
@@ -792,6 +955,11 @@ function parseMetadata(
 
   if (markdown[offset] !== "{") return null;
 
+  const reference = parseIdReference(markdown, offset);
+  if (reference) {
+    return reference;
+  }
+
   const parsed = parseCanonicalMetadata(markdown, offset);
   if (parsed) return parsed;
 
@@ -799,12 +967,24 @@ function parseMetadata(
     addDiagnostic(
       "error",
       "invalid-metadata-syntax",
-      'Metadata must use quoted attributes such as `{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}`.',
+      "Metadata must use a compact reference such as `{#c1}` backed by final YAML endmatter, or a valid compatibility attribute block.",
       offset,
     );
   }
 
   return null;
+}
+
+function parseIdReference(markdown: string, offset: number): Metadata | null {
+  const match = markdown.slice(offset).match(/^\{#([A-Za-z][A-Za-z0-9_-]*)\}/);
+  if (!match) return null;
+
+  return {
+    attrs: new Map([["id", match[1] ?? ""]]),
+    kind: "reference",
+    offset,
+    endOffset: offset + match[0].length,
+  };
 }
 
 function parseCanonicalMetadata(
@@ -887,6 +1067,181 @@ function parseLegacyAttributes(metadata: string): Map<string, string> {
   return attrs;
 }
 
+function parseRoughdraftEndmatter(markdown: string): RoughdraftEndmatter {
+  const empty: RoughdraftEndmatter = {
+    comments: new Map(),
+    suggestions: new Map(),
+    data: null,
+    raw: null,
+    offset: null,
+    diagnostics: [],
+  };
+  const match = findFinalYamlEndmatter(markdown);
+  if (!match) return empty;
+  if (!markdown.slice(0, match.offset).includes("{#")) return empty;
+
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(match.yaml);
+  } catch (error) {
+    if (!match.raw.includes("{#")) return empty;
+
+    return {
+      ...empty,
+      raw: match.raw,
+      offset: match.offset,
+      diagnostics: [
+        {
+          code: "invalid-endmatter-yaml",
+          message: `YAML endmatter could not be parsed: ${error instanceof Error ? error.message : String(error)}`,
+          offset: match.offset,
+        },
+      ],
+    };
+  }
+
+  if (!isPlainObject(parsed)) return empty;
+  const hasRoughdraftKeys = "comments" in parsed || "suggestions" in parsed;
+  if (!hasRoughdraftKeys) return empty;
+
+  return {
+    comments: readEndmatterEntries(parsed.comments),
+    suggestions: readEndmatterEntries(parsed.suggestions),
+    data: parsed,
+    raw: match.raw,
+    offset: match.offset,
+    diagnostics: [],
+  };
+}
+
+function findFinalYamlEndmatter(
+  markdown: string,
+): { raw: string; yaml: string; offset: number } | null {
+  const matches = [...markdown.matchAll(/\n---[ \t]*\r?\n/g)];
+  const last = matches.at(-1);
+  if (!last || last.index === undefined) return null;
+
+  const raw = markdown.slice(last.index);
+  return {
+    raw,
+    yaml: raw.replace(/^\n---[ \t]*\r?\n/, ""),
+    offset: last.index,
+  };
+}
+
+function readEndmatterEntries(value: unknown): Map<string, YamlMetadataEntry> {
+  const entries = new Map<string, YamlMetadataEntry>();
+  if (!isPlainObject(value)) return entries;
+
+  for (const [id, entry] of Object.entries(value)) {
+    if (!isPlainObject(entry)) continue;
+    entries.set(id, entry as YamlMetadataEntry);
+  }
+
+  return entries;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function hydrateMetadataAttrs(
+  metadata: Metadata | null,
+  endmatter: RoughdraftEndmatter,
+  kind: "comment" | "suggestion",
+): Map<string, string> {
+  const attrs = new Map(metadata?.attrs ?? []);
+  if (metadata?.kind !== "reference") return attrs;
+
+  const id = attrs.get("id");
+  const entry =
+    kind === "comment"
+      ? endmatter.comments.get(id ?? "")
+      : endmatter.suggestions.get(id ?? "");
+  if (!entry) return attrs;
+
+  for (const [key, value] of Object.entries(entry)) {
+    if (typeof value === "string") {
+      attrs.set(key, value);
+    }
+  }
+  if (id) attrs.set("id", id);
+  return attrs;
+}
+
+function validateEndmatterEntry(
+  id: string,
+  entry: YamlMetadataEntry,
+  offset: number,
+  addDiagnostic: (
+    severity: RfmDiagnosticSeverity,
+    code: string,
+    message: string,
+    offset: number,
+  ) => void,
+  isReply: boolean,
+): void {
+  for (const attribute of ["by", "at"] as const) {
+    if (typeof entry[attribute] !== "string" || !entry[attribute]) {
+      addDiagnostic(
+        "error",
+        `missing-endmatter-${attribute}`,
+        `Missing required YAML endmatter attribute \`${attribute}\` for \`${id}\`.`,
+        offset,
+      );
+    }
+  }
+
+  if (typeof entry.at === "string" && !isValidDateTime(entry.at)) {
+    addDiagnostic(
+      "error",
+      "invalid-endmatter-at",
+      `YAML endmatter attribute \`at\` for \`${id}\` must be an ISO 8601 date-time.`,
+      offset,
+    );
+  }
+
+  if (isReply && !entry.re) {
+    addDiagnostic(
+      "error",
+      "missing-reply-target",
+      `YAML endmatter reply \`${id}\` must include \`re\`.`,
+      offset,
+    );
+  }
+}
+
+function writeRoughdraftEndmatter(
+  markdown: string,
+  endmatter: {
+    comments: Map<string, YamlMetadataEntry>;
+    suggestions: Map<string, YamlMetadataEntry>;
+  },
+): string {
+  const existing = parseRoughdraftEndmatter(markdown);
+  const body =
+    existing.offset === null
+      ? markdown.replace(/\s*$/, "\n")
+      : markdown.slice(0, existing.offset).replace(/\s*$/, "\n");
+  const data: Record<string, unknown> = { ...(existing.data ?? {}) };
+  if (endmatter.comments.size > 0) {
+    data.comments = Object.fromEntries(endmatter.comments);
+  } else {
+    delete data.comments;
+  }
+  if (endmatter.suggestions.size > 0) {
+    data.suggestions = Object.fromEntries(endmatter.suggestions);
+  } else {
+    delete data.suggestions;
+  }
+
+  return `${body}\n---\n${stringifyYaml(data)}`;
+}
+
+function isEndmatterBackedItem(markdown: string, item: RfmReviewItem): boolean {
+  return markdown.slice(item.offset, item.endOffset).includes(`{#${item.id}}`);
+}
+
 function skipSpaces(markdown: string, offset: number): number {
   let cursor = offset;
   while (markdown[cursor] === " " || markdown[cursor] === "\t") {
@@ -953,3 +1308,4 @@ function findCanonicalMetadataStart(
 function isValidDateTime(value: string): boolean {
   return dateTimePattern.test(value) && !Number.isNaN(Date.parse(value));
 }
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";

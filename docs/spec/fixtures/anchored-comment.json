@@ -1,8 +1,8 @@
 {
   "format": "roughdraft-flavored-markdown",
-  "version": "0.1",
+  "version": "0.2",
   "source": {
-    "markdown": "Please revisit {==this sentence==}{>>Needs a source.<<}{id=\"c1\" by=\"user\" at=\"2026-04-28T12:00:00.000Z\"}.\\n"
+    "markdown": "Please revisit {==this sentence==}{>>Needs a source.<<}{#c1}.\\n\\n---\\ncomments:\\n  c1:\\n    by: user\\n    at: \"2026-04-28T12:00:00.000Z\"\\n"
   },
   "comments": [
     {

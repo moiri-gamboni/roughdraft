@@ -629,6 +629,49 @@ describe("PageCard editor integration", () => {
     );
   });
 
+  it("rich-text edits preserve YAML endmatter-backed review metadata on autosave", async () => {
+    const content = [
+      "# Review",
+      "Please revisit {==this claim==}{>>Needs a source.<<}{#c1}.",
+      "",
+      "---",
+      "comments:",
+      "  c1:",
+      "    by: Nora",
+      '    at: "2026-05-24T10:45:00.000Z"',
+      "  c2:",
+      "    body: I can soften this.",
+      "    by: AI",
+      '    at: "2026-05-24T10:46:00.000Z"',
+      "    re: c1",
+      "",
+    ].join("\n");
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-endmatter-autosave-1",
+        title: "Doc Endmatter Autosave 1",
+        content,
+      },
+      selected: true,
+    });
+
+    vi.useFakeTimers();
+
+    await insertTextAtEnd(rendered.getEditor(), " updated");
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    const saved = rendered.onSave.mock.calls[0]?.[1];
+    expect(saved).toContain("{==this claim==}{>>Needs a source.<<}{#c1}");
+    expect(saved).toContain("---\ncomments:");
+    expect(saved).toContain("body: I can soften this.");
+    expect(saved).toContain("re: c1");
+    expect(saved).not.toContain('id="c1"');
+  });
+
   it("rich-text edits preserve normal markdown table headers on autosave", async () => {
     const content = [
       "# Body",
@@ -1201,6 +1244,36 @@ describe("PageCard editor integration", () => {
     ).toBe(true);
   });
 
+  it("switching a YAML endmatter-backed document to code mode shows the endmatter block", async () => {
+    const content = [
+      "# Review",
+      "Please revisit {==this claim==}{>>Needs a source.<<}{#c1}.",
+      "",
+      "---",
+      "comments:",
+      "  c1:",
+      "    by: Nora",
+      '    at: "2026-05-24T10:45:00.000Z"',
+      "",
+    ].join("\n");
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-code-endmatter-1",
+        title: "Doc Code Endmatter 1",
+        content,
+      },
+      editorViewMode: "rich-text",
+      selected: true,
+    });
+
+    await rendered.rerender({ editorViewMode: "code" });
+
+    expect(rendered.container.textContent).toContain("---");
+    expect(rendered.container.textContent).toContain("comments:");
+    expect(rendered.container.textContent).toContain("c1:");
+    expect(rendered.container.textContent).toContain("Needs a source.");
+  });
+
   it("document code mode keeps rail space when comments exist", async () => {
     const rendered = await renderPageCard({
       page: {
@@ -1322,6 +1395,54 @@ describe("PageCard editor integration", () => {
 
     expect(getEditable(rendered.container).textContent).toContain("Beta");
     expect(getEditable(rendered.container).textContent).not.toContain("Alpha");
+  });
+
+  it("switching away from an endmatter-backed document clears stale endmatter for later saves", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-switch-from-endmatter-1",
+        title: "Doc Switch From Endmatter 1",
+        content: [
+          "# Review",
+          "Please revisit {==this claim==}{>>Needs a source.<<}{#c1}.",
+          "",
+          "---",
+          "comments:",
+          "  c1:",
+          "    by: Nora",
+          '    at: "2026-05-24T10:45:00.000Z"',
+          "",
+        ].join("\n"),
+      },
+      selected: true,
+    });
+
+    await rendered.rerender({
+      page: {
+        id: "doc-switch-plain-1",
+        title: "Doc Switch Plain 1",
+        content: "Plain",
+      },
+      interactionMode: "suggesting",
+    });
+
+    vi.useFakeTimers();
+    await act(async () => {
+      rendered.getEditor().commands.focus("end");
+    });
+    await typeTextAsBrowserInput(rendered.getEditor(), " now");
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    const savedMarkdown = rendered.onSave.mock.calls[0]?.[1];
+    expect(savedMarkdown).toMatch(
+      /^Plain \{\+\+now\+\+\}\{id="s1" by="user" at="[^"]+"\}\n$/,
+    );
+    expect(savedMarkdown).not.toContain("---\ncomments:");
+    expect(savedMarkdown).not.toContain("Needs a source.");
   });
 
   it("recent local save echo does not immediately overwrite current editor state", async () => {
@@ -1650,6 +1771,83 @@ describe("PageCard editor integration", () => {
     expect(
       suggestionThread?.querySelector('[data-testid="comment-tree-line"]'),
     ).not.toBeNull();
+  });
+
+  it("saving a reply to a YAML endmatter-backed suggestion preserves split endmatter", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-yaml-suggestion-reply-1",
+        title: "Doc YAML Suggestion Reply 1",
+        content: [
+          "This sentence includes {++clearer wording++}{#s1}.",
+          "",
+          "---",
+          "suggestions:",
+          "  s1:",
+          "    by: user",
+          '    at: "2026-05-24T17:00:00.000Z"',
+          "",
+        ].join("\n"),
+      },
+      selected: true,
+    });
+
+    await flushAnimationFrame();
+    rendered.getEditor();
+    const replyButton = queryByTestId<HTMLButtonElement>(
+      rendered.container,
+      "comment-rail-s1-action-reply",
+    );
+    expect(replyButton).not.toBeNull();
+
+    await act(async () => {
+      replyButton?.click();
+      await Promise.resolve();
+    });
+    await flushReact();
+    await flushAnimationFrame();
+
+    const replyEditor = queryByTestId<HTMLTextAreaElement>(
+      rendered.container,
+      "comment-rail-c1-editor",
+    );
+    expect(replyEditor).not.toBeNull();
+
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(replyEditor, "Looks good.");
+      replyEditor?.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const saveButton = queryByTestId<HTMLButtonElement>(
+      rendered.container,
+      "comment-rail-c1-action-save",
+    );
+    expect(saveButton).not.toBeNull();
+
+    vi.useFakeTimers();
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    const savedMarkdown = rendered.onSave.mock.calls[0]?.[1];
+    expect(savedMarkdown).toContain("{++clearer wording++}{#s1}");
+    expect(savedMarkdown).toContain("comments:");
+    expect(savedMarkdown).toContain("c1:");
+    expect(savedMarkdown).toContain("body: Looks good.");
+    expect(savedMarkdown).toContain("re: s1");
+    expect(savedMarkdown).toContain("suggestions:");
+    expect(savedMarkdown).toContain("s1:");
+    expect(savedMarkdown).not.toContain('id="s1"');
   });
 
   it("preserves suggestion color when comments are attached to suggestion text", async () => {

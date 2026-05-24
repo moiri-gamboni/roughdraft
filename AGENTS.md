@@ -219,3 +219,27 @@ Use CriticMarkup when reading or writing inline review feedback in markdown:
 - Deletion: `{--old text--}`
 - Substitution: `{~~old~>new~~}`
 - Highlight: `{==text==}`
+
+When adding new review feedback, prefer compact inline references plus final YAML endmatter:
+
+```markdown
+{==selected text==}{>>Comment text<<}{#c1}
+{++new text++}{#s1}
+
+---
+comments:
+  c1:
+    by: AI
+    at: "2026-04-28T12:00:00.000Z"
+  c2:
+    body: I can make that edit.
+    by: AI
+    at: "2026-04-28T12:05:00.000Z"
+    re: c1
+suggestions:
+  s1:
+    by: AI
+    at: "2026-04-28T12:10:00.000Z"
+```
+
+Older inline attribute blocks such as `{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}` may appear in existing documents. Preserve them unless you are intentionally rewriting that review item.

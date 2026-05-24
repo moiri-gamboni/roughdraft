@@ -60,11 +60,37 @@ Paragraph with **bold**, [link](https://example.com), `inline code`.
 ```
 ### Review Document
 ```markdown
-# Review document {==Select this sentence==}{>>Root comment<<}{id="root" by="Nora" at="2026-04-28T12:00:00.000Z"}{>>Nested reply<<}{id="child" by="AI" at="2026-04-28T12:01:00.000Z" re="root"} This sentence includes {++clearer wording++}{id="s1" by="AI" at="2026-04-28T12:02:00.000Z"}{>>Looks good.<<}{id="c1" by="Nora" at="2026-04-28T12:03:00.000Z" re="s1"}. Replace {~~old phrase~>new phrase~~}{id="s2" by="AI" at="2026-04-28T12:04:00.000Z"} and remove {--dead text--}{id="s3" by="AI" at="2026-04-28T12:05:00.000Z"}.
+# Review document {==Select this sentence==}{>>Root comment<<}{#root} This sentence includes {++clearer wording++}{#s1}. Replace {~~old phrase~>new phrase~~}{#s2} and remove {--dead text--}{#s3}.
+
+---
+comments:
+  root:
+    by: Nora
+    at: "2026-04-28T12:00:00.000Z"
+  child:
+    body: Nested reply
+    by: AI
+    at: "2026-04-28T12:01:00.000Z"
+    re: root
+  c1:
+    body: Looks good.
+    by: Nora
+    at: "2026-04-28T12:03:00.000Z"
+    re: s1
+suggestions:
+  s1:
+    by: AI
+    at: "2026-04-28T12:02:00.000Z"
+  s2:
+    by: AI
+    at: "2026-04-28T12:04:00.000Z"
+  s3:
+    by: AI
+    at: "2026-04-28T12:05:00.000Z"
 ```
 ### Fenced CriticMarkup Document
 ```markdown
-# Fenced examples This page should not show a review rail just because examples appear inside code fences. ```text {==example==}{>>comment<<}{id="c1" by="user" at="2026-05-12T22:52:50.592Z"} {++inserted++} {--deleted--} {~~old~>new~~} ```
+# Fenced examples This page should not show a review rail just because examples appear inside code fences. ```text {==example==}{>>comment<<}{#c1} {++inserted++} {--deleted--} {~~old~>new~~} ```
 ```
 ## Capture Matrix
 | Area | State | How to reach it | Useful selectors | Notes |

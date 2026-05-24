@@ -11,8 +11,7 @@
       "const": "roughdraft-flavored-markdown"
     },
     "version": {
-      "type": "string",
-      "pattern": "^0\\.1$"
+      "const": "0.2"
     },
     "source": {
       "type": "object",
@@ -26,6 +25,10 @@
         "frontmatter": {
           "type": ["string", "null"],
           "description": "YAML frontmatter content when exposed separately by the parser."
+        },
+        "endmatter": {
+          "type": ["string", "null"],
+          "description": "YAML endmatter content when exposed separately by the parser."
         }
       }
     },

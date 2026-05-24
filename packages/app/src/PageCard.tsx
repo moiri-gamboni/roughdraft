@@ -317,7 +317,7 @@ function addCommentIdsToAnchor(
     tr.addMark(
       from,
       to,
-      commentMarkType.create({ commentIds: nextCommentIds }),
+      commentMarkType.create({ ...mark.attrs, commentIds: nextCommentIds }),
     );
   });
 
@@ -650,6 +650,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     () => parsedContent.comments,
   );
   const frontmatterRef = useRef<string | null>(parsedContent.frontmatter);
+  const endmatterRef = useRef<string | null>(parsedContent.endmatter);
 
   useEffect(() => {
     commentsRef.current = comments;
@@ -675,7 +676,10 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
         editorStateToCriticMarkdown(
           currentDoc,
           nextComments ?? commentsRef.current,
-          { frontmatter: frontmatterRef.current },
+          {
+            frontmatter: frontmatterRef.current,
+            endmatter: endmatterRef.current,
+          },
         ),
       );
     },
@@ -1274,6 +1278,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     if (!editor) return;
 
     frontmatterRef.current = parsedContent.frontmatter;
+    endmatterRef.current = parsedContent.endmatter;
     commentsRef.current = parsedContent.comments;
     setComments(parsedContent.comments);
     setSelectedCommentId(null);

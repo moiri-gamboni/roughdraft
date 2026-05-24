@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
+import { validateRoughdraftMarkdown } from "@roughdraft/rfm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./index";
 import {
@@ -104,6 +105,23 @@ describe("cli", () => {
   function parseOnlyJsonLog<T>(logs: string[]): T {
     expect(logs).toHaveLength(1);
     return JSON.parse(logs[0] ?? "{}") as T;
+  }
+
+  function extractHelpExample(
+    logs: string[],
+    startLine: string,
+    stopLine: string,
+  ): string {
+    const startIndex = logs.indexOf(startLine);
+    const stopIndex = logs.indexOf(stopLine);
+    expect(startIndex).toBeGreaterThanOrEqual(0);
+    expect(stopIndex).toBeGreaterThan(startIndex);
+
+    return `${logs
+      .slice(startIndex + 1, stopIndex)
+      .filter((line) => line.length > 0)
+      .map((line) => line.replace(/^ {2}/, ""))
+      .join("\n")}\n`;
   }
 
   async function noUpdateStatus() {
@@ -1331,21 +1349,19 @@ describe("cli", () => {
     expect(exitCode).toBe(0);
     expect(test.logs).toContain("When adding new review feedback:");
     expect(test.logs).toContain(
-      '  Prefer the extended Roughdraft format with `id`, `by`, and `at` metadata, for example {>>Comment<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}.',
+      "  Prefer compact references like {>>Comment<<}{#c1} with metadata in final YAML endmatter.",
     );
     expect(test.logs).toContain(
       "  Use `c1`, `c2`, etc. for comment ids and `s1`, `s2`, etc. for suggested-change ids.",
     );
     expect(test.logs).toContain("Suggested changes with ids:");
+    expect(test.logs).toContain("  Add {++one concrete example++}{#s1}.");
     expect(test.logs).toContain(
-      '  Add {++one concrete example++}{id="s1" by="AI" at="2026-04-28T12:05:00.000Z"}.',
-    );
-    expect(test.logs).toContain(
-      '  Replace {~~vague phrasing~>specific wording~~}{id="s2" by="AI" at="2026-04-28T12:06:00.000Z"}.',
+      "  Replace {~~vague phrasing~>specific wording~~}{#s2}.",
     );
     expect(test.logs).toContain("Reply to an existing comment:");
     expect(test.logs).toContain(
-      '  Use explicit `id="..."` and `re="..."` metadata for replies.',
+      "  Existing inline attribute metadata is still accepted for compatibility.",
     );
     expect(test.logs).toContain(
       "  Comment ids are document-local and usually look like `c1`, `c2`, `c3`.",
@@ -1356,6 +1372,25 @@ describe("cli", () => {
     expect(test.logs).toContain(
       "  https://roughdraft.md/spec/roughdraft-flavored-markdown.md",
     );
+  });
+
+  it("prints copyable criticmarkup suggestion examples with required YAML metadata", async () => {
+    const test = createTestDependencies();
+
+    const exitCode = await runCli(["help", "criticmarkup"], test.deps);
+    const example = extractHelpExample(
+      test.logs,
+      "Suggested changes with ids:",
+      "Reply to an existing comment:",
+    );
+    const validation = validateRoughdraftMarkdown(example);
+
+    expect(exitCode).toBe(0);
+    expect(example).toContain("suggestions:");
+    expect(example).toContain("  s1:");
+    expect(example).toContain("  s2:");
+    expect(validation.diagnostics).toEqual([]);
+    expect(validation.summary.suggestions).toBe(2);
   });
 
   it("points general help to agent setup", async () => {

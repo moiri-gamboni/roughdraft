@@ -118,11 +118,33 @@ Deletion: `{--old text--}`
 Substitution: `{~~old~>new~~}`
 Highlight: `{==text==}`
 
-When you add a new comment or suggested change, use the extended Roughdraft format with an attribute block, such as `{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}`. Generate a stable document-local id (`c1`, `c2`, etc. for comments; `s1`, `s2`, etc. for suggestions), set `by` to your agent or author label, set `at` to the current ISO timestamp, and set `re` when replying to an existing comment or suggestion.
+When you add a new comment or suggested change, use the extended Roughdraft format with a compact inline reference such as `{#c1}` or `{#s1}`, then add metadata in final YAML endmatter. Generate a stable document-local id (`c1`, `c2`, etc. for comments; `s1`, `s2`, etc. for suggestions), set `by` to your agent or author label, set `at` to the current ISO timestamp, and set `re` when replying to an existing comment or suggestion.
 
-Roughdraft may already have attribute blocks after comments and suggestions. Preserve these attributes unless you are intentionally removing the associated comment or suggestion. The common attributes are `id` for a stable document-local id, `by` for the author, `at` for an ISO timestamp, and `re` for the parent comment or suggestion id in a reply thread.
+Roughdraft may already have inline attribute blocks after comments and suggestions from older documents. Preserve these attributes unless you are intentionally removing the associated comment or suggestion. For new feedback, prefer compact references plus YAML endmatter.
 
-Anchored comments usually look like `{==selected text==}{>>Comment text<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}`. Suggested changes usually look like `{++new text++}{id="s1" by="AI" at="2026-04-28T12:10:00.000Z"}` or `{~~old text~>new text~~}{id="s2" by="AI" at="2026-04-28T12:11:00.000Z"}`. Replies usually look like `{>>Reply text<<}{id="c2" by="AI" at="2026-04-28T12:05:00.000Z" re="c1"}`.
+Anchored comments usually look like `{==selected text==}{>>Comment text<<}{#c1}`. Suggested changes usually look like `{++new text++}{#s1}` or `{~~old text~>new text~~}{#s2}`. Replies live in final YAML endmatter with a `body` and `re` pointer.
+
+Example:
+
+```markdown
+{==selected text==}{>>Comment text<<}{#c1}
+{++new text++}{#s1}
+
+---
+comments:
+  c1:
+    by: AI
+    at: "2026-04-28T12:00:00.000Z"
+  c2:
+    body: I can make that edit.
+    by: AI
+    at: "2026-04-28T12:05:00.000Z"
+    re: c1
+suggestions:
+  s1:
+    by: AI
+    at: "2026-04-28T12:10:00.000Z"
+```
 
 Use `roughdraft help` and `roughdraft help criticmarkup` for local command and syntax details.
 ````
@@ -149,27 +171,40 @@ When adding review feedback, prefer the extended Roughdraft format so comments a
 
 Roughdraft extensions:
 
-```text
-Anchored comment:
-{==selected text==}{>>Comment text<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}
+```markdown
+{==selected text==}{>>Comment text<<}{#c1}
+{++new text++}{#s1}
+{--old text--}{#s2}
+{~~old text~>new text~~}{#s3}
 
-Reply:
-{>>I can make that edit.<<}{id="c2" by="AI" at="2026-04-28T12:05:00.000Z" re="c1"}
-
-Insertion suggestion:
-{++new text++}{id="s1" by="AI" at="2026-04-28T12:10:00.000Z"}
-
-Deletion suggestion:
-{--old text--}{id="s2" by="user" at="2026-04-28T12:11:00.000Z"}
-
-Substitution suggestion:
-{~~old text~>new text~~}{id="s3" by="AI" at="2026-04-28T12:12:00.000Z"}
-
-Comment on a suggestion:
-{++new text++}{id="s1" by="AI" at="2026-04-28T12:10:00.000Z"}{>>Use the customer example here.<<}{id="c3" by="user" at="2026-04-28T12:13:00.000Z" re="s1"}
+---
+comments:
+  c1:
+    by: user
+    at: "2026-04-28T12:00:00.000Z"
+  c2:
+    body: I can make that edit.
+    by: AI
+    at: "2026-04-28T12:05:00.000Z"
+    re: c1
+  c3:
+    body: Use the customer example here.
+    by: user
+    at: "2026-04-28T12:13:00.000Z"
+    re: s1
+suggestions:
+  s1:
+    by: AI
+    at: "2026-04-28T12:10:00.000Z"
+  s2:
+    by: user
+    at: "2026-04-28T12:11:00.000Z"
+  s3:
+    by: AI
+    at: "2026-04-28T12:12:00.000Z"
 ```
 
-Attribute blocks are written immediately after the markup they describe:
+Metadata is written in final YAML endmatter:
 
 ```text
 id  Stable document-local id for a comment or suggested change

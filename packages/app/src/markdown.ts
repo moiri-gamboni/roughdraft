@@ -1,6 +1,7 @@
 import { tables, taskListItems } from "@joplin/turndown-plugin-gfm";
 import { marked } from "marked";
 import TurndownService from "turndown";
+import { parse as parseYaml } from "yaml";
 
 export const rawMarkdownBlockAttribute = "data-markdown-raw-block";
 
@@ -12,6 +13,12 @@ export interface MarkdownOptions {
 export interface YamlFrontmatterSplit {
   frontmatter: string | null;
   body: string;
+}
+
+export interface YamlDocumentMetadataSplit {
+  frontmatter: string | null;
+  body: string;
+  endmatter: string | null;
 }
 
 function isExternalUrl(path: string): boolean {
@@ -169,6 +176,31 @@ function isYamlFrontmatterDelimiter(line: string): boolean {
   return /^(?:---|\.\.\.)[ \t]*$/.test(line.replace(/\r$/, ""));
 }
 
+function isReviewEndmatterMap(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isRoughdraftReviewEndmatter(endmatter: string): boolean {
+  const yamlText = endmatter.replace(/^---[ \t]*(?:\r\n|\n)/, "");
+  let parsed: unknown;
+
+  try {
+    parsed = parseYaml(yamlText);
+  } catch {
+    return false;
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return false;
+  }
+
+  const record = parsed as Record<string, unknown>;
+  return (
+    isReviewEndmatterMap(record.comments) ||
+    isReviewEndmatterMap(record.suggestions)
+  );
+}
+
 export function splitYamlFrontmatter(markdown: string): YamlFrontmatterSplit {
   const openingDelimiter = markdown.match(/^---[ \t]*(?:\r\n|\n)/);
   if (!openingDelimiter) return { frontmatter: null, body: markdown };
@@ -216,6 +248,43 @@ export function prependYamlFrontmatter(
   frontmatter?: string | null,
 ): string {
   return frontmatter ? `${frontmatter}${markdown}` : markdown;
+}
+
+export function splitYamlDocumentMetadata(
+  markdown: string,
+): YamlDocumentMetadataSplit {
+  const { frontmatter, body } = splitYamlFrontmatter(markdown);
+  const matches = [...body.matchAll(/\n---[ \t]*\r?\n/g)];
+  const match = matches.at(-1);
+
+  if (!match || match.index === undefined) {
+    return { frontmatter, body, endmatter: null };
+  }
+
+  const endmatter = body.slice(match.index);
+  const candidate = endmatter.replace(/^\n/, "");
+
+  if (
+    !body.slice(0, match.index).includes("{#") ||
+    !isRoughdraftReviewEndmatter(candidate)
+  ) {
+    return { frontmatter, body, endmatter: null };
+  }
+
+  return {
+    frontmatter,
+    body: body.slice(0, match.index).replace(/\s*$/, "\n"),
+    endmatter: candidate,
+  };
+}
+
+export function appendYamlEndmatter(
+  markdown: string,
+  endmatter?: string | null,
+): string {
+  return endmatter
+    ? `${markdown.replace(/\s*$/, "\n")}\n${endmatter}`
+    : markdown;
 }
 
 export function createMarkedRenderer(options?: MarkdownOptions) {

@@ -260,15 +260,21 @@ This is {>>a comment<<} in the margin.
 This is {==highlighted==} text.
 ```
 
-Roughdraft extends those markers with compact attribute blocks so review state can round-trip through the file. Attribute blocks are written immediately after the comment or suggestion:
+Roughdraft extends those markers with compact id references so review state can round-trip through the file. Root comments and suggestions keep an inline anchor such as `{#c1}` or `{#s1}`, while metadata lives in final YAML endmatter:
 
 ```markdown
-Please revisit {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}.
+Please revisit {==this sentence==}{>>Needs a source<<}{#c1}.
+
+---
+comments:
+  c1:
+    by: user
+    at: "2026-04-28T12:00:00.000Z"
 ```
 
 Supported attributes:
 
-- `id` gives the comment or suggested change a stable document-local id.
+- `id` is the compact inline reference after the comment or suggested change.
   
 - `by` records the reviewer or agent that created it.
   
@@ -277,19 +283,44 @@ Supported attributes:
 - `re` links a reply to another comment or suggestion id.
   
 
-Replies are stored as additional comment blocks that point at the parent id:
+Replies are stored in endmatter with a `body` and `re` pointer:
 
 ```markdown
-Please revisit {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}{>>I can add one from the intro.<<}{id="c2" by="AI" at="2026-04-28T12:05:00.000Z" re="c1"}.
+Please revisit {==this sentence==}{>>Needs a source<<}{#c1}.
+
+---
+comments:
+  c1:
+    by: user
+    at: "2026-04-28T12:00:00.000Z"
+  c2:
+    body: I can add one from the intro.
+    by: AI
+    at: "2026-04-28T12:05:00.000Z"
+    re: c1
 ```
 
 Suggested changes can also carry ids and discussion:
 
 ```markdown
-Add {++one concrete example++}{id="s1" by="AI" at="2026-04-28T12:10:00.000Z"}{>>Use the customer story here.<<}{id="c3" by="user" at="2026-04-28T12:12:00.000Z" re="s1"}.
-Remove {--vague phrasing--}{id="s2" by="user" at="2026-04-28T12:13:00.000Z"}.
-Use {~~rough~>specific~~}{id="s3" by="AI" at="2026-04-28T12:14:00.000Z"} wording.
+Add {++one concrete example++}{#s1}.
+Remove {--vague phrasing--}{#s2}.
+Use {~~rough~>specific~~}{#s3} wording.
+
+---
+suggestions:
+  s1:
+    by: AI
+    at: "2026-04-28T12:10:00.000Z"
+  s2:
+    by: user
+    at: "2026-04-28T12:13:00.000Z"
+  s3:
+    by: AI
+    at: "2026-04-28T12:14:00.000Z"
 ```
+
+Older inline metadata such as `{id="c1" by="user" at="..."}` and legacy `{@id:c1; by:user; at:...@}` blocks are still accepted for compatibility.
 
 CriticMarkup inside inline code and fenced code blocks is treated as literal example text, not live review feedback:
 

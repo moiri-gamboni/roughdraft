@@ -1056,7 +1056,7 @@ function printCriticMarkupHelp(log: (message: string) => void) {
   log("");
   log("When adding new review feedback:");
   log(
-    '  Prefer the extended Roughdraft format with `id`, `by`, and `at` metadata, for example {>>Comment<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}.',
+    "  Prefer compact references like {>>Comment<<}{#c1} with metadata in final YAML endmatter.",
   );
   log(
     "  Use `c1`, `c2`, etc. for comment ids and `s1`, `s2`, etc. for suggested-change ids.",
@@ -1066,25 +1066,32 @@ function printCriticMarkupHelp(log: (message: string) => void) {
   );
   log("");
   log("Anchored comment with id:");
-  log(
-    '  Review {==this sentence==}{>>Needs a source<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}.',
-  );
+  log("  Review {==this sentence==}{>>Needs a source<<}{#c1}.");
+  log("  ---");
+  log("  comments:");
+  log("    c1:");
+  log("      by: AI");
+  log('      at: "2026-04-28T12:00:00.000Z"');
   log("");
   log("Suggested changes with ids:");
-  log(
-    '  Add {++one concrete example++}{id="s1" by="AI" at="2026-04-28T12:05:00.000Z"}.',
-  );
-  log(
-    '  Replace {~~vague phrasing~>specific wording~~}{id="s2" by="AI" at="2026-04-28T12:06:00.000Z"}.',
-  );
+  log("  Add {++one concrete example++}{#s1}.");
+  log("  Replace {~~vague phrasing~>specific wording~~}{#s2}.");
+  log("  ---");
+  log("  suggestions:");
+  log("    s1:");
+  log("      by: AI");
+  log('      at: "2026-04-28T12:10:00.000Z"');
+  log("    s2:");
+  log("      by: AI");
+  log('      at: "2026-04-28T12:11:00.000Z"');
   log("");
   log("Reply to an existing comment:");
-  log(
-    '  Review {==this sentence==}{>>Needs a source<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}{>>I can add one from the intro.<<}{id="c2" by="AI" at="2026-04-28T12:10:00.000Z" re="c1"}.',
-  );
+  log("  Store replies in `comments.<id>.body` with `re: <parent-id>`.");
   log("");
   log("Reply guidance:");
-  log('  Use explicit `id="..."` and `re="..."` metadata for replies.');
+  log(
+    "  Existing inline attribute metadata is still accepted for compatibility.",
+  );
   log(
     "  Comment ids are document-local and usually look like `c1`, `c2`, `c3`.",
   );

@@ -59,6 +59,19 @@ describe("CriticMarkup comments", () => {
         ].join("\n"),
       ),
     ).toBe(false);
+    expect(
+      criticMarkdownHasReviewRail(
+        [
+          "<details>",
+          "<summary>Literal examples</summary>",
+          "",
+          '{==example==}{>>literal HTML comment example<<}{id="c60" by="AI" at="2026-05-24T18:50:00.000Z"}',
+          "",
+          "</details>",
+          "",
+        ].join("\n"),
+      ),
+    ).toBe(false);
 
     expect(
       criticMarkdownHasReviewRail(
@@ -84,6 +97,325 @@ describe("CriticMarkup comments", () => {
     expect(editorStateToCriticMarkdown(doc, comments)).toBe(input);
   });
 
+  it("renders YAML endmatter-backed root comments and replies", () => {
+    const input = [
+      "This is {==highlighted==}{>>comment text<<}{#c1} text.",
+      "",
+      "---",
+      "comments:",
+      "  c1:",
+      "    by: AI",
+      '    at: "2024-01-15T10:30:00.000Z"',
+      "  c2:",
+      "    body: Reply text",
+      "    by: user",
+      '    at: "2024-01-15T10:31:00.000Z"',
+      "    re: c1",
+      "",
+    ].join("\n");
+
+    const { doc, comments, endmatter } = criticMarkdownToEditorState(input);
+
+    expect(endmatter).toContain("comments:");
+    expect(comments.get("c1")).toMatchObject({
+      id: "c1",
+      content: "comment text",
+      authorType: "ai",
+    });
+    expect(comments.get("c2")).toMatchObject({
+      id: "c2",
+      content: "Reply text",
+      parentCommentId: "c1",
+    });
+    const output = editorStateToCriticMarkdown(doc, comments);
+    expect(output).toContain("{==highlighted==}{>>comment text<<}{#c1}");
+    expect(output).toContain("body: Reply text");
+    expect(output).toContain("re: c1");
+  });
+
+  it("does not treat horizontal rules and fenced YAML examples as review endmatter", () => {
+    const input = [
+      "# Markdown examples",
+      "",
+      "A normal horizontal rule follows.",
+      "",
+      "---",
+      "",
+      "```yaml",
+      "comments:",
+      "  c1:",
+      "    body: This is documentation, not review metadata.",
+      "suggestions:",
+      "  s1:",
+      "    by: AI",
+      "```",
+      "",
+    ].join("\n");
+
+    const { doc, comments, endmatter } = criticMarkdownToEditorState(input);
+    const output = editorStateToCriticMarkdown(doc, comments);
+
+    expect(endmatter).toBeNull();
+    expect(comments.size).toBe(0);
+    expect(output).toContain("* * *");
+    expect(output).toContain("```yaml");
+    expect(output).toContain("comments:");
+    expect(output).toContain("suggestions:");
+    expect(output).toContain("This is documentation, not review metadata.");
+  });
+
+  it("does not treat ordinary final comments sections as review endmatter", () => {
+    const input = [
+      "# Release notes",
+      "",
+      "---",
+      "comments:",
+      "  c1:",
+      "    by: docs",
+      '    at: "not review metadata"',
+      "",
+    ].join("\n");
+
+    const { doc, comments, endmatter } = criticMarkdownToEditorState(input);
+    const output = editorStateToCriticMarkdown(doc, comments);
+
+    expect(endmatter).toBeNull();
+    expect(comments.size).toBe(0);
+    expect(output).toContain("comments:");
+    expect(output).toContain("not review metadata");
+  });
+
+  it("writes YAML metadata for new suggestions in endmatter-backed documents", () => {
+    const input = [
+      "Replace {++draft++}{#s1}.",
+      "",
+      "---",
+      "suggestions:",
+      "  s1:",
+      "    by: AI",
+      '    at: "2026-05-24T10:00:00.000Z"',
+      "",
+    ].join("\n");
+    const parsed = criticMarkdownToEditorState(input);
+    const nextDoc = structuredClone(parsed.doc);
+    const paragraph = nextDoc.content?.[0];
+
+    paragraph?.content?.push(
+      { type: "text", text: " Add " },
+      {
+        type: "text",
+        text: "specifics",
+        marks: [
+          {
+            type: "criticChange",
+            attrs: createCriticChange("addition", {
+              changeId: "s2",
+              createdAt: "2026-05-24T11:00:00.000Z",
+              authorType: "user",
+              authorId: "user",
+            }),
+          },
+        ],
+      },
+      { type: "text", text: "." },
+    );
+
+    const output = editorStateToCriticMarkdown(nextDoc, parsed.comments);
+
+    expect(output).toContain("{++specifics++}{#s2}");
+    expect(output).toContain("suggestions:");
+    expect(output).toContain("s1:");
+    expect(output).toContain("s2:");
+    expect(output).toContain("at: 2026-05-24T11:00:00.000Z");
+  });
+
+  it("removes deleted comments and replies from YAML endmatter", () => {
+    const input = [
+      "Please revisit {==this claim==}{>>Needs a source.<<}{#c1}.",
+      "",
+      "---",
+      "comments:",
+      "  c1:",
+      "    by: Nora",
+      '    at: "2026-05-24T10:45:00.000Z"',
+      "  c2:",
+      "    body: I can soften this.",
+      "    by: AI",
+      '    at: "2026-05-24T10:46:00.000Z"',
+      "    re: c1",
+      "  c3:",
+      "    body: Stale reply.",
+      "    by: AI",
+      '    at: "2026-05-24T10:47:00.000Z"',
+      "    re: c1",
+      "",
+    ].join("\n");
+    const { doc, comments } = criticMarkdownToEditorState(input);
+    const nextComments = new Map(comments);
+
+    nextComments.delete("c2");
+    nextComments.delete("c3");
+
+    const output = editorStateToCriticMarkdown(doc, nextComments);
+
+    expect(output).toContain("comments:");
+    expect(output).toContain("c1:");
+    expect(output).not.toContain("c2:");
+    expect(output).not.toContain("c3:");
+    expect(output).not.toContain("I can soften this.");
+    expect(output).not.toContain("Stale reply.");
+  });
+
+  it("preserves unknown top-level YAML endmatter keys on save", () => {
+    const input = [
+      "Please revisit {==this claim==}{>>Needs a source.<<}{#c1}.",
+      "",
+      "---",
+      "comments:",
+      "  c1:",
+      "    by: Nora",
+      '    at: "2026-05-24T10:45:00.000Z"',
+      "workflow:",
+      "  owner: editorial",
+      "",
+    ].join("\n");
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+    const output = editorStateToCriticMarkdown(doc, comments);
+
+    expect(output).toContain("workflow:");
+    expect(output).toContain("owner: editorial");
+  });
+
+  it("renders YAML endmatter-backed unanchored comments", () => {
+    const input = [
+      "This paragraph has an unanchored note.{>>Consider whether this belongs in the executive summary instead.<<}{#c3}",
+      "",
+      "---",
+      "comments:",
+      "  c3:",
+      "    by: user",
+      '    at: "2026-05-24T17:00:00.000Z"',
+      "",
+    ].join("\n");
+
+    expect(criticMarkdownHasReviewRail(input)).toBe(true);
+
+    const { html, comments } = criticMarkdownToRenderedHtml(input);
+    const parsed = criticMarkdownToEditorState(input);
+    const output = editorStateToCriticMarkdown(parsed.doc, parsed.comments);
+
+    expect(comments.get("c3")).toMatchObject({
+      id: "c3",
+      content:
+        "Consider whether this belongs in the executive summary instead.",
+      authorType: "user",
+      createdAt: "2026-05-24T17:00:00.000Z",
+    });
+    expect(html).toContain('data-comment-ids="[&quot;c3&quot;]"');
+    expect(html).toContain('data-comment-anchorless="true"');
+    expect(html).not.toContain("{&gt;&gt;Consider whether");
+    expect(output).toContain(
+      "This paragraph has an unanchored note.{>>Consider whether this belongs in the executive summary instead.<<}{#c3}",
+    );
+    expect(output).not.toContain("{==\u2060==}");
+  });
+
+  it("reserves YAML endmatter-backed unanchored comment ids for new replies", () => {
+    const input = [
+      "Please revisit {==this claim==}{>>This needs a source.<<}{#c1}.",
+      "",
+      "This paragraph has an unanchored note.{>>Consider whether this belongs in the executive summary instead.<<}{#c3}",
+      "",
+      "---",
+      "comments:",
+      "  c1:",
+      "    by: Nora",
+      '    at: "2026-05-24T10:45:00.000Z"',
+      "  c2:",
+      "    body: I can soften the claim if we do not have a citation.",
+      "    by: AI",
+      '    at: "2026-05-24T10:46:00.000Z"',
+      "    re: c1",
+      "  c3:",
+      "    by: user",
+      '    at: "2026-05-24T17:00:00.000Z"',
+      "suggestions:",
+      "  s1:",
+      "    by: AI",
+      '    at: "2026-05-24T10:48:00.000Z"',
+      "",
+    ].join("\n");
+
+    const { comments } = criticMarkdownToEditorState(input);
+
+    expect(comments.get("c3")).toMatchObject({
+      id: "c3",
+      content:
+        "Consider whether this belongs in the executive summary instead.",
+      parentCommentId: null,
+    });
+    expect(createNextCommentId(comments.values())).toBe("c4");
+  });
+
+  it("repairs stale YAML reply metadata when an inline root comment id was reused", () => {
+    const input = [
+      "Add {++one concrete customer example++}{#s1}.",
+      "",
+      "This paragraph has an unanchored note.{>>Consider whether this belongs in the executive summary instead.<<}{#c3}",
+      "",
+      "---",
+      "comments:",
+      "  c3:",
+      "    by: user",
+      '    at: "2026-05-24T17:38:55.763Z"',
+      "    body: reply to suggestion",
+      "    re: s1",
+      "suggestions:",
+      "  s1:",
+      "    by: AI",
+      '    at: "2026-05-24T10:48:00.000Z"',
+      "",
+    ].join("\n");
+
+    const { doc, comments } = criticMarkdownToEditorState(input);
+    const output = editorStateToCriticMarkdown(doc, comments);
+
+    expect(comments.get("c3")).toMatchObject({
+      id: "c3",
+      content:
+        "Consider whether this belongs in the executive summary instead.",
+      parentCommentId: null,
+    });
+    expect(output).toContain(
+      "This paragraph has an unanchored note.{>>Consider whether this belongs in the executive summary instead.<<}{#c3}",
+    );
+    expect(output).not.toContain("body: reply to suggestion");
+    expect(output).not.toContain("re: s1");
+    expect(createNextCommentId(comments.values())).toBe("c4");
+  });
+
+  it("renders YAML endmatter-backed suggestions", () => {
+    const input = [
+      "Add {++one concrete example++}{#s1}.",
+      "",
+      "---",
+      "suggestions:",
+      "  s1:",
+      "    by: AI",
+      '    at: "2024-01-15T10:30:00.000Z"',
+      "",
+    ].join("\n");
+
+    const { changes } = criticMarkdownToRenderedHtml(input);
+
+    expect(changes.get("s1")).toMatchObject({
+      changeId: "s1",
+      authorType: "ai",
+      createdAt: "2024-01-15T10:30:00.000Z",
+    });
+  });
+
   it("preserves formatting nested inside a comment anchor", () => {
     const input =
       'The {==**important**==}{>>Review this phrasing<<}{id="cmt2" by="user@example.com" at="2024-01-15T10:31:00.000Z"} section stays bold.\n';
@@ -107,7 +439,7 @@ describe("CriticMarkup comments", () => {
       marks: expect.arrayContaining([
         expect.objectContaining({
           type: "commentRef",
-          attrs: { commentIds: ["cmt-code"] },
+          attrs: expect.objectContaining({ commentIds: ["cmt-code"] }),
         }),
         expect.objectContaining({ type: "code" }),
       ]),

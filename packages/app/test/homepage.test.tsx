@@ -177,6 +177,9 @@ describe("Homepage", () => {
     expect(homepageTextWrapper?.className).not.toContain("font-bold");
     expect(homepageHeading?.className).not.toContain("max-w-");
     expect(homepageHeading?.className).toContain("text-[clamp(");
+    expect(homepageHeading?.className).toContain(
+      "text-[clamp(2.875rem,14.2vw,5rem)]",
+    );
     expect(homepageHeading?.className).toContain("leading-[0.88]");
     expect(homepageHeading?.className).not.toContain("text-balance");
     expect(homepageHeading?.nextElementSibling?.className).toContain(
@@ -332,7 +335,7 @@ describe("Homepage", () => {
       "Keep the format section as proof that the review data is portable Markdown.",
     );
     expect(container.textContent).toContain(
-      "Sounds good. I'll move it above that section.",
+      'Replace: "Review an agent\'s plan" with "Review a homepage plan"',
     );
 
     await click(cta);
@@ -759,7 +762,7 @@ describe("Homepage", () => {
     ).toContain("Notion-flavored Markdown");
     expect(container.textContent).toContain("Threaded review");
     expect(container.textContent).toContain("Roughdraft extensions");
-    expect(container.textContent).toContain("Attribute metadata");
+    expect(container.textContent).toContain("YAML metadata");
     expect(container.textContent).toContain("Substitution");
     expect(container.textContent).toContain("{~~old text~>new text~~}");
     expect(container.querySelector('a[href="/"]')?.textContent).toContain(

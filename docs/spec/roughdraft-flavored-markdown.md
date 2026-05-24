@@ -1,4 +1,4 @@
-# Roughdraft Flavored Markdown 0.1
+# Roughdraft Flavored Markdown 0.2
 
 Status: Draft
 
@@ -10,7 +10,7 @@ The key words "MUST", "MUST NOT", "SHOULD", "SHOULD NOT", and "MAY" in this docu
 
 This specification defines the review markup that Roughdraft reads and writes. It does not define a replacement for Markdown, a hosted document format, a sync protocol, or a project database.
 
-A conforming document is a Markdown document that may contain Roughdraft review spans. Markdown parsing SHOULD follow CommonMark with GitHub Flavored Markdown extensions. Implementations MAY preserve YAML frontmatter as document metadata, but Roughdraft review state lives in the Markdown body.
+A conforming document is a Markdown document that may contain Roughdraft review spans. Markdown parsing SHOULD follow CommonMark with GitHub Flavored Markdown extensions. Implementations MAY preserve YAML frontmatter as document metadata. Roughdraft review state lives in the same Markdown file, either as inline review anchors or as final YAML endmatter.
 
 ## Canonical Markers
 
@@ -41,7 +41,13 @@ Comment text is plain inline Markdown content. Comment text MUST NOT contain the
 A comment MAY appear by itself when the feedback applies to the surrounding paragraph or document:
 
 ```markdown
-Add one concrete launch example here.{>>This should come from the customer story.<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}
+Add one concrete launch example here.{>>This should come from the customer story.<<}{#c1}
+
+---
+comments:
+  c1:
+    by: user
+    at: "2026-04-28T12:00:00.000Z"
 ```
 
 ## Anchored Comments
@@ -56,7 +62,13 @@ highlight        = "{==" anchor-text "==}"
 Example:
 
 ```markdown
-Please revisit {==this sentence==}{>>Needs a source.<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}.
+Please revisit {==this sentence==}{>>Needs a source.<<}{#c1}.
+
+---
+comments:
+  c1:
+    by: user
+    at: "2026-04-28T12:00:00.000Z"
 ```
 
 The highlighted text is the visible anchor. Implementations SHOULD attach all immediately following comment blocks to the same anchor until another token interrupts the sequence.
@@ -74,7 +86,13 @@ addition = "{++" new-text "++}" [ metadata ] *comment
 ```
 
 ```markdown
-Add {++one concrete example++}{id="s1" by="AI" at="2026-04-28T12:05:00.000Z"}.
+Add {++one concrete example++}{#s1}.
+
+---
+suggestions:
+  s1:
+    by: AI
+    at: "2026-04-28T12:05:00.000Z"
 ```
 
 ### Deletion
@@ -84,7 +102,13 @@ deletion = "{--" old-text "--}" [ metadata ] *comment
 ```
 
 ```markdown
-Remove {--vague phrasing--}{id="s2" by="user" at="2026-04-28T12:06:00.000Z"}.
+Remove {--vague phrasing--}{#s2}.
+
+---
+suggestions:
+  s2:
+    by: user
+    at: "2026-04-28T12:06:00.000Z"
 ```
 
 ### Substitution
@@ -94,18 +118,82 @@ substitution = "{~~" old-text "~>" new-text "~~}" [ metadata ] *comment
 ```
 
 ```markdown
-Use {~~rough~>specific~~}{id="s3" by="AI" at="2026-04-28T12:07:00.000Z"} wording.
+Use {~~rough~>specific~~}{#s3} wording.
+
+---
+suggestions:
+  s3:
+    by: AI
+    at: "2026-04-28T12:07:00.000Z"
 ```
 
 Trailing comment blocks after a suggestion attach discussion to that suggestion:
 
 ```markdown
-Add {++one concrete example++}{id="s1" by="AI" at="2026-04-28T12:05:00.000Z"}{>>Use the launch story.<<}{id="c2" by="user" at="2026-04-28T12:08:00.000Z" re="s1"}.
+Add {++one concrete example++}{#s1}.
+
+---
+comments:
+  c2:
+    body: Use the launch story.
+    by: user
+    at: "2026-04-28T12:08:00.000Z"
+    re: s1
+suggestions:
+  s1:
+    by: AI
+    at: "2026-04-28T12:05:00.000Z"
 ```
 
 ## Metadata
 
-Roughdraft's canonical metadata format is an attribute block written immediately after a comment or suggestion:
+Roughdraft's preferred metadata format is a compact inline reference backed by final YAML endmatter:
+
+```ebnf
+reference = "{#" id "}"
+id        = ALPHA *( ALPHA / DIGIT / "_" / "-" )
+```
+
+```markdown
+Please revisit {==this sentence==}{>>Needs a source.<<}{#c1}.
+
+---
+comments:
+  c1:
+    by: user
+    at: "2026-04-28T12:00:00.000Z"
+```
+
+Root comment bodies and suggestion text stay inline so their anchors remain portable. Replies live entirely in endmatter because their `re` field already points at a parent id:
+
+```markdown
+Please revisit {==this sentence==}{>>Needs a source.<<}{#c1}.
+
+---
+comments:
+  c1:
+    by: user
+    at: "2026-04-28T12:00:00.000Z"
+  c2:
+    body: I can add one from the intro.
+    by: AI
+    at: "2026-04-28T12:05:00.000Z"
+    re: c1
+```
+
+Suggested-change metadata lives under `suggestions:`:
+
+```markdown
+Add {++one concrete example++}{#s1}.
+
+---
+suggestions:
+  s1:
+    by: AI
+    at: "2026-04-28T12:05:00.000Z"
+```
+
+For compatibility, readers also accept the older inline attribute block written immediately after a comment or suggestion:
 
 ```ebnf
 metadata  = "{" 1*attribute "}"
@@ -115,7 +203,7 @@ name      = ALPHA *( ALPHA / DIGIT / "_" / "-" )
 
 Attribute values are double-quoted strings. Inside a quoted value, `\"` represents a literal quote and `\\` represents a literal backslash.
 
-Canonical attributes:
+Known metadata attributes:
 
 | Attribute | Applies to | Required when writing | Meaning |
 | --- | --- | --- | --- |
@@ -129,19 +217,36 @@ Canonical attributes:
 Example:
 
 ```markdown
-{>>Needs a source.<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}
+{>>Needs a source.<<}{#c1}
+
+---
+comments:
+  c1:
+    by: user
+    at: "2026-04-28T12:00:00.000Z"
 ```
 
-Implementations SHOULD generate simple document-local ids. Roughdraft uses `c1`, `c2`, and so on for comments and `s1`, `s2`, and so on for suggestions. Implementations MUST preserve unknown valid attributes when possible, but they MUST NOT require unknown attributes for correct review rendering.
+Implementations SHOULD generate simple document-local ids. Roughdraft uses `c1`, `c2`, and so on for comments and `s1`, `s2`, and so on for suggestions. Implementations MUST preserve unknown valid attributes or YAML keys when possible, but they MUST NOT require unknown metadata for correct review rendering.
 
-For compatibility, readers MAY accept legacy comment metadata of the form `{@id:c1; by:AI; at:2026-04-28T12:00:00.000Z@}`. Writers SHOULD emit canonical attribute blocks.
+For compatibility, readers MAY accept legacy comment metadata of the form `{@id:c1; by:AI; at:2026-04-28T12:00:00.000Z@}`. Writers SHOULD emit compact references plus YAML endmatter for new review data.
 
 ## Threads
 
 Threading is represented by `re`.
 
 ```markdown
-Review {==this sentence==}{>>Needs a source.<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}{>>I can add one from the intro.<<}{id="c2" by="AI" at="2026-04-28T12:05:00.000Z" re="c1"}.
+Review {==this sentence==}{>>Needs a source.<<}{#c1}.
+
+---
+comments:
+  c1:
+    by: user
+    at: "2026-04-28T12:00:00.000Z"
+  c2:
+    body: I can add one from the intro.
+    by: AI
+    at: "2026-04-28T12:05:00.000Z"
+    re: c1
 ```
 
 A reply whose `re` points to a missing id SHOULD be treated as a top-level comment. A comment MUST NOT be its own parent.
@@ -174,7 +279,7 @@ Example:
   "format": "roughdraft-flavored-markdown",
   "version": "0.1",
   "source": {
-    "markdown": "Please revisit {==this sentence==}{>>Needs a source.<<}{id=\"c1\" by=\"user\" at=\"2026-04-28T12:00:00.000Z\"}.\\n"
+    "markdown": "Please revisit {==this sentence==}{>>Needs a source.<<}{#c1}.\\n\\n---\\ncomments:\\n  c1:\\n    by: user\\n    at: \"2026-04-28T12:00:00.000Z\"\\n"
   },
   "comments": [
     {

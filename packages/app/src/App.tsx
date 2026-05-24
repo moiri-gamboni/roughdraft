@@ -101,7 +101,13 @@ const PREVIEW_INITIAL_MARKDOWN = [
   "- Comments and suggested changes use Roughdraft flavored Markdown.",
   "- Autosave updates the in-memory document, not disk or browser storage.",
   "",
-  '{==Select this sentence==}{>>Try replying to this comment or suggesting a replacement.<<}{id="preview-comment" by="Roughdraft" at="2026-04-28T12:00:00.000Z"}',
+  "{==Select this sentence==}{>>Try replying to this comment or suggesting a replacement.<<}{#preview-comment}",
+  "",
+  "---",
+  "comments:",
+  "  preview-comment:",
+  "    by: Roughdraft",
+  '    at: "2026-04-28T12:00:00.000Z"',
   "",
 ].join("\n");
 const HOMEPAGE_WORKFLOW_SCENES = [
@@ -145,32 +151,30 @@ const HOMEPAGE_WORKFLOW_SCENES = [
 const ROUGHDRAFT_MARKDOWN_SYNTAX = [
   {
     label: "Comment",
-    syntax:
-      '{==selected text==}{>>Comment text<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}',
+    syntax: "{==selected text==}{>>Comment text<<}{#c1}",
     description:
       "Highlights the reviewed text and attaches a margin comment to it.",
   },
   {
     label: "Reply",
     syntax:
-      '{>>I can make that edit.<<}{id="c2" by="AI" at="2026-04-28T12:01:00.000Z" re="c1"}',
+      'comments:\n  c2:\n    body: I can make that edit.\n    by: AI\n    at: "2026-04-28T12:01:00.000Z"\n    re: c1',
     description:
-      "Adds a threaded reply by pointing `re` at the parent comment id.",
+      "Adds a threaded reply in YAML endmatter by pointing `re` at the parent id.",
   },
   {
     label: "Insertion",
-    syntax: '{++new text++}{id="s1" by="AI" at="2026-04-28T12:02:00.000Z"}',
+    syntax: "{++new text++}{#s1}",
     description: "Suggests text to add without applying it silently.",
   },
   {
     label: "Deletion",
-    syntax: '{--old text--}{id="s2" by="user" at="2026-04-28T12:03:00.000Z"}',
+    syntax: "{--old text--}{#s2}",
     description: "Suggests removing text while keeping the original visible.",
   },
   {
     label: "Substitution",
-    syntax:
-      '{~~old text~>new text~~}{id="s3" by="AI" at="2026-04-28T12:04:00.000Z"}',
+    syntax: "{~~old text~>new text~~}{#s3}",
     description: "Suggests replacing one span with another.",
   },
 ] as const;
@@ -198,7 +202,7 @@ const ROUGHDRAFT_MARKDOWN_CONTRACT = [
   {
     title: "Metadata",
     description:
-      "Attribute blocks come immediately after review markup. `id` is document-local, `by` is a human or agent label, `at` is an ISO timestamp, and `re` points to the parent comment for replies.",
+      "Compact inline references keep review anchors portable, while YAML endmatter stores authors, timestamps, statuses, and reply links.",
   },
   {
     title: "Anchors",
@@ -218,8 +222,8 @@ const ROUGHDRAFT_MARKDOWN_CONTRACT = [
 ] as const;
 const ROUGHDRAFT_MARKDOWN_EXTENSION_DETAILS = [
   {
-    title: "Attribute metadata",
-    body: 'Roughdraft stores ids, authors, timestamps, and reply links in an attribute block after review markup, such as {>>Looks right.<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z" re="c0"}.',
+    title: "YAML metadata",
+    body: "Roughdraft stores ids inline as compact references such as {>>Looks right.<<}{#c1}, while authors, timestamps, and reply links live in final YAML endmatter.",
   },
   {
     title: "Threaded comments",
@@ -404,7 +408,7 @@ export function Homepage({
           </p>
           <div className="mt-20 sm:mt-28">
             <h1
-              className="font-die-grotesk-b text-[clamp(4.5rem,2.8rem+4vw,5rem)] leading-[0.88] font-bold text-slate-950 dark:text-slate-50"
+              className="font-die-grotesk-b text-[clamp(2.875rem,14.2vw,5rem)] leading-[0.88] font-bold text-slate-950 dark:text-slate-50"
               data-testid="homepage-heading"
             >
               Easier collaboration
@@ -1345,8 +1349,8 @@ export function RoughdraftFlavoredMarkdownPage() {
             </h2>
             <p className="mt-4 text-base leading-7 text-stone-600 dark:text-stone-400">
               Standard CriticMarkup captures the visible annotation. Roughdraft
-              keeps the same readable markers and adds a small attribute block
-              after comments and suggestions when it needs stable review state.
+              keeps the same readable markers, adds compact inline references,
+              and stores review metadata in final YAML endmatter.
             </p>
           </div>
 
