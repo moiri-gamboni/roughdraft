@@ -180,6 +180,21 @@ function isReviewEndmatterMap(value: unknown): boolean {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function hasDocumentLevelComment(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+
+  return Object.values(value as Record<string, unknown>).some(
+    (entry) =>
+      Boolean(entry) &&
+      typeof entry === "object" &&
+      !Array.isArray(entry) &&
+      typeof (entry as Record<string, unknown>).body === "string" &&
+      typeof (entry as Record<string, unknown>).by === "string" &&
+      typeof (entry as Record<string, unknown>).at === "string" &&
+      typeof (entry as Record<string, unknown>).re !== "string",
+  );
+}
+
 function isRoughdraftReviewEndmatter(endmatter: string): boolean {
   const yamlText = endmatter.replace(/^---[ \t]*(?:\r\n|\n)/, "");
   let parsed: unknown;
@@ -264,11 +279,16 @@ export function splitYamlDocumentMetadata(
   const endmatter = body.slice(match.index);
   const candidate = endmatter.replace(/^\n/, "");
 
-  if (
-    !body.slice(0, match.index).includes("{#") ||
-    !isRoughdraftReviewEndmatter(candidate)
-  ) {
+  const precedingBody = body.slice(0, match.index);
+  if (!isRoughdraftReviewEndmatter(candidate)) {
     return { frontmatter, body, endmatter: null };
+  }
+  if (!precedingBody.includes("{#")) {
+    const yamlText = candidate.replace(/^---[ \t]*(?:\r\n|\n)/, "");
+    const parsed = parseYaml(yamlText) as Record<string, unknown> | null;
+    if (!hasDocumentLevelComment(parsed?.comments)) {
+      return { frontmatter, body, endmatter: null };
+    }
   }
 
   return {

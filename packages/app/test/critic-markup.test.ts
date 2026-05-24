@@ -321,6 +321,38 @@ describe("CriticMarkup comments", () => {
     expect(output).not.toContain("{==\u2060==}");
   });
 
+  it("renders and preserves YAML endmatter-backed document-level comments", () => {
+    const input = [
+      "# Draft",
+      "",
+      "---",
+      "comments:",
+      "  c1:",
+      "    body: Please address the risk section.",
+      "    by: user",
+      '    at: "2026-05-24T12:00:00.000Z"',
+      "",
+    ].join("\n");
+
+    expect(criticMarkdownHasReviewRail(input)).toBe(true);
+
+    const parsed = criticMarkdownToEditorState(input);
+    const output = editorStateToCriticMarkdown(parsed.doc, parsed.comments);
+
+    expect(parsed.comments.get("c1")).toMatchObject({
+      id: "c1",
+      content: "Please address the risk section.",
+      authorType: "user",
+      createdAt: "2026-05-24T12:00:00.000Z",
+      parentCommentId: null,
+      scope: "document",
+    });
+    expect(output).toContain("comments:");
+    expect(output).toContain("  c1:");
+    expect(output).toContain("    body: Please address the risk section.");
+    expect(output).not.toContain("{#c1}");
+  });
+
   it("reserves YAML endmatter-backed unanchored comment ids for new replies", () => {
     const input = [
       "Please revisit {==this claim==}{>>This needs a source.<<}{#c1}.",

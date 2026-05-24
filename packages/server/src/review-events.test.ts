@@ -54,6 +54,41 @@ describe("ReviewEventQueue", () => {
     vi.useRealTimers();
   });
 
+  it("returns overall comments with delivered events", async () => {
+    vi.useFakeTimers();
+    const queue = new ReviewEventQueue();
+    const waiting = queue.wait({
+      documentPath: "/tmp/project/draft.md",
+      timeoutMs: 1_000,
+      batchWindowMs: 0,
+    });
+
+    queue.emit({
+      ...eventInput("/tmp/project/draft.md"),
+      overallComment: "Please prioritize the CLI contract.",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await expect(waiting).resolves.toMatchObject({
+      timedOut: false,
+      events: [
+        {
+          overallComment: "Please prioritize the CLI contract.",
+        },
+      ],
+    });
+    vi.useRealTimers();
+  });
+
+  it("keeps events without overall comments unchanged", async () => {
+    const queue = new ReviewEventQueue();
+
+    queue.emit(eventInput("/tmp/project/draft.md"));
+
+    const result = await queue.wait();
+    expect(result.events[0]).not.toHaveProperty("overallComment");
+  });
+
   it("keeps a watcher active without a timeout until a matching event arrives", async () => {
     vi.useFakeTimers();
     const queue = new ReviewEventQueue();

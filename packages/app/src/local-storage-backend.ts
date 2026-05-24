@@ -113,7 +113,10 @@ export class LocalStorageBackend implements StorageBackend {
     return undefined;
   }
 
-  async completeReview(_relativePath: string): Promise<{ delivered: boolean }> {
+  async completeReview(
+    _relativePath: string,
+    _options?: { overallComment?: string },
+  ): Promise<{ delivered: boolean }> {
     return { delivered: false };
   }
 

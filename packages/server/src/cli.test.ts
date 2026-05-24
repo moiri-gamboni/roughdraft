@@ -1,11 +1,10 @@
 import fs from "node:fs";
+import { createServer as createHttpServer, type Server } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { createServer as createHttpServer, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { validateRoughdraftMarkdown } from "@roughdraft/rfm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "./index";
 import {
   createCliDependencies,
   createDefaultOpenUrl,
@@ -13,6 +12,7 @@ import {
   getServerStateFilePath,
   runCli,
 } from "./cli";
+import { createApp } from "./index";
 import { ROUGHDRAFT_DEFAULT_PORT } from "./network";
 
 interface StartedServer {
@@ -994,13 +994,21 @@ describe("cli", () => {
     await fetch(`http://localhost:${persisted?.port}/api/review-events`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectPath: projectDir, path: "draft.md" }),
+      body: JSON.stringify({
+        projectPath: projectDir,
+        path: "draft.md",
+        overallComment: "Please prioritize the CLI contract.",
+      }),
     });
 
     const exitCode = await watchPromise;
     const payload = parseOnlyJsonLog<{
       timedOut: boolean;
-      events: Array<{ documentPath: string; type: string }>;
+      events: Array<{
+        documentPath: string;
+        overallComment?: string;
+        type: string;
+      }>;
     }>(test.logs);
 
     expect(exitCode).toBe(0);
@@ -1008,6 +1016,7 @@ describe("cli", () => {
     expect(payload.events).toHaveLength(1);
     expect(payload.events[0]).toMatchObject({
       documentPath,
+      overallComment: "Please prioritize the CLI contract.",
       type: "review.completed",
     });
   });

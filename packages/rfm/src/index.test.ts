@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   appendRoughdraftReply,
+  appendRoughdraftDocumentComment,
   extractRoughdraftReviewIndex,
   markRoughdraftResolved,
   validateRoughdraftMarkdown,
@@ -95,7 +96,7 @@ describe("validateRoughdraftMarkdown", () => {
     );
   });
 
-  it("reports invalid endmatter-only replies", () => {
+  it("accepts body-only endmatter comments as document-level feedback", () => {
     const result = validateRoughdraftMarkdown(
       [
         "{>>Root<<}{#c1}",
@@ -113,10 +114,9 @@ describe("validateRoughdraftMarkdown", () => {
       ].join("\n"),
     );
 
-    expect(result.errors.map((diagnostic) => diagnostic.code)).toContain(
-      "missing-reply-target",
-    );
-    expect(result.ok).toBe(false);
+    expect(result.errors).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.summary).toMatchObject({ comments: 2 });
   });
 
   it("ignores review markers inside fenced code blocks and inline code spans", () => {
@@ -180,6 +180,29 @@ describe("validateRoughdraftMarkdown", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.summary).toMatchObject({
       comments: 0,
+      suggestions: 0,
+    });
+  });
+
+  it("accepts document-level comments backed only by YAML endmatter", () => {
+    const result = validateRoughdraftMarkdown(
+      [
+        "# Draft",
+        "",
+        "---",
+        "comments:",
+        "  c1:",
+        "    body: Please address the risk section.",
+        "    by: user",
+        '    at: "2026-05-24T12:00:00.000Z"',
+        "",
+      ].join("\n"),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.summary).toMatchObject({
+      comments: 1,
       suggestions: 0,
     });
   });
@@ -341,6 +364,37 @@ describe("extractRoughdraftReviewIndex", () => {
     });
   });
 
+  it("extracts document-level comments backed only by YAML endmatter", () => {
+    const index = extractRoughdraftReviewIndex(
+      [
+        "# Draft",
+        "",
+        "---",
+        "comments:",
+        "  c1:",
+        "    body: Please address the risk section.",
+        "    by: user",
+        '    at: "2026-05-24T12:00:00.000Z"',
+        "",
+      ].join("\n"),
+    );
+
+    expect(index.summary).toMatchObject({
+      comments: 1,
+      replies: 0,
+      suggestions: 0,
+      unresolved: 1,
+    });
+    expect(index.items[0]).toMatchObject({
+      id: "c1",
+      kind: "comment",
+      parentId: null,
+      author: "user",
+      createdAt: "2026-05-24T12:00:00.000Z",
+      text: "Please address the risk section.",
+    });
+  });
+
   it("does not extract CriticMarkup-looking text inside YAML endmatter bodies", () => {
     const index = extractRoughdraftReviewIndex(
       [
@@ -474,6 +528,36 @@ describe("RFM mutation helpers", () => {
         }),
       ]),
     );
+  });
+
+  it("appends a document-level comment to YAML endmatter with the next comment id", () => {
+    const output = appendRoughdraftDocumentComment(
+      [
+        "# Draft",
+        "",
+        "Needs {==support==}{>>Add a source<<}{#c1}.",
+        "",
+        "---",
+        "comments:",
+        "  c1:",
+        "    by: user",
+        '    at: "2026-04-28T12:00:00.000Z"',
+        "workflow:",
+        "  owner: editorial",
+        "",
+      ].join("\n"),
+      {
+        message: "Please address the risk section.",
+        author: "user",
+        at: "2026-05-24T12:00:00.000Z",
+      },
+    );
+
+    expect(output).toContain("workflow:\n  owner: editorial");
+    expect(output).toContain("  c2:");
+    expect(output).toContain("    body: Please address the risk section.");
+    expect(output).toContain("    by: user");
+    expect(output).toContain("    at: 2026-05-24T12:00:00.000Z");
   });
 
   it("rejects reply text that would close CriticMarkup early", () => {

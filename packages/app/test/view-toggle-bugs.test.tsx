@@ -13,6 +13,7 @@ import {
 } from "../src/DocumentWorkspace";
 import type { DocumentSaveState } from "../src/PageCard";
 import type {
+  CompleteReviewOptions,
   CompleteReviewResult,
   Page,
   StorageBackend,
@@ -172,6 +173,19 @@ function setupDomMocks() {
 async function click(element: Element) {
   await act(async () => {
     element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
+async function change(element: HTMLTextAreaElement, value: string) {
+  await act(async () => {
+    const valueSetter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )?.set;
+    valueSetter?.call(element, value);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
     await Promise.resolve();
   });
 }
@@ -540,7 +554,9 @@ describe("review handoff watcher affordance", () => {
     onCompleteReview = async () => ({ delivered: false }),
   }: {
     getWatcherCount: () => number;
-    onCompleteReview?: () => Promise<CompleteReviewResult>;
+    onCompleteReview?: (
+      options?: CompleteReviewOptions,
+    ) => Promise<CompleteReviewResult>;
   }) {
     await act(async () => {
       root.render(
@@ -601,6 +617,7 @@ describe("review handoff watcher affordance", () => {
     await click(doneReviewingButton);
 
     expect(onCompleteReview).toHaveBeenCalledOnce();
+    expect(onCompleteReview).toHaveBeenCalledWith(undefined);
     expect(container.textContent).toContain("Sent");
     expect(queryByTestId(container, "review-handoff-status")).toBeNull();
     expect(container.textContent).not.toContain("Agent notified");
@@ -627,6 +644,91 @@ describe("review handoff watcher affordance", () => {
     expect(onCompleteReview).toHaveBeenCalledOnce();
     expect(container.textContent).toContain("Not sent");
     expect(container.textContent).not.toContain("I'm done");
+  });
+
+  it("submits an overall comment from the handoff popover", async () => {
+    const onCompleteReview = vi
+      .fn<(options?: CompleteReviewOptions) => Promise<CompleteReviewResult>>()
+      .mockResolvedValue({ delivered: true });
+
+    await renderWorkspace({ getWatcherCount: () => 1, onCompleteReview });
+
+    const commentTrigger = queryByTestId<HTMLButtonElement>(
+      container,
+      "review-handoff-comment-trigger",
+    );
+    if (!commentTrigger) {
+      throw new Error("Review handoff comment trigger not found");
+    }
+
+    await click(commentTrigger);
+
+    const textarea = queryByTestId<HTMLTextAreaElement>(
+      document.body,
+      "review-handoff-overall-comment",
+    );
+    if (!textarea) {
+      throw new Error("Overall comment textarea not found");
+    }
+
+    await change(textarea, "  Please prioritize the CLI contract.  ");
+
+    const submitButton = queryByTestId<HTMLButtonElement>(
+      document.body,
+      "review-handoff-submit-comment",
+    );
+    if (!submitButton) {
+      throw new Error("Submit with comment button not found");
+    }
+    await click(submitButton);
+
+    expect(onCompleteReview).toHaveBeenCalledWith({
+      overallComment: "Please prioritize the CLI contract.",
+    });
+    expect(document.body.textContent).not.toContain(
+      "Please prioritize the CLI contract.",
+    );
+  });
+
+  it("includes an overall comment when finishing from the primary handoff button", async () => {
+    const onCompleteReview = vi
+      .fn<(options?: CompleteReviewOptions) => Promise<CompleteReviewResult>>()
+      .mockResolvedValue({ delivered: true });
+
+    await renderWorkspace({ getWatcherCount: () => 1, onCompleteReview });
+
+    const commentTrigger = queryByTestId<HTMLButtonElement>(
+      container,
+      "review-handoff-comment-trigger",
+    );
+    if (!commentTrigger) {
+      throw new Error("Review handoff comment trigger not found");
+    }
+
+    await click(commentTrigger);
+
+    const textarea = queryByTestId<HTMLTextAreaElement>(
+      document.body,
+      "review-handoff-overall-comment",
+    );
+    if (!textarea) {
+      throw new Error("Overall comment textarea not found");
+    }
+
+    await change(textarea, "  Please prioritize the CLI contract.  ");
+
+    const doneReviewingButton = queryByTestId<HTMLButtonElement>(
+      container,
+      "review-handoff-button",
+    );
+    if (!doneReviewingButton) {
+      throw new Error("I'm done button not found");
+    }
+    await click(doneReviewingButton);
+
+    expect(onCompleteReview).toHaveBeenCalledWith({
+      overallComment: "Please prioritize the CLI contract.",
+    });
   });
 
   it("keeps visible sent feedback after the watcher receives the event", async () => {

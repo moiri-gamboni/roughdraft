@@ -1,15 +1,18 @@
-import express, { type Express, type Request, type Response } from "express";
 import crypto from "node:crypto";
-import os from "node:os";
-import { createServer as createHttpServer } from "node:http";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
 import fs from "node:fs";
-import { extractRoughdraftReviewIndex } from "@roughdraft/rfm";
+import { createServer as createHttpServer } from "node:http";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
+  appendRoughdraftDocumentComment,
+  extractRoughdraftReviewIndex,
+} from "@roughdraft/rfm";
+import express, { type Express, type Request, type Response } from "express";
+import {
+  hasNonLoopbackHost,
   ROUGHDRAFT_DEFAULT_PORT,
   ROUGHDRAFT_PUBLIC_HOST,
-  hasNonLoopbackHost,
   resolveBindHosts,
 } from "./network.js";
 import { ReviewEventQueue } from "./review-events.js";
@@ -106,6 +109,7 @@ interface RemoteDocumentSavePayload {
 const REMOTE_SESSION_TTL_MS = 5 * 60 * 1000;
 const REMOTE_SESSION_SWEEP_INTERVAL_MS = 60 * 1000;
 const REMOTE_SESSION_KEEPALIVE_MS = 15 * 1000;
+const MAX_OVERALL_COMMENT_LENGTH = 4_000;
 
 let nextOpenRequestClientId = 1;
 
@@ -164,6 +168,12 @@ function fileVersionFromFile(filePath: string): string {
   const content = fs.readFileSync(filePath);
   const stats = fs.statSync(filePath);
   return fileVersionFromContent(stats, content);
+}
+
+function normalizeOverallComment(input: unknown): string | undefined {
+  if (typeof input !== "string") return undefined;
+  const trimmed = input.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function markdownPageFromFile(
@@ -630,14 +640,36 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     const target = markdownPathFromRequest(req, res);
     if (!target) return;
 
+    const overallComment = normalizeOverallComment(req.body?.overallComment);
+    if (
+      overallComment !== undefined &&
+      overallComment.length > MAX_OVERALL_COMMENT_LENGTH
+    ) {
+      res.status(400).json({
+        error: `overallComment must be ${MAX_OVERALL_COMMENT_LENGTH} characters or fewer`,
+      });
+      return;
+    }
+
     const markdown = fs.readFileSync(target.absolutePath, "utf-8");
-    const index = extractRoughdraftReviewIndex(markdown);
+    const persistedMarkdown = overallComment
+      ? appendRoughdraftDocumentComment(markdown, {
+          message: overallComment,
+          author: "user",
+        })
+      : markdown;
+    if (persistedMarkdown !== markdown) {
+      fs.writeFileSync(target.absolutePath, persistedMarkdown);
+    }
+
+    const index = extractRoughdraftReviewIndex(persistedMarkdown);
     const result = reviewEvents.emit({
       documentPath: target.absolutePath,
       projectPath: target.projectDir,
       relativePath: target.relativePath,
       version: fileVersionFromFile(target.absolutePath),
       summary: index.summary,
+      overallComment,
     });
 
     res.status(201).json(result);

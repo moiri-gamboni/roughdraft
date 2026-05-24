@@ -1,5 +1,5 @@
-import type { AddressInfo } from "node:net";
 import fs from "node:fs";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -265,9 +265,11 @@ describe("createApp", () => {
       staticDirPath: projectDir,
     });
 
-    const response = await request(app)
-      .post("/api/review-events")
-      .send({ projectPath: projectDir, path: "draft.md" });
+    const response = await request(app).post("/api/review-events").send({
+      projectPath: projectDir,
+      path: "draft.md",
+      overallComment: "Please address the risk section.",
+    });
 
     expect(response.status).toBe(201);
     expect(response.body).toMatchObject({
@@ -278,16 +280,100 @@ describe("createApp", () => {
         projectPath: projectDir,
         relativePath: "draft.md",
         sequence: 1,
+        overallComment: "Please address the risk section.",
         summary: {
-          comments: 1,
+          comments: 2,
           replies: 0,
           suggestions: 0,
-          unresolved: 1,
+          unresolved: 2,
         },
       },
     });
     expect(response.body.event.version).toEqual(expect.any(String));
     expect(response.body.event.createdAt).toEqual(expect.any(String));
+  });
+
+  it("persists an overall review comment as document-level YAML feedback before emitting the event", async () => {
+    const filePath = path.join(projectDir, "draft.md");
+    fs.writeFileSync(
+      filePath,
+      [
+        "# Draft",
+        "",
+        "Needs {==support==}{>>Add a source<<}{#c1}.",
+        "",
+        "---",
+        "comments:",
+        "  c1:",
+        "    by: user",
+        '    at: "2026-04-28T12:00:00.000Z"',
+        "workflow:",
+        "  owner: editorial",
+        "",
+      ].join("\n"),
+    );
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+    });
+
+    const response = await request(app).post("/api/review-events").send({
+      projectPath: projectDir,
+      path: "draft.md",
+      overallComment: "Please address the risk section.",
+    });
+
+    const saved = fs.readFileSync(filePath, "utf-8");
+    expect(response.status).toBe(201);
+    expect(saved).toContain("workflow:\n  owner: editorial");
+    expect(saved).toContain("  c1:");
+    expect(saved).toContain("  c2:");
+    expect(saved).toContain("    body: Please address the risk section.");
+    expect(saved).toContain("    by: user");
+    expect(response.body.event.summary).toMatchObject({
+      comments: 2,
+      replies: 0,
+      suggestions: 0,
+      unresolved: 2,
+    });
+  });
+
+  it("omits whitespace-only overall comments from review events", async () => {
+    fs.writeFileSync(path.join(projectDir, "draft.md"), "# Draft\n");
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+    });
+
+    const response = await request(app).post("/api/review-events").send({
+      projectPath: projectDir,
+      path: "draft.md",
+      overallComment: "   \n\t  ",
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body.event).not.toHaveProperty("overallComment");
+  });
+
+  it("rejects over-limit overall comments", async () => {
+    fs.writeFileSync(path.join(projectDir, "draft.md"), "# Draft\n");
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+    });
+
+    const response = await request(app)
+      .post("/api/review-events")
+      .send({
+        projectPath: projectDir,
+        path: "draft.md",
+        overallComment: "x".repeat(4001),
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: "overallComment must be 4000 characters or fewer",
+    });
   });
 
   it("rejects review events without a projectPath", async () => {

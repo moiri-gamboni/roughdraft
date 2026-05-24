@@ -1,8 +1,9 @@
 import {
-  MarkdownFileConflictError,
   type BackendInfo,
+  type CompleteReviewOptions,
   type CompleteReviewResult,
   type MarkdownFileChangeEvent,
+  MarkdownFileConflictError,
   type Page,
   type ReviewWatchStatus,
   type StorageBackend,
@@ -110,7 +111,11 @@ export class ApiBackend implements StorageBackend {
     };
   }
 
-  async completeReview(relativePath: string): Promise<CompleteReviewResult> {
+  async completeReview(
+    relativePath: string,
+    options: CompleteReviewOptions = {},
+  ): Promise<CompleteReviewResult> {
+    const overallComment = options.overallComment?.trim();
     const res = await fetch(
       this.buildUrl("/api/review-events", { path: relativePath }),
       {
@@ -119,6 +124,7 @@ export class ApiBackend implements StorageBackend {
         body: JSON.stringify({
           projectPath: this.info.projectPath,
           path: relativePath,
+          ...(overallComment ? { overallComment } : {}),
         }),
       },
     );

@@ -4,8 +4,8 @@ import {
   Check,
   CodeXml,
   Copy,
-  Eye,
   ExternalLink,
+  Eye,
   FileText,
   MessageSquare,
   PencilLine,
@@ -44,24 +44,25 @@ import {
   DialogTrigger,
 } from "./components/ui/dialog";
 import { DocumentWorkspace } from "./DocumentWorkspace";
+import { detectBackend } from "./detect-backend";
 import {
   getCommentAnchorMeasurements,
   groupCommentAnchorMeasurements,
   normalizeCommentMeasurement,
   resolveAnchoredRailLayouts,
 } from "./document-comments";
-import { detectBackend } from "./detect-backend";
+import { cn } from "./lib/utils";
 import type { DocumentSaveState } from "./PageCard";
 import { PreviewBackend } from "./preview-backend";
 import { RoughdraftFormatDemo } from "./RoughdraftFormatDemo";
 import {
+  type CompleteReviewOptions,
   MarkdownFileConflictError,
   type Page,
   type StorageBackend,
 } from "./storage";
 import { UpdateNotice } from "./UpdateNotice";
 import { fetchUpdateStatus, type UpdateStatus } from "./update-status";
-import { cn } from "./lib/utils";
 
 export type DocumentDiskChangeState =
   | "clean"
@@ -1436,11 +1437,14 @@ export function PreviewPage() {
     setPreviewForceResetKey(`preview-reset:${Date.now()}`);
   }, [backend]);
 
-  const handleCompletePreviewReview = useCallback(async () => {
-    return backend.completeReview
-      ? backend.completeReview(PREVIEW_DOCUMENT_PATH)
-      : { delivered: false };
-  }, [backend]);
+  const handleCompletePreviewReview = useCallback(
+    async (options?: CompleteReviewOptions) => {
+      return backend.completeReview
+        ? backend.completeReview(PREVIEW_DOCUMENT_PATH, options)
+        : { delivered: false };
+    },
+    [backend],
+  );
 
   return (
     <main className="relative flex h-screen min-w-0 flex-col overflow-hidden bg-[#FCFCFC] dark:bg-background text-slate-950 dark:text-slate-50">
@@ -1785,39 +1789,43 @@ export function App() {
     );
   }, [applyDocumentPage, handleDocumentSaveStateChange]);
 
-  const handleCompleteReview = useCallback(async () => {
-    const currentBackend = backendRef.current;
-    const currentPath = activeDocumentPathRef.current;
-    const currentDocument = documentPageRef.current;
-    if (!currentBackend || !currentPath || !currentDocument) {
-      return { delivered: false };
-    }
+  const handleCompleteReview = useCallback(
+    async (options?: CompleteReviewOptions) => {
+      const currentBackend = backendRef.current;
+      const currentPath = activeDocumentPathRef.current;
+      const currentDocument = documentPageRef.current;
+      if (!currentBackend || !currentPath || !currentDocument) {
+        return { delivered: false };
+      }
 
-    const content = documentDraftContentRef.current ?? currentDocument.content;
-    const expectedVersion = currentDocument.version;
-    const firstLine = content.split("\n")[0] || "";
-    const fallbackTitle =
-      currentDocument.id.split("/").at(-1) || currentDocument.id;
-    const title = firstLine.replace(/^#*\s*/, "") || fallbackTitle;
+      const content =
+        documentDraftContentRef.current ?? currentDocument.content;
+      const expectedVersion = currentDocument.version;
+      const firstLine = content.split("\n")[0] || "";
+      const fallbackTitle =
+        currentDocument.id.split("/").at(-1) || currentDocument.id;
+      const title = firstLine.replace(/^#*\s*/, "") || fallbackTitle;
 
-    const savedDocument = (await currentBackend.saveMarkdownFile(
-      currentPath,
-      content,
-      expectedVersion,
-    )) ?? {
-      ...currentDocument,
-      content,
-      title,
-    };
+      const savedDocument = (await currentBackend.saveMarkdownFile(
+        currentPath,
+        content,
+        expectedVersion,
+      )) ?? {
+        ...currentDocument,
+        content,
+        title,
+      };
 
-    applyDocumentPage(savedDocument);
-    documentDirtyRef.current = false;
-    setDocumentDiskChangeState("clean");
+      applyDocumentPage(savedDocument);
+      documentDirtyRef.current = false;
+      setDocumentDiskChangeState("clean");
 
-    return currentBackend.completeReview
-      ? currentBackend.completeReview(currentPath)
-      : { delivered: false };
-  }, [applyDocumentPage]);
+      return currentBackend.completeReview
+        ? currentBackend.completeReview(currentPath, options)
+        : { delivered: false };
+    },
+    [applyDocumentPage],
+  );
 
   useEffect(() => {
     if (!backend?.watchMarkdownFile || !activeDocumentPath) return;

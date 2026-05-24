@@ -32,6 +32,7 @@ export interface CriticComment {
   authorType?: "user" | "ai";
   authorId?: string | null;
   parentCommentId?: string | null;
+  scope?: "document";
 }
 
 export interface CriticCommentThread {
@@ -263,12 +264,12 @@ function parseEndmatterMap(
   );
 }
 
-function addEndmatterReplies(
+function addEndmatterFeedback(
   comments: Map<string, CriticComment>,
   endmatter: ParsedEndmatter,
 ) {
   for (const [id, entry] of endmatter.comments) {
-    if (typeof entry.body !== "string" || typeof entry.re !== "string") {
+    if (typeof entry.body !== "string") {
       continue;
     }
     if (comments.has(id)) {
@@ -280,6 +281,8 @@ function addEndmatterReplies(
       createCommentWithContext({
         ...commentPartialFromEndmatterEntry(id, entry),
         content: entry.body,
+        parentCommentId: typeof entry.re === "string" ? entry.re : null,
+        scope: typeof entry.re === "string" ? undefined : "document",
       }),
     );
   }
@@ -325,7 +328,10 @@ function endmatterEntryForComment(
     at: comment.createdAt,
   };
 
-  if (comment.parentCommentId) {
+  if (comment.scope === "document") {
+    next.body = comment.content;
+    delete next.re;
+  } else if (comment.parentCommentId) {
     next.body = comment.content;
     next.re = comment.parentCommentId;
   } else {
@@ -447,6 +453,7 @@ function createCommentWithContext(
     authorType,
     authorId: partial?.authorId ?? (authorType === "ai" ? null : "user"),
     parentCommentId: partial?.parentCommentId ?? null,
+    scope: partial?.scope,
   };
 }
 
@@ -1391,7 +1398,7 @@ export function criticMarkdownHasReviewRail(
     parsedEndmatter,
   );
   parser.parse(protectRichTextRoundTripMarkdown(body));
-  addEndmatterReplies(comments, parsedEndmatter);
+  addEndmatterFeedback(comments, parsedEndmatter);
   return comments.size > 0 || changes.size > 0;
 }
 
@@ -1412,7 +1419,7 @@ export function criticMarkdownToRenderedHtml(
     parsedEndmatter,
   );
   const html = parser.parse(protectRichTextRoundTripMarkdown(body)) as string;
-  addEndmatterReplies(comments, parsedEndmatter);
+  addEndmatterFeedback(comments, parsedEndmatter);
 
   return { html, comments, changes, frontmatter, endmatter };
 }
@@ -1434,7 +1441,7 @@ export function criticMarkdownToEditorState(
     yamlFrontmatter?: string;
     yamlEndmatter?: string;
   };
-  addEndmatterReplies(comments, parsedEndmatter);
+  addEndmatterFeedback(comments, parsedEndmatter);
   if (frontmatter) {
     doc.yamlFrontmatter = frontmatter;
   }

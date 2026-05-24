@@ -69,6 +69,13 @@ export interface AppendRoughdraftReplyOptions {
   id?: string;
 }
 
+export interface AppendRoughdraftDocumentCommentOptions {
+  message: string;
+  author?: string;
+  at?: string;
+  id?: string;
+}
+
 export interface MarkRoughdraftResolvedOptions {
   targetId: string;
   summary?: string;
@@ -379,13 +386,15 @@ export function validateRoughdraftMarkdown(
       entry,
       endmatter.offset ?? 0,
       addDiagnostic,
-      true,
+      Boolean(entry.re),
     );
-    replies.push({
-      id,
-      parentId: String(entry.re ?? ""),
-      offset: endmatter.offset ?? 0,
-    });
+    if (entry.re) {
+      replies.push({
+        id,
+        parentId: String(entry.re),
+        offset: endmatter.offset ?? 0,
+      });
+    }
   }
 
   for (const reply of replies) {
@@ -558,12 +567,12 @@ export function extractRoughdraftReviewIndex(markdown: string): RfmReviewIndex {
   }
 
   for (const [id, entry] of endmatter.comments) {
-    if (!entry.body || !entry.re) continue;
+    if (!entry.body) continue;
 
     items.push({
       id,
-      kind: "reply",
-      parentId: String(entry.re),
+      kind: entry.re ? "reply" : "comment",
+      parentId: entry.re ? String(entry.re) : null,
       author: typeof entry.by === "string" ? entry.by : null,
       createdAt: typeof entry.at === "string" ? entry.at : null,
       status: typeof entry.status === "string" ? entry.status : null,
@@ -586,6 +595,28 @@ export function extractRoughdraftReviewIndex(markdown: string): RfmReviewIndex {
       unresolved: items.filter((item) => item.status !== "resolved").length,
     },
   };
+}
+
+export function appendRoughdraftDocumentComment(
+  markdown: string,
+  options: AppendRoughdraftDocumentCommentOptions,
+): string {
+  assertSafeCommentBodyText(options.message);
+
+  const index = extractRoughdraftReviewIndex(markdown);
+  const endmatter = parseRoughdraftEndmatter(markdown);
+  const commentId = options.id ?? nextCommentId(index.items);
+  const comments = new Map(endmatter.comments);
+  comments.set(commentId, {
+    body: options.message,
+    by: options.author ?? "user",
+    at: options.at ?? new Date().toISOString(),
+  });
+
+  return writeRoughdraftEndmatter(markdown, {
+    comments,
+    suggestions: endmatter.suggestions,
+  });
 }
 
 export function appendRoughdraftReply(
@@ -1078,7 +1109,6 @@ function parseRoughdraftEndmatter(markdown: string): RoughdraftEndmatter {
   };
   const match = findFinalYamlEndmatter(markdown);
   if (!match) return empty;
-  if (!markdown.slice(0, match.offset).includes("{#")) return empty;
 
   let parsed: unknown;
   try {
@@ -1103,6 +1133,12 @@ function parseRoughdraftEndmatter(markdown: string): RoughdraftEndmatter {
   if (!isPlainObject(parsed)) return empty;
   const hasRoughdraftKeys = "comments" in parsed || "suggestions" in parsed;
   if (!hasRoughdraftKeys) return empty;
+  if (
+    !markdown.slice(0, match.offset).includes("{#") &&
+    !hasDocumentLevelComment(parsed)
+  ) {
+    return empty;
+  }
 
   return {
     comments: readEndmatterEntries(parsed.comments),
@@ -1112,6 +1148,22 @@ function parseRoughdraftEndmatter(markdown: string): RoughdraftEndmatter {
     offset: match.offset,
     diagnostics: [],
   };
+}
+
+function hasDocumentLevelComment(parsed: Record<string, unknown>): boolean {
+  const comments = readEndmatterEntries(parsed.comments);
+  for (const entry of comments.values()) {
+    if (
+      typeof entry.body === "string" &&
+      typeof entry.by === "string" &&
+      typeof entry.at === "string" &&
+      !entry.re
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function findFinalYamlEndmatter(

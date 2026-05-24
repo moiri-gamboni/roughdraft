@@ -31,6 +31,10 @@ export interface CompleteReviewResult {
   delivered: boolean;
 }
 
+export interface CompleteReviewOptions {
+  overallComment?: string;
+}
+
 export interface ReviewWatchStatus {
   watching: boolean;
   watcherCount: number;
@@ -58,7 +62,10 @@ export interface StorageBackend {
     relativePath: string,
     onChange: (event: MarkdownFileChangeEvent) => void,
   ): () => void;
-  completeReview?(relativePath: string): Promise<CompleteReviewResult>;
+  completeReview?(
+    relativePath: string,
+    options?: CompleteReviewOptions,
+  ): Promise<CompleteReviewResult>;
   getReviewWatchStatus?(relativePath: string): Promise<ReviewWatchStatus>;
   saveAsset(file: File): Promise<StoredAsset>;
   resolveFileUrl(path: string): string | null;

@@ -63,6 +63,42 @@ describe("mcp", () => {
     });
   });
 
+  it("returns overall comments from review watch events unchanged", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          events: [
+            {
+              documentPath,
+              type: "review.completed",
+              overallComment: "Please prioritize the CLI contract.",
+            },
+          ],
+          timedOut: false,
+          nextSequence: 2,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+
+    const result = await callTool(
+      "roughdraft_watch_review_events",
+      { documentPath, projectPath: projectDir },
+      { ROUGHDRAFT_STATE_FILE: stateFile },
+      fetchImpl,
+    );
+
+    expect(result).toMatchObject({
+      events: [
+        {
+          overallComment: "Please prioritize the CLI contract.",
+        },
+      ],
+    });
+  });
+
   it("does not write a reply when the message contains a CriticMarkup close delimiter", async () => {
     const original =
       '# Draft\n\n{>>Needs proof<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}\n';

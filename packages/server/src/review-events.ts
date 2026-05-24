@@ -12,6 +12,7 @@ export interface ReviewCompletedEventInput {
     suggestions: number;
     unresolved: number;
   };
+  overallComment?: string;
 }
 
 export interface ReviewCompletedEvent extends ReviewCompletedEventInput {
@@ -73,6 +74,8 @@ export class ReviewEventQueue {
       documentPath: event.documentPath,
       sequence: event.sequence,
       waiters: this.waiters.size,
+      hasOverallComment: typeof event.overallComment === "string",
+      overallCommentLength: event.overallComment?.length ?? 0,
     });
 
     let delivered = false;

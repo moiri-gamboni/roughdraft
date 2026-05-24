@@ -69,7 +69,7 @@ const tools: ToolDefinition[] = [
   {
     name: "roughdraft_watch_review_events",
     description:
-      "Block until Roughdraft receives Done Reviewing for a Markdown file. Omit timeoutSeconds to wait indefinitely.",
+      "Block until Roughdraft receives Done Reviewing for a Markdown file. Overall handoff comments are persisted as document-level YAML endmatter comments before the event is emitted. Omit timeoutSeconds to wait indefinitely.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
