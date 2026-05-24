@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./index";
 import {
   createCliDependencies,
+  createDefaultOpenUrl,
   ensureServerRunning,
   getServerStateFilePath,
   runCli,
@@ -381,6 +382,145 @@ describe("cli", () => {
       ),
     });
     expect(lastOpenedUrl).toBeNull();
+  });
+
+  it("opens the default browser on macOS when Chrome is installed but not the default browser", () => {
+    const opened: Array<{ command: string; args: string[] }> = [];
+    const openUrl = createDefaultOpenUrl({
+      env: {},
+      platform: "darwin",
+      spawnSyncCommand: (command, args) => {
+        if (command === "plutil") {
+          expect(args?.join(" ")).toContain(
+            "com.apple.launchservices.secure.plist",
+          );
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              {
+                LSHandlerURLScheme: "http",
+                LSHandlerRoleAll: "com.apple.Safari",
+              },
+            ]),
+          } as ReturnType<typeof import("node:child_process").spawnSync>;
+        }
+
+        if (command === "open" && args?.[0] === "-Ra") {
+          return {
+            status: 0,
+            stdout: "",
+          } as ReturnType<typeof import("node:child_process").spawnSync>;
+        }
+
+        throw new Error(`unexpected spawnSync command ${command}`);
+      },
+      openDetachedCommand: (command, args) => {
+        opened.push({ command, args });
+      },
+    });
+
+    const mode = openUrl("http://localhost:4020/?file=draft.md");
+
+    expect(mode).toBe("browser");
+    expect(opened).toEqual([
+      { command: "open", args: ["http://localhost:4020/?file=draft.md"] },
+    ]);
+  });
+
+  it("opens a Chrome app window on macOS when Chrome is the default browser", () => {
+    const opened: Array<{ command: string; args: string[] }> = [];
+    const openUrl = createDefaultOpenUrl({
+      env: {},
+      platform: "darwin",
+      spawnSyncCommand: (command, args) => {
+        if (command === "plutil") {
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              {
+                LSHandlerURLScheme: "http",
+                LSHandlerRoleAll: "com.google.Chrome",
+              },
+            ]),
+          } as ReturnType<typeof import("node:child_process").spawnSync>;
+        }
+
+        if (command === "open" && args?.[0] === "-Ra") {
+          return {
+            status: 0,
+            stdout: "",
+          } as ReturnType<typeof import("node:child_process").spawnSync>;
+        }
+
+        throw new Error(`unexpected spawnSync command ${command}`);
+      },
+      openDetachedCommand: (command, args) => {
+        opened.push({ command, args });
+      },
+    });
+
+    const mode = openUrl("http://localhost:4020/?file=draft.md");
+
+    expect(mode).toBe("chrome-app");
+    expect(opened).toEqual([
+      {
+        command: "open",
+        args: [
+          "-na",
+          "Google Chrome",
+          "--args",
+          "--app=http://localhost:4020/?file=draft.md",
+        ],
+      },
+    ]);
+  });
+
+  it("opens the default browser on Windows without macOS browser detection", () => {
+    const opened: Array<{ command: string; args: string[] }> = [];
+    const openUrl = createDefaultOpenUrl({
+      env: {},
+      platform: "win32",
+      spawnSyncCommand: () => {
+        throw new Error("macOS browser detection should not run on Windows");
+      },
+      openDetachedCommand: (command, args) => {
+        opened.push({ command, args });
+      },
+    });
+
+    const mode = openUrl("http://localhost:4020/?file=draft.md");
+
+    expect(mode).toBe("browser");
+    expect(opened).toEqual([
+      {
+        command: "cmd",
+        args: ["/c", "start", "", "http://localhost:4020/?file=draft.md"],
+      },
+    ]);
+  });
+
+  it("opens the default browser on Linux without macOS browser detection", () => {
+    const opened: Array<{ command: string; args: string[] }> = [];
+    const openUrl = createDefaultOpenUrl({
+      env: {},
+      platform: "linux",
+      spawnSyncCommand: () => {
+        throw new Error("macOS browser detection should not run on Linux");
+      },
+      openDetachedCommand: (command, args) => {
+        opened.push({ command, args });
+      },
+    });
+
+    const mode = openUrl("http://localhost:4020/?file=draft.md");
+
+    expect(mode).toBe("browser");
+    expect(opened).toEqual([
+      {
+        command: "xdg-open",
+        args: ["http://localhost:4020/?file=draft.md"],
+      },
+    ]);
   });
 
   it("prints only the document URL from open --print-url", async () => {

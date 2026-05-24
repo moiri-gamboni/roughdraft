@@ -25,6 +25,32 @@ Prefer the fastest test that remains predictive. Escalate to integration or e2e 
 
 When the user asks you to fix something, first have a subagent reproduce the bug with a failing test case before implementing the fix. The subagent should focus on the smallest behavioral test that demonstrates the problem, and should report the failing command, changed test files, and why the failure captures the requested bug.
 
+### Prove It Pattern
+
+For every bug fix:
+
+1. Reproduce the failure before changing production code. Prefer the smallest automated test that exercises the actual buggy path and fails for the reported behavior.
+2. If the bug crosses a boundary such as the OS, browser, CLI subprocess, filesystem watcher, network, or a third-party tool, also run a realistic command or flow that exercises that boundary. A mocked unit test can cover branching logic, but it does not prove the external command syntax, output shape, permissions, launch behavior, or integration contract.
+3. Implement the fix.
+4. Rerun the failing test or realistic reproduction and confirm it now passes.
+5. Run the narrow relevant test command first, then the broader check when the change is broad enough to justify it.
+
+If a realistic reproduction is infeasible, document why before proceeding and include the remaining verification gap in the final summary.
+
+### Realistic Verification Before Handoff
+
+Before asking the user to test or review a change, verify the riskiest changed behavior with the most realistic feasible check:
+
+- For CLI behavior, run the actual worktree CLI or the exact subprocess command it will invoke.
+- For browser behavior, open the affected route in a real browser automation flow when possible.
+- For OS integration, run the target OS command directly and inspect its real output.
+- For file-backed behavior, exercise the real file path, watcher, or save/load cycle.
+- For external APIs or libraries, verify against official docs or a real local integration point rather than only mocked assumptions.
+
+Mocked tests are still useful, but they are not a substitute when the boundary itself is the product behavior.
+
+In the final response, list the verification commands run, what each proved, and any residual realism gap.
+
 ## Slog Default
 
 This repo vendors the `slog` skill at `.codex/skills/slog`.

@@ -599,11 +599,18 @@ function suggestCommand(command: string): string | null {
   return suggestion && suggestion.distance <= 3 ? suggestion.candidate : null;
 }
 
-function hasChromeAppMode() {
-  if (process.platform !== "darwin") return false;
+type SpawnSyncCommand = typeof spawnSync;
+type OpenDetachedCommand = typeof openDetached;
+
+function hasChromeAppMode(
+  platform: NodeJS.Platform = process.platform,
+  spawnSyncCommand: SpawnSyncCommand = spawnSync,
+) {
+  if (platform !== "darwin") return false;
   return (
-    spawnSync("open", ["-Ra", "Google Chrome"], { stdio: "ignore" }).status ===
-    0
+    spawnSyncCommand("open", ["-Ra", "Google Chrome"], {
+      stdio: "ignore",
+    }).status === 0
   );
 }
 
@@ -616,32 +623,106 @@ function openDetached(command: string, args: string[]) {
   child.unref();
 }
 
+function resolveDefaultBrowserBundleId(
+  platform: NodeJS.Platform = process.platform,
+  spawnSyncCommand: SpawnSyncCommand = spawnSync,
+): string | null {
+  if (platform !== "darwin") return null;
+
+  const result = spawnSyncCommand(
+    "plutil",
+    [
+      "-extract",
+      "LSHandlers",
+      "json",
+      "-o",
+      "-",
+      path.join(
+        os.homedir(),
+        "Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist",
+      ),
+    ],
+    {
+      encoding: "utf8",
+      windowsHide: true,
+    },
+  );
+
+  if (result.status !== 0) return null;
+
+  try {
+    const handlers = JSON.parse(result.stdout) as Array<{
+      LSHandlerRoleAll?: string;
+      LSHandlerURLScheme?: string;
+    }>;
+    return (
+      handlers
+        .find((handler) => handler.LSHandlerURLScheme === "http")
+        ?.LSHandlerRoleAll?.trim()
+        .toLowerCase() ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function isChromeBundleId(bundleId: string | null): boolean {
+  return bundleId === "com.google.chrome";
+}
+
+export function createDefaultOpenUrl({
+  env = process.env,
+  platform = process.platform,
+  spawnSyncCommand = spawnSync,
+  openDetachedCommand = openDetached,
+}: {
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  spawnSyncCommand?: SpawnSyncCommand;
+  openDetachedCommand?: OpenDetachedCommand;
+} = {}): (url: string) => OpenMode {
+  return (url: string) => {
+    if (env.ROUGHDRAFT_NO_OPEN === "1") {
+      return "disabled";
+    }
+
+    if (
+      isChromeBundleId(
+        resolveDefaultBrowserBundleId(platform, spawnSyncCommand),
+      )
+    ) {
+      if (hasChromeAppMode(platform, spawnSyncCommand)) {
+        openDetachedCommand("open", [
+          "-na",
+          "Google Chrome",
+          "--args",
+          `--app=${url}`,
+        ]);
+        return "chrome-app";
+      }
+    }
+
+    if (platform === "darwin") {
+      openDetachedCommand("open", [url]);
+      return "browser";
+    }
+
+    if (platform === "linux") {
+      openDetachedCommand("xdg-open", [url]);
+      return "browser";
+    }
+
+    if (platform === "win32") {
+      openDetachedCommand("cmd", ["/c", "start", "", url]);
+      return "browser";
+    }
+
+    return "none";
+  };
+}
+
 function defaultOpenUrl(url: string): OpenMode {
-  if (process.env.ROUGHDRAFT_NO_OPEN === "1") {
-    return "disabled";
-  }
-
-  if (hasChromeAppMode()) {
-    openDetached("open", ["-na", "Google Chrome", "--args", `--app=${url}`]);
-    return "chrome-app";
-  }
-
-  if (process.platform === "darwin") {
-    openDetached("open", [url]);
-    return "browser";
-  }
-
-  if (process.platform === "linux") {
-    openDetached("xdg-open", [url]);
-    return "browser";
-  }
-
-  if (process.platform === "win32") {
-    openDetached("cmd", ["/c", "start", "", url]);
-    return "browser";
-  }
-
-  return "none";
+  return createDefaultOpenUrl()(url);
 }
 
 function defaultIsProcessRunning(pid: number): boolean {
