@@ -100,7 +100,10 @@ test.describe("markdown round-trips", () => {
 
     await openMarkdownFile(page, filePath);
 
-    await expect(documentSaveStatus(page)).toContainText("Saved");
+    await expect(documentSaveStatus(page)).toHaveAttribute(
+      "aria-label",
+      "Saved",
+    );
 
     logE2eEvent("markdown-roundtrip.initial-saved", {
       file: "initial-saved.md",
@@ -123,7 +126,10 @@ test.describe("markdown round-trips", () => {
     await expect
       .poll(() => readProjectFile(projectDir, "manual-save.md"))
       .toContain("Saved by shortcut.");
-    await expect(documentSaveStatus(page)).toContainText("Saved");
+    await expect(documentSaveStatus(page)).toHaveAttribute(
+      "aria-label",
+      "Saved",
+    );
 
     logE2eEvent("markdown-roundtrip.manual-save-shortcut", {
       file: "manual-save.md",
@@ -152,7 +158,10 @@ test.describe("markdown round-trips", () => {
     await expect
       .poll(() => readProjectFile(projectDir, "rich-save.md"))
       .toContain("Saved by shortcut.");
-    await expect(documentSaveStatus(page)).toContainText("Saved");
+    await expect(documentSaveStatus(page)).toHaveAttribute(
+      "aria-label",
+      "Saved",
+    );
 
     logE2eEvent("markdown-roundtrip.rich-manual-save", {
       file: "rich-save.md",
@@ -202,7 +211,10 @@ test.describe("markdown round-trips", () => {
         { defaultPrevented: true, metaKey: true, ctrlKey: false },
         { defaultPrevented: true, metaKey: false, ctrlKey: true },
       ]);
-      await expect(documentSaveStatus(page)).toContainText("Saved");
+      await expect(documentSaveStatus(page)).toHaveAttribute(
+        "aria-label",
+        "Saved",
+      );
     }
 
     logE2eEvent("markdown-roundtrip.save-default-prevented", {

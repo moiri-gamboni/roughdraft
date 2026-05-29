@@ -262,6 +262,7 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
       root.unmount();
     });
     container.remove();
+    Reflect.deleteProperty(globalThis, "ClipboardItem");
     vi.restoreAllMocks();
   });
 
@@ -285,10 +286,12 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
 
   async function renderWorkspace({
     documentDiskChangeState = "clean",
+    documentContent = "Hello world",
     watcherCount = 0,
     onSaveDocument = async () => {},
   }: {
     documentDiskChangeState?: "clean" | "changed" | "conflict" | "paused";
+    documentContent?: string;
     watcherCount?: number;
     onSaveDocument?: (id: string, content: string) => Promise<void>;
   } = {}) {
@@ -299,7 +302,7 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     await act(async () => {
       root.render(
         <DocumentWorkspace
-          documentPage={createPage()}
+          documentPage={createPage(documentContent)}
           activeDocumentPath="test.md"
           documentFilenameLabel="test.md"
           documentEditorViewMode="rich-text"
@@ -321,20 +324,28 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     });
   }
 
+  async function openFileMenu() {
+    await click(getByTestId(container, "document-file-menu-trigger"));
+    return getByTestId(document.body, "document-file-menu");
+  }
+
   it.each([
-    ["saved", "Saved"],
-    ["saving", "Saving"],
-    ["unsaved", "Unsaved changes"],
-    ["error", "Save failed"],
+    ["saved", "Saved", "document-save-status-saved"],
+    ["saving", "Saving", "animate-spin"],
+    ["unsaved", "Unsaved changes", "animate-spin"],
+    ["error", "Save failed", ""],
   ] satisfies Array<
-    [DocumentSaveState, string]
-  >)("shows persistent %s save status", async (saveState, label) => {
+    [DocumentSaveState, string, string]
+  >)("shows icon-only %s save status", async (saveState, label, iconClass) => {
     await renderSaveStatus({ saveState });
 
-    expect(
-      getByTestId(container, "document-save-status").textContent,
-    ).toContain(label);
-    expect(container.textContent).toContain(label);
+    const status = getByTestId(container, "document-save-status");
+    expect(status.getAttribute("aria-label")).toBe(label);
+    expect(status.textContent).toBe("");
+    const icon = getByTestId(status, "document-save-status-icon");
+    if (iconClass) {
+      expect(icon.classList.contains(iconClass)).toBe(true);
+    }
   });
 
   it.each([
@@ -344,16 +355,17 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
   ] as const)("shows disk-blocked %s save status", async (state, label) => {
     await renderSaveStatus({ documentDiskChangeState: state });
 
-    expect(
-      getByTestId(container, "document-save-status").textContent,
-    ).toContain(label);
-    expect(container.textContent).toContain(label);
+    const status = getByTestId(container, "document-save-status");
+    expect(status.getAttribute("aria-label")).toBe(label);
+    expect(status.textContent).toBe("");
+    expect(getByTestId(status, "document-save-status-icon")).not.toBeNull();
   });
 
-  it("renders save status below the handoff button when handoff exists", async () => {
+  it("renders save status next to the filename when handoff exists", async () => {
     await renderWorkspace({ watcherCount: 1 });
 
     const stack = queryByTestId(container, "document-status-stack");
+    const header = getByTestId(container, "document-page-header");
     const doneReviewingButton = queryByTestId(
       container,
       "review-handoff-button",
@@ -362,16 +374,79 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     expect(doneReviewingButton).toBeDefined();
     expect(doneReviewingButton?.textContent).toContain("I'm done");
     expect(doneReviewingButton?.textContent).not.toContain("Saved");
-    expect(stack?.textContent).toContain("Saved");
+    expect(stack?.textContent).not.toContain("Saved");
+    expect(header.textContent).toContain("test.md");
+    expect(header.textContent).not.toContain("Saved");
+    expect(
+      getByTestId(header, "document-save-status").getAttribute("aria-label"),
+    ).toBe("Saved");
   });
 
-  it("renders standalone save status in the top-right stack without handoff", async () => {
+  it("renders save status next to the filename without handoff", async () => {
     await renderWorkspace();
 
     const stack = queryByTestId(container, "document-status-stack");
+    const header = getByTestId(container, "document-page-header");
     expect(stack).not.toBeNull();
     expect(stack?.textContent).not.toContain("I'm done");
-    expect(stack?.textContent).toContain("Saved");
+    expect(stack?.textContent).not.toContain("Saved");
+    expect(header.textContent).toContain("test.md");
+    expect(header.textContent).not.toContain("Saved");
+    expect(
+      getByTestId(header, "document-save-status").getAttribute("aria-label"),
+    ).toBe("Saved");
+  });
+
+  it.each([
+    ["path", "test.md"],
+    ["filename", "test.md"],
+    ["markdown", "# Heading\n\nBody"],
+  ] as const)("copies document %s from the file menu", async (action, text) => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    await renderWorkspace({ documentContent: "# Heading\n\nBody" });
+    await openFileMenu();
+    await click(getByTestId(document.body, `document-file-menu-${action}`));
+
+    expect(writeText).toHaveBeenCalledWith(text);
+  });
+
+  it("copies document rich text with html and plain markdown flavors", async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+    const clipboardItems: Array<Record<string, Blob>> = [];
+    class ClipboardItemMock {
+      items: Record<string, Blob>;
+
+      constructor(items: Record<string, Blob>) {
+        this.items = items;
+        clipboardItems.push(items);
+      }
+    }
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { write },
+    });
+    Object.defineProperty(globalThis, "ClipboardItem", {
+      configurable: true,
+      value: ClipboardItemMock,
+    });
+
+    await renderWorkspace({ documentContent: "# Heading\n\nBody" });
+    await openFileMenu();
+    await click(getByTestId(document.body, "document-file-menu-rich-text"));
+
+    expect(clipboardItems).toHaveLength(1);
+    expect(clipboardItems[0]).toEqual({
+      "text/html": expect.any(Blob),
+      "text/plain": expect.any(Blob),
+    });
+    expect(write).toHaveBeenCalledWith([
+      expect.objectContaining({ items: expect.any(Object) }),
+    ]);
   });
 
   it.each([
@@ -427,13 +502,11 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     expect(container.textContent).toContain("Save conflict");
     expect(container.textContent).toContain("This file changed on disk");
     expect(
-      getByTestId(container, "document-save-status").textContent,
-    ).toContain("Save conflict");
+      getByTestId(container, "document-save-status").getAttribute("aria-label"),
+    ).toBe("Save conflict");
   });
 
   it.each([
-    ["saving", "clean"],
-    ["unsaved", "clean"],
     ["error", "clean"],
     ["saved", "conflict"],
   ] satisfies Array<
@@ -448,7 +521,22 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     ).toBe(true);
   });
 
-  it("allows handoff only when saved, conflict-free, and idle", () => {
+  it.each([
+    "saving",
+    "unsaved",
+  ] satisfies DocumentSaveState[])("keeps handoff enabled while a debounced save is pending (save state %s)", (saveState) => {
+    // The button must not dim on every keystroke while autosave debounces; it
+    // stays enabled and flushes the pending save on click instead.
+    expect(
+      isReviewHandoffDisabled({
+        saveState,
+        documentDiskChangeState: "clean",
+        reviewHandoffState: "idle",
+      }),
+    ).toBe(false);
+  });
+
+  it("allows handoff when saved, conflict-free, and idle", () => {
     expect(
       isReviewHandoffDisabled({
         saveState: "saved",
@@ -512,18 +600,18 @@ describe("interaction mode preserved across view toggle (issue 3 fix)", () => {
       });
     };
 
-    // Mount with rich-text → mode is "editing" by default
+    // Mount with rich-text -> mode is "Editing" by default
     await renderWorkspace("rich-text");
     expect(
       getByTestId(container, "document-mode-trigger").textContent,
-    ).toContain("editing");
+    ).toContain("Editing");
 
-    // Rerender with code view (same component instance, no remount) →
-    // mode stays "editing" because the component is not destroyed.
+    // Rerender with code view (same component instance, no remount) ->
+    // mode stays "Editing" because the component is not destroyed.
     await renderWorkspace("code");
     expect(
       getByTestId(container, "document-mode-trigger").textContent,
-    ).toContain("editing");
+    ).toContain("Editing");
   });
 });
 
@@ -670,6 +758,8 @@ describe("review handoff watcher affordance", () => {
     if (!textarea) {
       throw new Error("Overall comment textarea not found");
     }
+    expect(textarea.getAttribute("placeholder")).toBe("Overall comment");
+    expect(document.body.textContent).not.toContain("Overall comment");
 
     await change(textarea, "  Please prioritize the CLI contract.  ");
 

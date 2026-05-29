@@ -26,7 +26,6 @@ import {
   SelectItem,
   SelectItemText,
   SelectTrigger,
-  SelectValue,
 } from "./components/ui/select";
 import { Textarea } from "./components/ui/textarea";
 import {
@@ -36,6 +35,7 @@ import {
 } from "./components/ui/tooltip";
 import { criticMarkdownHasReviewRail } from "./critic-markup";
 import { cn } from "./lib/utils";
+import { toHtml } from "./markdown";
 import {
   type DocumentInteractionMode,
   type DocumentSaveController,
@@ -51,11 +51,12 @@ type ReviewHandoffState =
   | "notified"
   | "undelivered"
   | "error";
+type FileCopyAction = "path" | "filename" | "markdown" | "rich-text";
 
 const documentInteractionModeOptions = [
-  { value: "editing", label: "editing", Icon: PencilLine },
-  { value: "suggesting", label: "suggesting", Icon: MessageSquarePlus },
-  { value: "viewing", label: "viewing", Icon: Eye },
+  { value: "editing", label: "Editing", Icon: PencilLine },
+  { value: "suggesting", label: "Suggesting", Icon: MessageSquarePlus },
+  { value: "viewing", label: "Viewing", Icon: Eye },
 ] satisfies {
   value: DocumentInteractionMode;
   label: string;
@@ -82,6 +83,38 @@ const conflictNoticeCopy: Record<
     body: "Keep editing locally, then reload from disk to discard your draft or overwrite the disk file when you are ready.",
   },
 };
+
+const fileCopyMenuOptions = [
+  { action: "path", label: "Copy path" },
+  { action: "filename", label: "Copy filename" },
+  { action: "markdown", label: "Copy markdown" },
+  { action: "rich-text", label: "Copy rich text" },
+] satisfies {
+  action: FileCopyAction;
+  label: string;
+}[];
+
+async function writePlainTextToClipboard(text: string) {
+  await navigator.clipboard.writeText(text);
+}
+
+async function writeRichTextToClipboard(markdown: string) {
+  const clipboardWithRichText = navigator.clipboard as Clipboard & {
+    write?: Clipboard["write"];
+  };
+
+  if (clipboardWithRichText.write && typeof ClipboardItem !== "undefined") {
+    await clipboardWithRichText.write([
+      new ClipboardItem({
+        "text/html": new Blob([toHtml(markdown)], { type: "text/html" }),
+        "text/plain": new Blob([markdown], { type: "text/plain" }),
+      }),
+    ]);
+    return;
+  }
+
+  await writePlainTextToClipboard(markdown);
+}
 
 function getSaveStatusViewModel(
   saveState: DocumentSaveState,
@@ -136,8 +169,8 @@ function getSaveStatusViewModel(
     return {
       label: "Unsaved changes",
       ariaLabel: "Unsaved changes",
-      tone: "warning" as const,
-      Icon: AlertTriangle,
+      tone: "neutral" as const,
+      Icon: Loader2,
     };
   }
 
@@ -165,17 +198,22 @@ export function DocumentSaveStatusIndicator({
       role="status"
       aria-label={saveStatus.ariaLabel}
       className={cn(
-        "inline-flex h-7 max-w-full shrink-0 items-center gap-1.5 px-1 font-mono text-[0.68rem] leading-none text-stone-400 dark:text-stone-500",
+        "inline-flex size-7 shrink-0 items-center justify-center text-stone-400 dark:text-stone-500",
+        saveStatus.tone === "warning" && "text-amber-600 dark:text-amber-400",
+        saveStatus.tone === "danger" && "text-red-600 dark:text-red-400",
       )}
     >
       <SaveStatusIcon
+        data-testid="document-save-status-icon"
         className={cn(
           "size-3.5 shrink-0",
-          saveStatus.label === "Saving" && "animate-spin",
+          (saveStatus.label === "Saving" ||
+            saveStatus.label === "Unsaved changes") &&
+            "animate-spin",
+          saveStatus.label === "Saved" && "document-save-status-saved",
         )}
         aria-hidden="true"
       />
-      <span className="min-w-0 truncate">{saveStatus.label}</span>
     </span>
   );
 }
@@ -189,9 +227,11 @@ export function isReviewHandoffDisabled({
   documentDiskChangeState: DiskChangeState;
   reviewHandoffState: ReviewHandoffState;
 }) {
+  // Transient save states ("saving"/"unsaved") intentionally do NOT disable the
+  // button. Disabling on them dims the whole control on every keystroke while
+  // autosave debounces. Instead the button stays enabled and flushes the
+  // pending save on click, so the agent still receives the latest content.
   return (
-    saveState === "saving" ||
-    saveState === "unsaved" ||
     saveState === "error" ||
     reviewHandoffState !== "idle" ||
     documentDiskChangeState !== "clean"
@@ -245,6 +285,9 @@ export function DocumentWorkspace({
   const [reviewWatcherCount, setReviewWatcherCount] = useState(0);
   const [reviewHandoffPopoverOpen, setReviewHandoffPopoverOpen] =
     useState(false);
+  const [fileCopyMenuOpen, setFileCopyMenuOpen] = useState(false);
+  const [copiedFileAction, setCopiedFileAction] =
+    useState<FileCopyAction | null>(null);
   const [overallComment, setOverallComment] = useState("");
   const sawNoWatcherAfterNotifiedRef = useRef(false);
   const saveControllerRef = useRef<DocumentSaveController | null>(null);
@@ -357,6 +400,13 @@ export function DocumentWorkspace({
 
       setReviewHandoffState("notifying");
       try {
+        // The button stays enabled while autosave is still pending, so make
+        // sure any debounced edits are persisted before handing off.
+        const flushResult = await saveControllerRef.current?.flushSave();
+        if (flushResult && flushResult.status === "error") {
+          throw flushResult.error;
+        }
+
         const result = await onCompleteReview(options);
         if (result.delivered) {
           setReviewWatcherCount(0);
@@ -375,6 +425,36 @@ export function DocumentWorkspace({
       }
     },
     [activeDocumentPath, onCompleteReview, reviewHandoffState],
+  );
+
+  const handleCopyFileMenuAction = useCallback(
+    async (action: FileCopyAction) => {
+      if (!documentPage) return;
+
+      const copyTextByAction: Record<
+        Exclude<FileCopyAction, "rich-text">,
+        string
+      > = {
+        path: activeDocumentPath ?? documentFilenameLabel,
+        filename: documentFilenameLabel,
+        markdown: documentPage.content,
+      };
+
+      try {
+        if (action === "rich-text") {
+          await writeRichTextToClipboard(documentPage.content);
+        } else {
+          await writePlainTextToClipboard(copyTextByAction[action]);
+        }
+
+        setCopiedFileAction(action);
+        window.setTimeout(() => setCopiedFileAction(null), 1400);
+        setFileCopyMenuOpen(false);
+      } catch (error) {
+        console.error("Failed to copy document data:", error);
+      }
+    },
+    [activeDocumentPath, documentFilenameLabel, documentPage],
   );
 
   const editorViewModeToggleLabel =
@@ -448,7 +528,7 @@ export function DocumentWorkspace({
               open={reviewHandoffPopoverOpen}
               onOpenChange={setReviewHandoffPopoverOpen}
             >
-              <div className="relative flex items-center overflow-hidden rounded-[7px] shadow-[0_10px_28px_rgba(0,0,0,0.18)] after:pointer-events-none after:absolute after:top-px after:right-8 after:bottom-px after:z-10 after:w-px after:bg-slate-700 after:content-[''] dark:after:bg-slate-700">
+              <div className="relative flex items-center overflow-hidden rounded-[7px] shadow-[0_10px_28px_rgba(0,0,0,0.18)] after:pointer-events-none after:absolute after:top-px after:right-8 after:bottom-px after:z-10 after:w-px after:bg-[#444] after:content-[''] dark:after:bg-[#444]">
                 <Button
                   type="button"
                   data-testid="review-handoff-button"
@@ -511,22 +591,18 @@ export function DocumentWorkspace({
                     }}
                   >
                     <div>
-                      <label
-                        htmlFor="review-handoff-overall-comment"
-                        className="text-sm font-semibold text-stone-950 dark:text-slate-50"
-                      >
-                        Overall comment
-                      </label>
                       <Textarea
                         id="review-handoff-overall-comment"
                         data-testid="review-handoff-overall-comment"
+                        aria-label="Overall comment"
+                        placeholder="Overall comment"
                         value={overallComment}
                         onChange={(event) =>
                           setOverallComment(event.currentTarget.value)
                         }
                         maxLength={4000}
                         rows={4}
-                        className="mt-2 min-h-24 resize-y"
+                        className="min-h-24 resize-y"
                       />
                     </div>
                     <Button
@@ -566,12 +642,6 @@ export function DocumentWorkspace({
             </Popover>
           ) : null}
         </div>
-        {documentPage ? (
-          <DocumentSaveStatusIndicator
-            saveState={saveState}
-            diskChangeState={documentDiskChangeState}
-          />
-        ) : null}
       </div>
       {conflictNotice ? (
         <div
@@ -651,10 +721,10 @@ export function DocumentWorkspace({
                       <button
                         type="button"
                         data-testid="document-editor-view-toggle"
-                        className="grid h-[1.25rem] shrink-0 grid-cols-2 rounded-[999px] bg-[#DED8CE] dark:bg-slate-700 px-[2px] py-[2px] shadow-[inset_0_1px_0_rgba(255,251,245,0.72)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+                        className="grid shrink-0 grid-cols-2 rounded-[999px] bg-[#E8E3DB] dark:bg-slate-700 px-[2px] pt-[3px] pb-[2px] shadow-[inset_0_1px_0_rgba(255,251,245,0.72)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
                       >
                         <span
-                          className={`flex h-[1rem] w-[1.375rem] items-center justify-center rounded-full transition ${
+                          className={`flex w-[1.375rem] items-center justify-center rounded-full py-[2px] transition ${
                             documentEditorViewMode === "rich-text"
                               ? "bg-[#FFFDFC] dark:bg-slate-500 text-stone-700 dark:text-white shadow-[0_1px_2px_rgba(41,37,36,0.12)]"
                               : "text-stone-500 dark:text-slate-400"
@@ -663,7 +733,7 @@ export function DocumentWorkspace({
                           <Eye className="size-[0.75rem]" />
                         </span>
                         <span
-                          className={`flex h-[1rem] w-[1.375rem] items-center justify-center rounded-full transition ${
+                          className={`flex w-[1.375rem] items-center justify-center rounded-full py-[2px] transition ${
                             documentEditorViewMode === "code"
                               ? "bg-[#FFFDFC] dark:bg-slate-500 text-stone-700 dark:text-white shadow-[0_1px_2px_rgba(41,37,36,0.12)]"
                               : "text-stone-500 dark:text-slate-400"
@@ -684,12 +754,57 @@ export function DocumentWorkspace({
                   />
                   <TooltipContent>{editorViewModeToggleLabel}</TooltipContent>
                 </Tooltip>
-                <div
-                  className="min-w-0 truncate font-mono text-[0.7rem] tracking-[0.01em] text-stone-400 dark:text-stone-500"
-                  title={documentFilenameLabel}
+                <Popover
+                  open={fileCopyMenuOpen}
+                  onOpenChange={setFileCopyMenuOpen}
                 >
-                  {documentFilenameLabel}
-                </div>
+                  <PopoverTrigger
+                    render={
+                      <button
+                        type="button"
+                        data-testid="document-file-menu-trigger"
+                        className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full px-1 py-0.5 font-mono text-[0.7rem] tracking-[0.01em] text-stone-400 outline-none transition hover:bg-[#EEE9E1] hover:text-stone-600 focus-visible:ring-2 focus-visible:ring-stone-300/70 dark:text-stone-500 dark:hover:bg-slate-800 dark:hover:text-stone-300 dark:focus-visible:ring-slate-600/70"
+                        title={documentFilenameLabel}
+                        aria-label="Document file actions"
+                      >
+                        <span className="min-w-0 truncate">
+                          {documentFilenameLabel}
+                        </span>
+                        <ChevronDown
+                          className="size-[0.62rem] shrink-0"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    }
+                  />
+                  <PopoverContent
+                    aria-label="Document file actions"
+                    data-testid="document-file-menu"
+                    className="w-44 p-1"
+                    align="start"
+                  >
+                    <div className="flex flex-col">
+                      {fileCopyMenuOptions.map(({ action, label }) => (
+                        <button
+                          key={action}
+                          type="button"
+                          data-testid={`document-file-menu-${action}`}
+                          className="flex h-8 items-center justify-between rounded-md px-2 text-left text-[0.72rem] leading-none text-stone-700 outline-none transition hover:bg-[#EEE9E1] focus-visible:bg-[#EEE9E1] dark:text-stone-300 dark:hover:bg-slate-700 dark:focus-visible:bg-slate-700"
+                          onClick={() => void handleCopyFileMenuAction(action)}
+                        >
+                          <span>{label}</span>
+                          {copiedFileAction === action ? (
+                            <Check className="size-3 text-stone-500 dark:text-stone-400" />
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                <DocumentSaveStatusIndicator
+                  saveState={saveState}
+                  diskChangeState={documentDiskChangeState}
+                />
                 <div className="ml-auto inline-flex h-[1.25rem] shrink-0 items-center">
                   <Select<DocumentInteractionMode>
                     value={documentInteractionMode}
@@ -703,7 +818,9 @@ export function DocumentWorkspace({
                       className="h-[1.5rem] px-1 font-mono text-[0.7rem] leading-[1.25rem] font-normal tracking-[0.01em] text-stone-400 dark:text-stone-500 hover:text-stone-500 dark:hover:text-stone-400"
                     >
                       <ActiveDocumentInteractionModeIcon className="size-[0.68rem]" />
-                      <SelectValue />
+                      <span className="truncate">
+                        {activeDocumentInteractionMode?.label}
+                      </span>
                     </SelectTrigger>
                     <SelectContent>
                       {documentInteractionModeOptions.map(

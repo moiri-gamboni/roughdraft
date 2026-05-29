@@ -34,7 +34,8 @@ test.describe("in-memory preview", () => {
     await page.goto("/preview");
 
     await expect(page.getByTestId("review-handoff-button")).toHaveCount(0);
-    await expect(page.getByTestId("document-save-status")).toContainText(
+    await expect(page.getByTestId("document-save-status")).toHaveAttribute(
+      "aria-label",
       "Saved",
     );
 

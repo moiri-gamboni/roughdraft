@@ -116,15 +116,15 @@ suggestions:
 | Document | Editing mode | Open mode menu and choose Editing | `document-mode-trigger` | Normal edit behavior. |
 | Document | Suggesting mode | Open mode menu and choose Suggesting | `document-mode-trigger` | Selection actions should create suggestions instead of direct edits. |
 | Document | Viewing mode | Open mode menu and choose Viewing | `document-mode-trigger` | Editing controls should look non-editable. |
-| Document | Save status: saved | Any clean document after autosave | `document-save-status` | Label should be `Saved`. |
-| Document | Save status: unsaved | Type in a local document before save completes | `document-save-status` | Transient; often easier with save throttling or network mocking. |
-| Document | Save status: saving | Type and capture during autosave | `document-save-status` | Transient; easiest with mocked delayed save. |
-| Document | Save status: failed | Force save error | `document-save-status` | Use backend/API mocking or a component harness. |
+| Document | Save status: saved | Any clean document after autosave | `document-save-status` | Checkmark should sit next to the filename and fade out over 2 seconds; accessible label remains `Saved`. |
+| Document | Save status: unsaved | Type in a local document before save completes | `document-save-status` | Spinner-only pending state; accessible label is `Unsaved changes`. Transient; often easier with save throttling or network mocking. |
+| Document | Save status: saving | Type and capture during autosave | `document-save-status` | Spinner-only pending state; accessible label is `Saving`. Transient; easiest with mocked delayed save. |
+| Document | Save status: failed | Force save error | `document-save-status` | Icon-only error state; accessible label is `Save failed`. Use backend/API mocking or a component harness. |
 | Document | Disk changed | Open local file, modify file externally while browser content is clean | `file-conflict-notice`, `file-conflict-action-reload`, `file-conflict-action-overwrite` | Banner title: `File changed on disk`. |
 | Document | Save conflict | Edit in browser, then modify file externally before autosave resolves | `file-conflict-notice`, `file-conflict-action-keep-editing` | Banner title: `Save conflict`; autosave pauses. |
 | Document | Autosave paused | Keep editing after conflict | `file-conflict-notice`, `file-conflict-action-overwrite` | Banner title: `Autosave paused`; no keep-editing action. |
 | Document | Review handoff idle | Open a local file while a watcher is connected | `review-handoff-button` | Header text: `Agent watching`. |
-| Document | Review handoff comment popover | Open a local file while a watcher is connected, then click the handoff dropdown trigger | `review-handoff-comment-trigger`, `review-handoff-comment-popover`, `review-handoff-overall-comment` | Capture the split handoff control and textarea before submission. |
+| Document | Review handoff comment popover | Open a local file while a watcher is connected, then click the handoff dropdown trigger | `review-handoff-comment-trigger`, `review-handoff-comment-popover`, `review-handoff-overall-comment` | Capture the split handoff control and textarea with `Overall comment` placeholder before submission. |
 | Document | Review handoff sending | Click handoff button while watcher is connected | `review-handoff-button` | Button label: `Sending`. |
 | Document | Review handoff sent | Successful handoff | `review-handoff-status` | Popover title: `Your agent is now working`. |
 | Document | Review handoff undelivered | Watcher disconnects before handoff | `review-handoff-status` | Popover title: `No agent is watching now`. |

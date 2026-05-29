@@ -96,6 +96,44 @@ test.describe("CriticMarkup review flows", () => {
     });
   });
 
+  test("shows tooltips for selection menu formatting actions", async ({
+    page,
+  }) => {
+    const filePath = writeProjectFile(
+      projectDir,
+      "selection-tooltips.md",
+      [
+        "# Selection Tooltips",
+        "",
+        "This paragraph has target text to review.",
+        "",
+      ].join("\n"),
+    );
+
+    await openMarkdownFile(page, filePath);
+    await selectRichText(page, "target text");
+
+    await page.getByTestId("selection-menu-action-bold").hover();
+    await expect(page.getByTestId("selection-menu-action-tooltip")).toHaveText(
+      "Bold",
+    );
+
+    await expect(
+      page.getByTestId("selection-menu-action-suggest-insertion"),
+    ).toHaveCount(0);
+    await expect(
+      page.getByTestId("selection-menu-action-suggest-deletion"),
+    ).toHaveCount(0);
+    await expect(
+      page.getByTestId("selection-menu-action-suggest-replacement"),
+    ).toHaveCount(0);
+
+    await page.getByTestId("selection-menu-action-comment").hover();
+    await expect(page.getByTestId("selection-menu-action-tooltip")).toHaveCount(
+      0,
+    );
+  });
+
   test("accepts and rejects suggested changes on disk @smoke", async ({
     page,
   }) => {
