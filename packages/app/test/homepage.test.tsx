@@ -173,7 +173,7 @@ describe("Homepage", () => {
     expect(homepageHeading?.parentElement?.className).toContain("mt-20");
     expect(homepageHeading?.parentElement?.className).toContain("sm:mt-28");
     expect(homepageTextWrapper?.className).toContain("text-left");
-    expect(homepageTextWrapper?.className).toContain("max-w-[100rem]");
+    expect(homepageTextWrapper?.className).toContain("max-w-[1500px]");
     expect(homepageTextWrapper?.className).not.toContain("font-bold");
     expect(homepageHeading?.className).not.toContain("max-w-");
     expect(homepageHeading?.className).toContain("text-[clamp(");
@@ -182,11 +182,21 @@ describe("Homepage", () => {
     );
     expect(homepageHeading?.className).toContain("leading-[0.88]");
     expect(homepageHeading?.className).not.toContain("text-balance");
+    expect(homepageHeading?.nextElementSibling?.className).toContain("mt-7");
+    expect(homepageHeading?.nextElementSibling?.className).not.toContain(
+      "mt-5",
+    );
     expect(homepageHeading?.nextElementSibling?.className).toContain(
-      "text-[clamp(",
+      "text-[clamp(1.125rem,0.85rem+0.8vw,1.5rem)]",
     );
     expect(homepageHeading?.nextElementSibling?.className).toContain(
       "leading-none",
+    );
+    expect(homepageHeading?.nextElementSibling?.className).toContain(
+      "font-sans",
+    );
+    expect(homepageHeading?.nextElementSibling?.className).toContain(
+      "font-medium",
     );
     expect(homepageHeading?.nextElementSibling?.className).toContain(
       "max-w-5xl",
@@ -297,7 +307,7 @@ describe("Homepage", () => {
     expect(
       getByTestId(container, "homepage-sneak-peek-image").parentElement
         ?.className,
-    ).toContain("max-w-[100rem]");
+    ).toContain("max-w-[1500px]");
     expect(document.body.textContent).not.toContain(AGENT_SETUP_PROMPT);
 
     const cta = getByTestId<HTMLButtonElement>(
@@ -344,6 +354,19 @@ describe("Homepage", () => {
       "Give this to your coding agent",
     );
     expect(document.body.textContent).toContain(AGENT_SETUP_PROMPT);
+    const dialogContent = document.body.querySelector(
+      '[data-slot="dialog-content"]',
+    );
+    const dialogOverlay = document.body.querySelector(
+      '[data-slot="dialog-overlay"]',
+    );
+    expect(dialogContent?.getAttribute("data-open")).toBe("");
+    expect(dialogContent?.className).toContain("data-open:animate-in");
+    expect(dialogContent?.className).toContain("data-open:fade-in-0");
+    expect(dialogContent?.className).toContain("data-open:zoom-in-95");
+    expect(dialogOverlay?.getAttribute("data-open")).toBe("");
+    expect(dialogOverlay?.className).toContain("data-open:animate-in");
+    expect(dialogOverlay?.className).toContain("data-open:fade-in-0");
 
     const copyButton = getByTestId<HTMLButtonElement>(
       document.body,
@@ -483,6 +506,21 @@ describe("Homepage", () => {
       expect(sceneNodes[index]?.textContent).toContain(String(index + 1));
       expect(sceneNodes[index]?.textContent).toContain(scene);
     });
+
+    const firstSceneDescription = getByTestId(
+      sceneNodes[0],
+      "homepage-workflow-scene-description",
+    );
+    expect(firstSceneDescription?.textContent).toContain(
+      "Start in the same agent chat you already use.",
+    );
+    expect(firstSceneDescription?.className).toContain("font-sans");
+    expect(firstSceneDescription?.className).toContain(
+      "text-[clamp(1rem,0.95rem+0.25vw,1.125rem)]",
+    );
+    expect(firstSceneDescription?.className).toContain("leading-7");
+    expect(firstSceneDescription?.className).toContain("font-medium");
+    expect(firstSceneDescription?.className).toContain("text-slate-950");
 
     expect(storyboard.textContent).toContain(
       "Let's make the homepage more persuasive. Write a plan first.",
