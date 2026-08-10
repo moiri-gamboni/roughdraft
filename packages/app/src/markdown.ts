@@ -336,12 +336,21 @@ export function createMarkedRenderer(options?: MarkdownOptions) {
       !title && raw?.startsWith("<") && raw.endsWith(">")
         ? ' data-markdown-autolink="true"'
         : "";
+    // GFM linkifies bare URLs and email addresses that the author never marked
+    // up at all. Record that, so serializing can put the plain text back rather
+    // than inventing a link -- otherwise prose containing
+    // `mailto:someone@example.com` is rewritten to
+    // `mailto:[someone@example.com](mailto:someone@example.com)`.
+    const bareAutolinkAttr =
+      !title && raw !== undefined && raw === text
+        ? ' data-markdown-bare-autolink="true"'
+        : "";
     const externalAttr =
       isExternalUrl(rawHref) && !rawHref.startsWith("mailto:")
         ? ' target="_blank" rel="noreferrer noopener"'
         : "";
 
-    return `<a href="${escapeHtml(renderedHref)}"${titleAttr}${markdownSrcAttr}${autolinkAttr}${externalAttr}>${text}</a>`;
+    return `<a href="${escapeHtml(renderedHref)}"${titleAttr}${markdownSrcAttr}${autolinkAttr}${bareAutolinkAttr}${externalAttr}>${text}</a>`;
   };
 
   renderer.image = ({ href, title, text }) => {
@@ -396,6 +405,24 @@ export function createTurndownService(): TurndownService {
 
   service.use(tables as Parameters<TurndownService["use"]>[0]);
   service.use(taskListItems as Parameters<TurndownService["use"]>[0]);
+
+  // The task-list renderer wraps an item's content in a <div> so the editor can
+  // hold a block there. Turndown has no rule for <div>, so the default block
+  // handling wraps it in blank lines, and compactListItem then indents them:
+  // `- [ ] x` comes back as `- [ ]\n  \n  x\n`. Serialize it inline instead.
+  service.addRule("taskItemContent", {
+    filter(node) {
+      const parent = node.parentNode as HTMLElement | null;
+      return (
+        node.nodeName === "DIV" &&
+        parent?.nodeName === "LI" &&
+        parent.getAttribute("data-type") === "taskItem"
+      );
+    },
+    replacement(content) {
+      return content.trim();
+    },
+  });
 
   service.addRule("compactListItem", {
     filter: "li",
@@ -469,6 +496,13 @@ export function createTurndownService(): TurndownService {
       const titleMarkdown = title
         ? ` "${title.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
         : "";
+
+      if (
+        element.getAttribute("data-markdown-bare-autolink") === "true" &&
+        !titleMarkdown
+      ) {
+        return content;
+      }
 
       if (
         element.getAttribute("data-markdown-autolink") === "true" &&
