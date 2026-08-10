@@ -705,6 +705,20 @@ const MarkdownLink = Link.extend({
             ? { "data-markdown-autolink": attributes.dataMarkdownAutolink }
             : {},
       },
+      // Must be declared here or the editor drops it, and a link GFM invented
+      // from bare text would be serialized back as an explicit link.
+      dataMarkdownBareAutolink: {
+        default: null,
+        parseHTML: (element) =>
+          element.getAttribute("data-markdown-bare-autolink"),
+        renderHTML: (attributes) =>
+          attributes.dataMarkdownBareAutolink
+            ? {
+                "data-markdown-bare-autolink":
+                  attributes.dataMarkdownBareAutolink,
+              }
+            : {},
+      },
     };
   },
 });
@@ -767,8 +781,48 @@ const RawMarkdownBlock = Node.create({
   },
 });
 
+/**
+ * Carry the author's heading spacing through the editor.
+ *
+ * Heading comes from StarterKit, and an attribute the schema does not declare
+ * is dropped on the way through — which would lose the record of whether the
+ * source had blank lines around its headings, and every save would re-space
+ * them. A global attribute adds this without replacing the node.
+ */
+const HeadingSpacing = Extension.create({
+  name: "headingSpacing",
+  addGlobalAttributes() {
+    return [
+      {
+        types: ["heading"],
+        attributes: {
+          dataMdCompactBefore: {
+            default: null,
+            parseHTML: (element: HTMLElement) =>
+              element.getAttribute("data-md-compact-before"),
+            renderHTML: (attributes: Record<string, unknown>) =>
+              attributes.dataMdCompactBefore
+                ? { "data-md-compact-before": attributes.dataMdCompactBefore }
+                : {},
+          },
+          dataMdCompactAfter: {
+            default: null,
+            parseHTML: (element: HTMLElement) =>
+              element.getAttribute("data-md-compact-after"),
+            renderHTML: (attributes: Record<string, unknown>) =>
+              attributes.dataMdCompactAfter
+                ? { "data-md-compact-after": attributes.dataMdCompactAfter }
+                : {},
+          },
+        },
+      },
+    ];
+  },
+});
+
 export function createEditorExtensions(placeholder: string) {
   return [
+    HeadingSpacing,
     StarterKit.configure({
       heading: {
         levels: [1, 2, 3],

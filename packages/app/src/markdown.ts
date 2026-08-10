@@ -363,6 +363,22 @@ export function createMarkedRenderer(options?: MarkdownOptions) {
     return `<img src="${escapeHtml(renderedHref)}" alt="${escapeHtml(alt)}"${titleAttr}${markdownSrcAttr}>`;
   };
 
+  renderer.heading = function (token) {
+    const spacing = token as unknown as {
+      compactBefore?: boolean;
+      compactAfter?: boolean;
+    };
+    const before = spacing.compactBefore
+      ? ` ${headingSpacing.compactBeforeAttribute}="true"`
+      : "";
+    const after = spacing.compactAfter
+      ? ` ${headingSpacing.compactAfterAttribute}="true"`
+      : "";
+    const text = this.parser.parseInline(token.tokens);
+
+    return `<h${token.depth}${before}${after}>${text}</h${token.depth}>\n`;
+  };
+
   renderer.list = function (token) {
     const hasTaskItems = token.items.some((item) => item.task);
     if (!hasTaskItems) {
@@ -424,13 +440,37 @@ export function createTurndownService(): TurndownService {
     },
   });
 
+  // Replay the author's heading spacing. The markers are stripped in
+  // applyHeadingSpacing once Turndown has finished joining blocks.
+  service.addRule("markdownAwareHeading", {
+    filter: ["h1", "h2", "h3", "h4", "h5", "h6"],
+    replacement(content, node) {
+      const element = node as HTMLElement;
+      const level = Number(element.nodeName.charAt(1));
+      const before =
+        element.getAttribute(headingSpacing.compactBeforeAttribute) === "true"
+          ? headingSpacing.compactBeforeMarker
+          : "";
+      const after =
+        element.getAttribute(headingSpacing.compactAfterAttribute) === "true"
+          ? headingSpacing.compactAfterMarker
+          : "";
+
+      return `\n\n${before}${"#".repeat(level)} ${content}${after}\n\n`;
+    },
+  });
+
   service.addRule("compactListItem", {
     filter: "li",
     replacement(content, node, options) {
       const trimmed = content
         .replace(/^\n+/, "")
         .replace(/\n+$/, "\n")
-        .replace(/\n/gm, "\n  ");
+        .replace(/\n/gm, "\n  ")
+        // Indenting every line also indents the empty ones, leaving "  " on a
+        // line that should be blank. Invisible, but it is a diff on a file the
+        // author only opened.
+        .replace(/\n[ \t]+(?=\n|$)/g, "\n");
 
       let prefix = `${options.bulletListMarker} `;
       const parent = node.parentNode;
@@ -563,28 +603,105 @@ export function createTurndownService(): TurndownService {
 
 const turndown = createTurndownService();
 
+/*
+ * Heading spacing.
+ *
+ * Turndown treats a heading as a block and always separates it with a blank
+ * line, so a compact source would gain blank lines on every save. The author's
+ * choice is therefore recorded per heading on the way in and replayed on the
+ * way out, rather than normalized to one style for everyone.
+ *
+ * Marked reports the two sides differently: a blank line *before* a heading is
+ * its own `space` token, while a blank line *after* one is folded into the
+ * heading token's own `raw`.
+ */
+const COMPACT_BEFORE_MARKER = " rd-compact-before ";
+const COMPACT_AFTER_MARKER = " rd-compact-after ";
+
+export const headingSpacing = {
+  compactBeforeAttribute: "data-md-compact-before",
+  compactAfterAttribute: "data-md-compact-after",
+  compactBeforeMarker: COMPACT_BEFORE_MARKER,
+  compactAfterMarker: COMPACT_AFTER_MARKER,
+};
+
+interface SpacingAnnotatedToken {
+  type: string;
+  raw: string;
+  compactBefore?: boolean;
+  compactAfter?: boolean;
+}
+
+export function annotateHeadingSpacing(tokens: unknown[]): void {
+  const list = tokens as SpacingAnnotatedToken[];
+
+  list.forEach((token, index) => {
+    if (token.type !== "heading") return;
+
+    const previous = list[index - 1];
+    // Nothing precedes the first block, so it cannot have lost a blank line.
+    token.compactBefore =
+      previous !== undefined && previous.type !== "space" ? true : undefined;
+    token.compactAfter = /\n\n$/.test(token.raw ?? "") ? undefined : true;
+  });
+}
+
 /**
- * Collapse runs of 3+ newlines to 2 and remove the blank line that
- * Turndown inserts before/after ATX headings.  This keeps block
- * separation where it matters (between consecutive paragraphs) while
- * producing a more compact output that round-trips with fewer
- * gratuitous whitespace changes.
+ * Annotate headings wherever markdown is parsed. Both this module and the
+ * CriticMarkup parser call marked separately, so hanging the annotation off a
+ * hook keeps them from drifting apart.
+ */
+export const headingSpacingHooks = {
+  processAllTokens(tokens: unknown[]) {
+    annotateHeadingSpacing(tokens);
+    return tokens;
+  },
+} as unknown as NonNullable<Parameters<typeof marked.parse>[1]>["hooks"];
+
+function applyHeadingSpacing(md: string): string {
+  return md
+    .replace(new RegExp(`\\n{2,}${COMPACT_BEFORE_MARKER}`, "g"), "\n")
+    .replace(new RegExp(`${COMPACT_AFTER_MARKER}\\n{2,}`, "g"), "\n")
+    .replaceAll(COMPACT_BEFORE_MARKER, "")
+    .replaceAll(COMPACT_AFTER_MARKER, "");
+}
+
+/**
+ * Collapse runs of 3+ newlines to 2.
+ *
+ * This used to also strip the blank line before and after every ATX heading,
+ * because Turndown always emits one and a compact source would otherwise gain
+ * blank lines on save. But it stripped them unconditionally, so a source that
+ * *had* blank lines around its headings lost them — a whole-document diff for
+ * a file the author only opened. Heading spacing is now carried through the
+ * round trip per heading (see `headingSpacing` markers), so nothing here has
+ * to guess.
  */
 export function normalizeBlockSpacing(md: string): string {
-  let normalized = md.replace(/\n{3,}/g, "\n\n");
-  // Remove blank line immediately before a heading.
-  normalized = normalized.replace(/\n\n(#{1,6} )/g, "\n$1");
-  // Remove blank line immediately after a heading line.
-  normalized = normalized.replace(/(^#{1,6} [^\n]+)\n\n/gm, "$1\n");
-  return normalized;
+  // Deliberately does nothing to blank runs. Collapsing 3+ newlines removed
+  // blank lines the author wrote, which is a diff on a file they only opened.
+  // Turndown's own extra newlines are handled where they are produced.
+  return md;
+}
+
+/**
+ * Final pass for anything Turndown produced. Both this module and the
+ * CriticMarkup serializer must run it: it is what strips the heading-spacing
+ * markers, so skipping it leaks them into the saved file as literal text.
+ */
+export function finalizeMarkdown(serialized: string): string {
+  return `${applyHeadingSpacing(normalizeBlockSpacing(serialized)).trimEnd()}\n`;
 }
 
 export function toMarkdown(html: string): string {
-  return normalizeBlockSpacing(`${turndown.turndown(html).trimEnd()}\n`);
+  return finalizeMarkdown(turndown.turndown(html));
 }
 
 export function toHtml(markdown: string, options?: MarkdownOptions): string {
-  return marked.parse(markdown, {
+  const tokens = marked.lexer(markdown, { gfm: true });
+  annotateHeadingSpacing(tokens);
+
+  return marked.parser(tokens, {
     async: false,
     gfm: true,
     renderer: createMarkedRenderer(options),
