@@ -798,7 +798,10 @@ const RawMarkdownBlock = Node.create({
 const SourceProvenance = Extension.create({
   name: "sourceProvenance",
   addGlobalAttributes() {
-    const attribute = { default: null, rendered: false };
+    // keepOnSplit is false because splitting a block with Enter copies its
+    // attributes to the new half, which would hand a freshly typed block
+    // provenance describing text it never contained.
+    const attribute = { default: null, rendered: false, keepOnSplit: false };
 
     return [
       {
