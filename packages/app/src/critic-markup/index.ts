@@ -1453,7 +1453,7 @@ function attachSourceProvenance(doc: JSONContent, sources: string[]): void {
 
   blocks.forEach((node, index) => {
     const source = sources[index];
-    if (source === undefined || REVIEW_MARKUP.test(source)) return;
+    if (source === undefined) return;
 
     // Raw blocks were substituted into the parsed text as a placeholder div, so
     // the recorded "source" is that placeholder rather than the author's
@@ -1477,11 +1477,19 @@ function attachSourceProvenance(doc: JSONContent, sources: string[]): void {
       resolved = `${leading}${decodeRawMarkdownBlock(encoded)}${trailing}`;
     }
 
+    // The source is recorded for every block, because even a block whose text
+    // will be rewritten still tells us the blank lines around it. The hash is
+    // what licenses reusing the text itself, and review markup never gets one:
+    // comments are added and resolved through the UI and older metadata is
+    // migrated on save, all of which reusing the original text would suppress.
     node.attrs = {
       ...node.attrs,
       [SOURCE_TEXT_ATTRIBUTE]: resolved,
-      [SOURCE_HASH_ATTRIBUTE]: hashSourceNode(node),
     };
+
+    if (!REVIEW_MARKUP.test(resolved)) {
+      node.attrs[SOURCE_HASH_ATTRIBUTE] = hashSourceNode(node);
+    }
   });
 }
 
@@ -1565,38 +1573,87 @@ function collectCriticChangesFromDoc(
  * matches the node it produced. A document nobody edited therefore comes back
  * byte for byte, because no serializer runs over any of it.
  */
+function isTrailingEmptyParagraph(
+  node: JSONContent,
+  index: number,
+  blocks: JSONContent[],
+): boolean {
+  // The editor keeps an empty paragraph after the last block so the cursor can
+  // sit past it. It is the editor's, not the author's, and markdown has no way
+  // to express it, so it neither needs preserving nor counts as a change.
+  return (
+    index === blocks.length - 1 &&
+    node.type === "paragraph" &&
+    (node.content?.length ?? 0) === 0
+  );
+}
+
+/** The block's markdown with the surrounding blank lines stripped off. */
+function serializeBlock(node: JSONContent, service: TurndownService): string {
+  const html = generateHTML({ type: "doc", content: [node] }, extensions);
+  return finalizeMarkdown(service.turndown(html)).trim();
+}
+
 function serializeBody(
   doc: JSONContent,
   html: string,
   service: TurndownService,
 ): string {
-  const blocks = doc.content ?? [];
+  const blocks = (doc.content ?? []).filter(
+    (node, index, all) => !isTrailingEmptyParagraph(node, index, all),
+  );
 
-  // Only when *nothing* changed. That is the case this exists for: a document
-  // opened, read, and saved should come back byte for byte. As soon as one
-  // block differs the whole body goes through the serializer as before, so
-  // editing behaves exactly as it always has and mixing preserved source with
-  // freshly serialized blocks never has to be reconciled.
-  const preserved: string[] = [];
-  for (const [index, node] of blocks.entries()) {
-    // The editor keeps an empty paragraph at the end so the cursor can sit past
-    // the last block. It is the editor's, not the author's, and markdown has no
-    // way to express it, so it neither needs preserving nor counts as a change.
-    const isTrailingEmptyParagraph =
-      index === blocks.length - 1 &&
-      node.type === "paragraph" &&
-      (node.content?.length ?? 0) === 0;
-    if (isTrailingEmptyParagraph) continue;
+  // No provenance at all (an older document, or block counts that never lined
+  // up): serialize the whole body as before rather than guessing.
+  const hasProvenance = blocks.some(
+    (node) => typeof node.attrs?.[SOURCE_TEXT_ATTRIBUTE] === "string",
+  );
+  if (!hasProvenance) return finalizeMarkdown(service.turndown(html));
 
-    const source = unchangedSource(node);
-    if (source === null) return finalizeMarkdown(service.turndown(html));
+  let body = "";
+  // Splitting a block copies its attributes to the new half, so a freshly typed
+  // block can arrive carrying provenance describing text it never held. Source
+  // belongs to whichever block reaches it first; later claimants are new.
+  const claimed = new Set<string>();
 
-    preserved.push(source);
+  for (const node of blocks) {
+    const recordedText = node.attrs?.[SOURCE_TEXT_ATTRIBUTE];
+    const isDuplicate =
+      typeof recordedText === "string" && claimed.has(recordedText);
+    if (typeof recordedText === "string" && !isDuplicate) {
+      claimed.add(recordedText);
+    }
+
+    const unchanged = isDuplicate ? null : unchangedSource(node);
+    if (unchanged !== null) {
+      body += unchanged;
+      continue;
+    }
+
+    const serialized = serializeBlock(node, service);
+    if (!serialized) continue;
+
+    // Editing a block's text does not move the blank lines around it, so its
+    // recorded source still describes its spacing even though its content is
+    // stale. Reusing those keeps an edit to one block from reflowing the rest.
+    const recorded = isDuplicate ? undefined : recordedText;
+    if (typeof recorded === "string") {
+      // Taken exactly as recorded, including when one side is empty: marked
+      // puts the separator between two blocks on one side or the other, never
+      // both, so inventing a newline for the empty side doubles it.
+      const before = recorded.match(/^[\r\n]*/)?.[0] ?? "";
+      const after = recorded.match(/[\r\n]*$/)?.[0] ?? "";
+      body += `${before}${serialized}${after}`;
+      continue;
+    }
+
+    // Newly typed: nothing recorded its spacing, so separate it as a block.
+    const separator =
+      body === "" || /\n\n$/.test(body) ? "" : /\n$/.test(body) ? "\n" : "\n\n";
+    body += `${separator}${serialized}\n`;
   }
 
-  if (preserved.length === 0) return finalizeMarkdown(service.turndown(html));
-
-  return `${preserved.join("").replace(/\n+$/, "")}\n`;
+  return `${body.replace(/\n+$/, "")}\n`;
 }
 
 export function editorStateToCriticMarkdown(
