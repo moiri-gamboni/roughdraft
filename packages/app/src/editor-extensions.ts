@@ -789,6 +789,40 @@ const RawMarkdownBlock = Node.create({
  * source had blank lines around its headings, and every save would re-space
  * them. A global attribute adds this without replacing the node.
  */
+/**
+ * Carry each block's original source through the editor so an unchanged block
+ * can be written back verbatim. Declared on the schema because an undeclared
+ * attribute is dropped as the document loads, and rendered as nothing because
+ * these never belong in the HTML the serializer sees.
+ */
+const SourceProvenance = Extension.create({
+  name: "sourceProvenance",
+  addGlobalAttributes() {
+    const attribute = { default: null, rendered: false };
+
+    return [
+      {
+        types: [
+          "paragraph",
+          "heading",
+          "bulletList",
+          "orderedList",
+          "taskList",
+          "blockquote",
+          "codeBlock",
+          "horizontalRule",
+          "table",
+          "rawMarkdownBlock",
+        ],
+        attributes: {
+          dataMdSource: attribute,
+          dataMdSourceHash: attribute,
+        },
+      },
+    ];
+  },
+});
+
 const HeadingSpacing = Extension.create({
   name: "headingSpacing",
   addGlobalAttributes() {
@@ -823,6 +857,7 @@ const HeadingSpacing = Extension.create({
 export function createEditorExtensions(placeholder: string) {
   return [
     HeadingSpacing,
+    SourceProvenance,
     StarterKit.configure({
       heading: {
         levels: [1, 2, 3],
