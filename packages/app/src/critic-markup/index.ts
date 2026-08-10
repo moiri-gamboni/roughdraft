@@ -1578,9 +1578,19 @@ function serializeBody(
   // editing behaves exactly as it always has and mixing preserved source with
   // freshly serialized blocks never has to be reconciled.
   const preserved: string[] = [];
-  for (const node of blocks) {
+  for (const [index, node] of blocks.entries()) {
+    // The editor keeps an empty paragraph at the end so the cursor can sit past
+    // the last block. It is the editor's, not the author's, and markdown has no
+    // way to express it, so it neither needs preserving nor counts as a change.
+    const isTrailingEmptyParagraph =
+      index === blocks.length - 1 &&
+      node.type === "paragraph" &&
+      (node.content?.length ?? 0) === 0;
+    if (isTrailingEmptyParagraph) continue;
+
     const source = unchangedSource(node);
     if (source === null) return finalizeMarkdown(service.turndown(html));
+
     preserved.push(source);
   }
 

@@ -56,11 +56,24 @@ export function topLevelSourceBlocks(tokens: unknown[]): string[] {
 
 /** FNV-1a. Only needs to detect change, not resist collisions. */
 export function hashSourceNode(node: unknown): string {
-  const serialized = JSON.stringify(node, (key, value) =>
-    key === SOURCE_TEXT_ATTRIBUTE || key === SOURCE_HASH_ATTRIBUTE
-      ? undefined
-      : value,
-  );
+  // Key order must not matter: the document is hashed once as parsed and again
+  // as the editor hands it back, and the editor emits attributes in schema
+  // order rather than the order they were created in.
+  const serialized = JSON.stringify(node, (key, value) => {
+    if (key === SOURCE_TEXT_ATTRIBUTE || key === SOURCE_HASH_ATTRIBUTE) {
+      return undefined;
+    }
+
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).sort(
+          ([left], [right]) => (left < right ? -1 : left > right ? 1 : 0),
+        ),
+      );
+    }
+
+    return value;
+  });
 
   let hash = 0x811c9dc5;
   for (let index = 0; index < serialized.length; index += 1) {
