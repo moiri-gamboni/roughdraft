@@ -5,6 +5,72 @@ import { parse as parseYaml } from "yaml";
 
 export const rawMarkdownBlockAttribute = "data-markdown-raw-block";
 
+/*
+ * Source preservation.
+ *
+ * Serializing a document re-derives it from the editor model, so it comes back
+ * in the serializer's conventions rather than the author's. The only way a save
+ * cannot rewrite a file is not to serialize the parts that did not change: each
+ * top-level block carries the exact source text it was parsed from, plus a hash
+ * of the node it produced. If the node still hashes the same on save, its
+ * original bytes are emitted verbatim and no serializer runs on it.
+ *
+ * A block's recorded source includes any blank lines that preceded it, so
+ * concatenating the blocks of an untouched document reproduces it byte for byte.
+ */
+export const SOURCE_TEXT_ATTRIBUTE = "dataMdSource";
+export const SOURCE_HASH_ATTRIBUTE = "dataMdSourceHash";
+
+interface RawToken {
+  type: string;
+  raw: string;
+}
+
+/**
+ * One entry per block that renders, carrying the blank lines that preceded it.
+ * Marked emits blank runs as their own `space` tokens which produce no output,
+ * so they are folded into the following block rather than dropped.
+ */
+export function topLevelSourceBlocks(tokens: unknown[]): string[] {
+  const blocks: string[] = [];
+  let pendingSpace = "";
+
+  for (const token of tokens as RawToken[]) {
+    if (token.type === "space") {
+      pendingSpace += token.raw ?? "";
+      continue;
+    }
+
+    blocks.push(`${pendingSpace}${token.raw ?? ""}`);
+    pendingSpace = "";
+  }
+
+  // Trailing blank lines belong to the last block, or to an empty document.
+  if (pendingSpace) {
+    if (blocks.length === 0) blocks.push(pendingSpace);
+    else blocks[blocks.length - 1] += pendingSpace;
+  }
+
+  return blocks;
+}
+
+/** FNV-1a. Only needs to detect change, not resist collisions. */
+export function hashSourceNode(node: unknown): string {
+  const serialized = JSON.stringify(node, (key, value) =>
+    key === SOURCE_TEXT_ATTRIBUTE || key === SOURCE_HASH_ATTRIBUTE
+      ? undefined
+      : value,
+  );
+
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return (hash >>> 0).toString(36);
+}
+
 export interface MarkdownOptions {
   resolveFileUrl?: (path: string) => string | null;
   resolveLinkUrl?: (path: string) => string | null;

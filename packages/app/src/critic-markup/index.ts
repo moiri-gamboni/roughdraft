@@ -15,10 +15,16 @@ import {
   type CriticChangeKind,
 } from "../editor-extensions";
 import {
+  annotateHeadingSpacing,
   createMarkedRenderer,
   createTurndownService,
+  decodeRawMarkdownBlock,
   finalizeMarkdown,
+  hashSourceNode,
   headingSpacingHooks,
+  SOURCE_HASH_ATTRIBUTE,
+  SOURCE_TEXT_ATTRIBUTE,
+  topLevelSourceBlocks,
   appendYamlEndmatter,
   prependYamlFrontmatter,
   protectRichTextRoundTripMarkdown,
@@ -1429,6 +1435,65 @@ export function criticMarkdownToRenderedHtml(
   return { html, comments, changes, frontmatter, endmatter };
 }
 
+/**
+ * Record, per top-level block, the exact source it came from plus a hash of the
+ * node it produced. Only applied when the block counts line up; when they do
+ * not the document simply serializes the old way rather than risking a mismatch
+ * between a node and someone else's source.
+ */
+// Review markup is the app's to write: comments and suggestions are added,
+// edited and resolved through the UI, and older metadata forms are migrated on
+// save. Blocks carrying any of it are serialized rather than preserved, so
+// preservation covers the author's prose and nothing the app owns.
+const REVIEW_MARKUP = /\{==|\{>>|\{\+\+|\{--|\{~~|\{#|\{@|\{id=|\{\s*id\s*=/;
+
+function attachSourceProvenance(doc: JSONContent, sources: string[]): void {
+  const blocks = doc.content;
+  if (!blocks || blocks.length !== sources.length) return;
+
+  blocks.forEach((node, index) => {
+    const source = sources[index];
+    if (source === undefined || REVIEW_MARKUP.test(source)) return;
+
+    // Raw blocks were substituted into the parsed text as a placeholder div, so
+    // the recorded "source" is that placeholder rather than the author's
+    // markdown. Swap the placeholder back out for what it stands in for, while
+    // keeping the blank lines that preceded it.
+    let resolved = source;
+    if (node.type === "rawMarkdownBlock") {
+      const encoded = node.attrs?.rawMarkdown;
+      if (typeof encoded !== "string" || encoded.length === 0) return;
+
+      const start = source.indexOf("<div");
+      const end = source.indexOf("</div>");
+      if (start < 0 || end < 0) return;
+
+      const leading = source.slice(0, start);
+      // The placeholder contributed one newline of its own; anything past that
+      // is blank lines the author wrote after the block.
+      const trailing = source
+        .slice(end + "</div>".length)
+        .replace(/^\r?\n/, "");
+      resolved = `${leading}${decodeRawMarkdownBlock(encoded)}${trailing}`;
+    }
+
+    node.attrs = {
+      ...node.attrs,
+      [SOURCE_TEXT_ATTRIBUTE]: resolved,
+      [SOURCE_HASH_ATTRIBUTE]: hashSourceNode(node),
+    };
+  });
+}
+
+/** The recorded source, but only while the node still matches it. */
+function unchangedSource(node: JSONContent): string | null {
+  const source = node.attrs?.[SOURCE_TEXT_ATTRIBUTE];
+  const hash = node.attrs?.[SOURCE_HASH_ATTRIBUTE];
+  if (typeof source !== "string" || typeof hash !== "string") return null;
+
+  return hashSourceNode(node) === hash ? source : null;
+}
+
 export function criticMarkdownToEditorState(
   markdown: string,
   options?: MarkdownOptions,
@@ -1441,11 +1506,15 @@ export function criticMarkdownToEditorState(
   const { frontmatter, body, endmatter } = splitYamlDocumentMetadata(markdown);
   const parsedEndmatter = parseReviewEndmatter(endmatter);
   const { parser, comments } = createCriticMarked(options, parsedEndmatter);
-  const html = parser.parse(protectRichTextRoundTripMarkdown(body)) as string;
+  const protectedBody = protectRichTextRoundTripMarkdown(body);
+  const tokens = parser.lexer(protectedBody);
+  annotateHeadingSpacing(tokens);
+  const html = parser.parser(tokens) as string;
   const doc = generateJSON(html, extensions) as JSONContent & {
     yamlFrontmatter?: string;
     yamlEndmatter?: string;
   };
+  attachSourceProvenance(doc, topLevelSourceBlocks(tokens));
   addEndmatterFeedback(comments, parsedEndmatter);
   if (frontmatter) {
     doc.yamlFrontmatter = frontmatter;
@@ -1491,6 +1560,35 @@ function collectCriticChangesFromDoc(
   return changes;
 }
 
+/**
+ * Write the body back, reusing original source for every block that still
+ * matches the node it produced. A document nobody edited therefore comes back
+ * byte for byte, because no serializer runs over any of it.
+ */
+function serializeBody(
+  doc: JSONContent,
+  html: string,
+  service: TurndownService,
+): string {
+  const blocks = doc.content ?? [];
+
+  // Only when *nothing* changed. That is the case this exists for: a document
+  // opened, read, and saved should come back byte for byte. As soon as one
+  // block differs the whole body goes through the serializer as before, so
+  // editing behaves exactly as it always has and mixing preserved source with
+  // freshly serialized blocks never has to be reconciled.
+  const preserved: string[] = [];
+  for (const node of blocks) {
+    const source = unchangedSource(node);
+    if (source === null) return finalizeMarkdown(service.turndown(html));
+    preserved.push(source);
+  }
+
+  if (preserved.length === 0) return finalizeMarkdown(service.turndown(html));
+
+  return `${preserved.join("").replace(/\n+$/, "")}\n`;
+}
+
 export function editorStateToCriticMarkdown(
   doc: JSONContent,
   comments: Map<string, CriticComment>,
@@ -1517,10 +1615,7 @@ export function editorStateToCriticMarkdown(
     changes,
   );
   return appendYamlEndmatter(
-    prependYamlFrontmatter(
-      finalizeMarkdown(service.turndown(html)),
-      frontmatter,
-    ),
+    prependYamlFrontmatter(serializeBody(doc, html, service), frontmatter),
     endmatter,
   );
 }

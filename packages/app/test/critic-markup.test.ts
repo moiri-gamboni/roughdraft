@@ -157,7 +157,10 @@ describe("CriticMarkup comments", () => {
 
     expect(endmatter).toBeNull();
     expect(comments.size).toBe(0);
-    expect(output).toContain("* * *");
+    // Still a horizontal rule and not swallowed as endmatter. It stays in the
+    // author's `---` form now that an unchanged document is written back
+    // verbatim, rather than being renormalized to Turndown's `* * *`.
+    expect(output).toContain("\n---\n");
     expect(output).toContain("```yaml");
     expect(output).toContain("comments:");
     expect(output).toContain("suggestions:");
