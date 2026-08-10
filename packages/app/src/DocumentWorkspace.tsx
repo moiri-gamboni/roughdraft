@@ -8,6 +8,8 @@ import {
   Eye,
   Loader2,
   MessageSquarePlus,
+  Maximize2,
+  Minimize2,
   PencilLine,
   RefreshCcw,
   Upload,
@@ -47,6 +49,7 @@ import {
 } from "./PageCard";
 import { RobotsHighFiveToy } from "./RobotsHighFiveToy";
 import type { CompleteReviewOptions, Page, StorageBackend } from "./storage";
+import { useReadingWidth } from "./useReadingWidth";
 import { useReviewLayoutShiftAnimation } from "./useReviewLayoutShiftAnimation";
 
 type DiskChangeState = "clean" | "changed" | "conflict" | "paused";
@@ -430,6 +433,7 @@ export function DocumentWorkspace({
     getRandomReviewCompleteTitle(),
   );
   const [fileCopyMenuOpen, setFileCopyMenuOpen] = useState(false);
+  const { isWide, toggleWide } = useReadingWidth();
   const [copiedFileAction, setCopiedFileAction] =
     useState<FileCopyAction | null>(null);
   const [overallComment, setOverallComment] = useState("");
@@ -976,7 +980,7 @@ export function DocumentWorkspace({
           </div>
         </div>
       ) : null}
-      <div className="mx-auto min-h-full max-w-[1080px]">
+      <div className="mx-auto min-h-full max-w-[var(--reading-shell-width)]">
         {documentPage ? (
           <div
             ref={documentHeaderRef}
@@ -987,7 +991,7 @@ export function DocumentWorkspace({
                 "review-layout-grid--centered document-page-shell-no-comments",
             )}
           >
-            <div className="review-layout-main document-page-main w-full max-w-[46.5rem] min-w-0">
+            <div className="review-layout-main document-page-main w-full max-w-[var(--reading-width)] min-w-0">
               <div className="flex w-full flex-wrap items-center gap-1.5 px-1">
                 <Tooltip>
                   <TooltipTrigger
@@ -1027,6 +1031,31 @@ export function DocumentWorkspace({
                     }
                   />
                   <TooltipContent>{editorViewModeToggleLabel}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        data-testid="document-width-toggle"
+                        aria-pressed={isWide}
+                        aria-label={
+                          isWide ? "Use normal width" : "Use full width"
+                        }
+                        className="inline-flex size-[1.5rem] shrink-0 items-center justify-center rounded-full text-stone-400 outline-none transition hover:text-stone-500 focus-visible:ring-2 focus-visible:ring-stone-300/70 dark:text-slate-400 dark:hover:text-slate-300 dark:focus-visible:ring-slate-600/70"
+                        onClick={toggleWide}
+                      />
+                    }
+                  >
+                    {isWide ? (
+                      <Minimize2 className="size-[0.8rem]" aria-hidden="true" />
+                    ) : (
+                      <Maximize2 className="size-[0.8rem]" aria-hidden="true" />
+                    )}
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {isWide ? "Normal width" : "Full width"}
+                  </TooltipContent>
                 </Tooltip>
                 <Popover
                   open={fileCopyMenuOpen}

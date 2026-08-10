@@ -784,6 +784,21 @@
  *
  * Below the breakpoint the shell falls back to a simple stacked column.
  */
+/*
+ * Reading width. The document column and the shell that centres it are both
+ * driven by these, so widening is one class on <html> rather than a hunt
+ * through hardcoded caps. `.editor-wide` is the full-width mode.
+ */
+:root {
+  --reading-width: 46.5rem;
+  --reading-shell-width: 1080px;
+}
+
+:root.editor-wide {
+  --reading-width: 78rem;
+  --reading-shell-width: min(100vw - 3rem, 110rem);
+}
+
 .review-layout-grid {
   --review-layout-shift-x: 0px;
   display: flex;
@@ -797,7 +812,9 @@
     display: grid;
     /* comments present: document on the left, fixed-width rail on the right */
     --review-rail-width: 18rem;
-    grid-template-columns: minmax(0, 46.5rem) var(--review-rail-width);
+    grid-template-columns: minmax(0, var(--reading-width)) var(
+        --review-rail-width
+      );
     justify-content: center;
     align-items: start;
     column-gap: 2rem;
