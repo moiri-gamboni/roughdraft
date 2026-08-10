@@ -17,7 +17,8 @@ import {
 import {
   createMarkedRenderer,
   createTurndownService,
-  normalizeBlockSpacing,
+  finalizeMarkdown,
+  headingSpacingHooks,
   appendYamlEndmatter,
   prependYamlFrontmatter,
   protectRichTextRoundTripMarkdown,
@@ -1261,6 +1262,10 @@ function createCriticMarked(
     renderer,
   });
 
+  // Merged via use() rather than the constructor: marked expects a full Hooks
+  // instance there, and would call the ones a partial object does not define.
+  parser.use({ hooks: headingSpacingHooks });
+
   parser.use({
     extensions: [
       {
@@ -1513,7 +1518,7 @@ export function editorStateToCriticMarkdown(
   );
   return appendYamlEndmatter(
     prependYamlFrontmatter(
-      normalizeBlockSpacing(`${service.turndown(html).trimEnd()}\n`),
+      finalizeMarkdown(service.turndown(html)),
       frontmatter,
     ),
     endmatter,

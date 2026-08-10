@@ -101,6 +101,9 @@ describe("toHtml", () => {
     expect(toMarkdown(toHtml(readMarkdownFixture("headerless-table.md")))).toBe(
       [
         "# Headerless Table",
+        // The fixture has a blank line after the heading, and round-tripping
+        // keeps the author's spacing rather than normalizing it away.
+        "",
         "|     |     |",
         "| --- | --- |",
         "| First | Ready |",
