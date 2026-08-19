@@ -795,8 +795,11 @@
 }
 
 :root.editor-wide {
-  --reading-width: 78rem;
-  --reading-shell-width: min(100vw - 3rem, 110rem);
+  /* Genuinely full width: the only margins left are the workspace padding.
+     Every consumer is a max-width or grid-track cap, so 100% means "all the
+     space the container offers". */
+  --reading-width: 100%;
+  --reading-shell-width: 100%;
 }
 
 .review-layout-grid {
