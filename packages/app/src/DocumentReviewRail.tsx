@@ -10,10 +10,10 @@ import {
   useState,
 } from "react";
 import {
-  CommentEditorList,
   type CommentActionDefinition,
   type CommentActionsRenderContext,
   type CommentContentRenderContext,
+  CommentEditorList,
 } from "./CommentEditorList";
 import type {
   CriticChangeAttrs,
@@ -217,7 +217,9 @@ export function DocumentReviewRail({
 }: DocumentReviewRailProps) {
   const draftTextareaRef = useRef<HTMLTextAreaElement>(null);
   const itemRefs = useRef(new Map<string, HTMLDivElement>());
+  const containerRef = useRef<HTMLDivElement>(null);
   const [itemHeights, setItemHeights] = useState<Record<string, number>>({});
+  const [anchorOffset, setAnchorOffset] = useState(0);
 
   const activeRootThreadId = useMemo(
     () => getRootThreadIdForCommentId(selectedCommentId, comments),
@@ -320,12 +322,48 @@ export function DocumentReviewRail({
     [selectedCommentId, suggestions],
   );
 
+  // Anchors are measured relative to the editor element, but cards are
+  // positioned relative to the rail container, whose top sits higher (the
+  // content card's padding). Shift anchors into rail space so a pinned card
+  // lines up with its anchor text.
+  // biome-ignore lint/correctness/useExhaustiveDependencies(contentHeight): re-measure when the editor's height settles late (fonts, images)
+  useLayoutEffect(() => {
+    if (railLayout !== "anchored") return;
+
+    const measureOffset = () => {
+      const container = containerRef.current;
+      let editorElement: HTMLElement | null = null;
+      try {
+        editorElement = (editor?.view.dom as HTMLElement | undefined) ?? null;
+      } catch {
+        editorElement = null;
+      }
+      if (!container || !editorElement) return;
+
+      const next = Math.round(
+        editorElement.getBoundingClientRect().top -
+          container.getBoundingClientRect().top,
+      );
+      setAnchorOffset((current) => (current === next ? current : next));
+    };
+
+    measureOffset();
+    window.addEventListener("resize", measureOffset);
+    return () => window.removeEventListener("resize", measureOffset);
+  }, [editor, railLayout, contentHeight]);
+
   const layouts = useMemo(() => {
     const entries = [
       ...suggestionEntries,
       ...commentEntries,
       ...(draftEntry ? [draftEntry] : []),
-    ].sort((left, right) => left.anchorTop - right.anchorTop);
+    ]
+      .sort((left, right) => left.anchorTop - right.anchorTop)
+      .map((entry) => ({
+        ...entry,
+        anchorTop: entry.anchorTop + anchorOffset,
+        anchorBottom: entry.anchorBottom + anchorOffset,
+      }));
     const activeKey =
       draftEntry?.key ??
       selectedChangeId ??
@@ -336,6 +374,7 @@ export function DocumentReviewRail({
   }, [
     activeRootThreadId,
     activeSuggestionIdForComment,
+    anchorOffset,
     commentEntries,
     draftEntry,
     itemHeights,
@@ -417,7 +456,10 @@ export function DocumentReviewRail({
   const railHeight =
     railLayout === "flow"
       ? undefined
-      : Math.max(contentHeight, layouts.at(-1)?.railBottom ?? 0) + 24;
+      : Math.max(
+          contentHeight + anchorOffset,
+          layouts.at(-1)?.railBottom ?? 0,
+        ) + 24;
 
   const hasDraftOnly = layouts.length === 0 && !draftSuggestion;
   if (hasDraftOnly) {
@@ -427,6 +469,7 @@ export function DocumentReviewRail({
   return (
     <aside className={cn("min-w-0", className)} data-testid={testId}>
       <div
+        ref={containerRef}
         className={cn(railLayout === "flow" ? "grid gap-3" : "relative")}
         style={railHeight ? { minHeight: railHeight } : undefined}
       >
