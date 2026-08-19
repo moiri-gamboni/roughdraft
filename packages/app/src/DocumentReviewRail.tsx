@@ -449,7 +449,7 @@ export function DocumentReviewRail({
 
   useEffect(() => {
     if (draftSuggestion && draftTextareaRef.current) {
-      draftTextareaRef.current.focus();
+      draftTextareaRef.current.focus({ preventScroll: true });
     }
   }, [draftSuggestion]);
 

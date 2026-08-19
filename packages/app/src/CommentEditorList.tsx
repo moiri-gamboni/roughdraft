@@ -182,7 +182,7 @@ export function CommentEditorList({
     const target = textareaRefs.current.get(pendingFocusCommentId);
     if (!target || target.offsetParent === null) return;
 
-    target.focus();
+    target.focus({ preventScroll: true });
     const cursorPosition = target.value.length;
     target.setSelectionRange(cursorPosition, cursorPosition);
     onAutoFocusComment?.(pendingFocusCommentId);
