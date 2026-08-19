@@ -1886,8 +1886,11 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     setSelectedCommentId(commentId);
 
     const range = findCommentRange(currentEditor, commentId);
+    const anchorElement = findCommentAnchorElement(currentEditor, commentId);
+    if (!range && !anchorElement) return;
+
+    currentEditor.commands.focus(undefined, { scrollIntoView: false });
     if (range) {
-      currentEditor.commands.focus(undefined, { scrollIntoView: false });
       currentEditor.view.dispatch(
         currentEditor.state.tr.setSelection(
           range.isNodeAnchor
@@ -1899,12 +1902,13 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
               ),
         ),
       );
-      return;
     }
 
-    if (!findCommentAnchorElement(currentEditor, commentId)) return;
-
-    currentEditor.commands.focus(undefined, { scrollIntoView: false });
+    // The transaction's own scrollIntoView cannot do this: ProseMirror skips
+    // scroll-to-selection while the DOM focus sits outside the editor, which
+    // it always does right after a click on a rail card. Scroll the anchor
+    // element instead; scroll-margin in the stylesheet keeps it off the edge.
+    anchorElement?.scrollIntoView({ block: "nearest" });
   }, []);
 
   const focusSuggestion = useCallback((changeId: string) => {
@@ -1923,6 +1927,9 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
         TextSelection.create(currentEditor.state.doc, range.from, range.to),
       ),
     );
+    currentEditor.view.dom
+      .querySelector(`.critic-change[data-critic-change-id="${changeId}"]`)
+      ?.scrollIntoView({ block: "nearest" });
   }, []);
 
   const hasReviewRail = comments.size > 0 || criticChanges.length > 0;

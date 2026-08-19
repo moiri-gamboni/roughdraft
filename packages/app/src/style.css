@@ -139,6 +139,8 @@
     @apply text-inherit;
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
+    /* Breathing room when a rail click scrolls an anchor into view. */
+    scroll-margin: 6rem;
   }
 
   .tiptap .comment-decoration {
@@ -205,6 +207,8 @@
   .tiptap .critic-change {
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
+    /* Breathing room when a rail click scrolls an anchor into view. */
+    scroll-margin: 6rem;
   }
 
   .tiptap .critic-change-addition,
