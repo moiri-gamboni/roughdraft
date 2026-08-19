@@ -14,7 +14,13 @@ import {
   RefreshCcw,
   Upload,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { DocumentEditorViewMode } from "./app-navigation";
 import { RemoteSessionBanner } from "./components/RemoteSessionBanner";
 import { Button } from "./components/ui/button";
@@ -717,8 +723,30 @@ export function DocumentWorkspace({
     reviewHandoffDisabled && reviewHandoffState !== "notified";
   const trimmedOverallComment = overallComment.trim();
 
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const [scrollbarWidth, setScrollbarWidth] = useState(0);
+
+  // The status stack is fixed to the window edge, but the scrollbar belongs
+  // to this container and sits at that same edge; offset the stack so it
+  // clears a classic scrollbar (overlay scrollbars measure 0). The observer
+  // sees the client box shrink when the scrollbar appears with the content.
+  useLayoutEffect(() => {
+    const element = scrollContainerRef.current;
+    if (!element) return;
+
+    const measure = () => {
+      setScrollbarWidth(element.offsetWidth - element.clientWidth);
+    };
+
+    measure();
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(element);
+    return () => resizeObserver.disconnect();
+  }, []);
+
   return (
     <div
+      ref={scrollContainerRef}
       className={cn(
         "min-h-0 flex-1 overflow-y-auto px-8 pb-8 sm:px-12",
         conflictNotice ? "pt-40 sm:pt-28" : "pt-10",
@@ -738,9 +766,10 @@ export function DocumentWorkspace({
       ) : null}
       <div
         className={cn(
-          "fixed right-3 z-[60] flex max-w-[min(16rem,calc(100vw-1rem))] flex-col items-end gap-1.5",
+          "fixed z-[60] flex max-w-[min(16rem,calc(100vw-1rem))] flex-col items-end gap-1.5",
           conflictNotice ? "top-[19rem] sm:top-[7rem]" : "top-3",
         )}
+        style={{ right: `calc(0.75rem + ${scrollbarWidth}px)` }}
         data-testid="document-status-stack"
         data-document-status-stack="true"
       >
