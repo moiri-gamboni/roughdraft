@@ -4,7 +4,7 @@ import { TextSelection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/react";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-
+import { buildLocationForLinkedMarkdownDocument } from "./app-navigation";
 import { CommentEditorList } from "./CommentEditorList";
 import {
   type CriticChangeAttrs,
@@ -32,9 +32,9 @@ import {
   criticChangeHighlightPluginKey,
   SUGGESTED_PARAGRAPH_SENTINEL,
 } from "./editor-extensions";
+import { copyTextToClipboard } from "./lib/clipboard";
 import { cn } from "./lib/utils";
 import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
-import { buildLocationForLinkedMarkdownDocument } from "./app-navigation";
 import { toHtml } from "./markdown";
 import type { Page, StorageBackend } from "./storage";
 import { useCommentAnchorLayout } from "./useCommentAnchorLayout";
@@ -1080,7 +1080,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
             const from = selection.from;
             const to = selection.to;
             const selectedText = view.state.doc.textBetween(from, to);
-            void navigator.clipboard.writeText(selectedText);
+            void copyTextToClipboard(selectedText);
 
             const criticMarkType = view.state.schema.marks.criticChange;
             const isAdditionKind = (m: ProseMirrorMark) =>

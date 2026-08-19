@@ -51,6 +51,7 @@ import {
   normalizeCommentMeasurement,
   resolveAnchoredRailLayouts,
 } from "./document-comments";
+import { copyTextToClipboard } from "./lib/clipboard";
 import { cn } from "./lib/utils";
 import type { DocumentSaveState } from "./PageCard";
 import { PreviewBackend } from "./preview-backend";
@@ -319,7 +320,7 @@ export function Homepage({
 
   const handleCopySetupPrompt = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(AGENT_SETUP_PROMPT);
+      await copyTextToClipboard(AGENT_SETUP_PROMPT);
       setCopyState("copied");
       window.setTimeout(() => setCopyState("idle"), 1800);
     } catch {
