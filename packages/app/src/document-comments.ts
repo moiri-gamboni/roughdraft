@@ -294,13 +294,24 @@ export function resolveAnchoredRailLayouts<T extends AnchoredRailItem>(
 ): Array<AnchoredRailLayout<T>> {
   if (items.length === 0) return [];
 
+  const getHeight = (item: T) => heights[item.key] ?? defaultHeight;
+
+  // Resting pass: every card at its anchor, pushed down just far enough to
+  // clear the cards before it.
+  const restingTops = new Array<number>(items.length);
+  let minRestingTop = Number.NEGATIVE_INFINITY;
+  items.forEach((item, index) => {
+    const railTop = Math.max(item.anchorTop, minRestingTop);
+    restingTops[index] = railTop;
+    minRestingTop = railTop + getHeight(item) + gap;
+  });
+
   const activeIndex = Math.max(
     0,
     activeKey ? items.findIndex((item) => item.key === activeKey) : 0,
   );
 
   const resolved = new Array<AnchoredRailLayout<T>>(items.length);
-  const getHeight = (item: T) => heights[item.key] ?? defaultHeight;
 
   const activeItem = items[activeIndex] ?? items[0];
   if (!activeItem) return [];
@@ -313,6 +324,9 @@ export function resolveAnchoredRailLayouts<T extends AnchoredRailItem>(
     height: activeHeight,
   };
 
+  // Cards above the active one move up from their resting position — not
+  // toward their own anchor — so a card that already had clearance stays put
+  // when the selection changes.
   for (let index = activeIndex - 1; index >= 0; index -= 1) {
     const item = items[index];
     const nextLayout = resolved[index + 1];
@@ -320,7 +334,10 @@ export function resolveAnchoredRailLayouts<T extends AnchoredRailItem>(
     if (!item || !nextLayout) continue;
 
     const height = getHeight(item);
-    const railTop = Math.min(item.anchorTop, nextLayout.railTop - gap - height);
+    const railTop = Math.min(
+      restingTops[index] ?? item.anchorTop,
+      nextLayout.railTop - gap - height,
+    );
 
     resolved[index] = {
       ...item,
@@ -347,16 +364,9 @@ export function resolveAnchoredRailLayouts<T extends AnchoredRailItem>(
     };
   }
 
-  const firstRailTop = resolved[0]?.railTop ?? 0;
-  if (firstRailTop < 0) {
-    const offset = -firstRailTop;
-    return resolved.map((layout) => ({
-      ...layout,
-      railTop: layout.railTop + offset,
-      railBottom: layout.railBottom + offset,
-    }));
-  }
-
+  // Cards above the active one may resolve to negative railTops and slide out
+  // of view past the top edge; keeping the active card pinned to its anchor
+  // takes priority over keeping every card visible.
   return resolved;
 }
 
