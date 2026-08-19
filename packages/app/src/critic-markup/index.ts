@@ -10,26 +10,26 @@ import {
 import type TurndownService from "turndown";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
-  createEditorExtensions,
   type CriticChangeAttrs,
   type CriticChangeKind,
+  createEditorExtensions,
 } from "../editor-extensions";
 import {
   annotateHeadingSpacing,
+  appendYamlEndmatter,
   createMarkedRenderer,
   createTurndownService,
   decodeRawMarkdownBlock,
   finalizeMarkdown,
   hashSourceNode,
   headingSpacingHooks,
-  SOURCE_HASH_ATTRIBUTE,
-  SOURCE_TEXT_ATTRIBUTE,
-  topLevelSourceBlocks,
-  appendYamlEndmatter,
+  type MarkdownOptions,
   prependYamlFrontmatter,
   protectRichTextRoundTripMarkdown,
+  SOURCE_HASH_ATTRIBUTE,
+  SOURCE_TEXT_ATTRIBUTE,
   splitYamlDocumentMetadata,
-  type MarkdownOptions,
+  topLevelSourceBlocks,
 } from "../markdown";
 
 export interface CriticComment {

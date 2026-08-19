@@ -174,6 +174,34 @@
     background-color: transparent;
   }
 
+  /* A background highlight is invisible behind an image, so a commented
+     image shows its state as an outline instead. */
+  .tiptap img.comment-decoration {
+    @apply px-0;
+    background-color: transparent;
+    outline: 3px solid #fde68a;
+    outline-offset: 2px;
+    border-radius: 2px;
+    transition: outline-color 140ms ease;
+  }
+
+  .tiptap img.comment-decoration.comment-decoration-hovered,
+  .tiptap img.comment-decoration.comment-decoration-active {
+    background-color: transparent;
+    outline-color: #ffd000;
+  }
+
+  .dark .tiptap img.comment-decoration {
+    background-color: transparent;
+    outline-color: rgb(133 77 14 / 0.55);
+  }
+
+  .dark .tiptap img.comment-decoration.comment-decoration-hovered,
+  .dark .tiptap img.comment-decoration.comment-decoration-active {
+    background-color: transparent;
+    outline-color: rgb(217 119 6 / 0.8);
+  }
+
   .tiptap .critic-change {
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;

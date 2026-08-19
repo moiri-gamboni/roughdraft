@@ -133,6 +133,9 @@ suggestions:
 | Remote | Connected banner | Open with `?session=<id>&token=<token>` and remote capability enabled | `role=status`, `aria-label="Remote session connected"` | Requires remote backend support in `/api/status`. |
 | Remote | Disconnected banner | Drop remote session connection | `role=alert`, `aria-label="Remote session disconnected"` | Best captured with backend mocking. |
 | Editor | Selection menu | Select text in rich editor | `selection-menu` | Capture formatting buttons and comment/suggestion actions. |
+| Editor | Selection menu on image | Click an image in rich editor | `selection-menu`, `selection-menu-action-comment` | Node selection: formatting actions disabled, Comment enabled; menu is positioned from the image rect. |
+| Editor | Commented image highlight | Open a fixture containing `{==![alt](src)==}{>>note<<}{#c1}` | `comment-decoration` | The image shows an amber outline instead of a background highlight; hover/select deepens the outline color. |
+| Editor | Point comment anchor | Place the caret (no selection) and press the Add-comment shortcut, or use the context-menu Add comment | `comment-decoration` | The anchor is an invisible word-joiner rendered as a thin highlighted sliver at the caret position; it serializes as a standalone `{>>…<<}` comment. |
 | Editor | Selection menu on suggestion | Select existing suggestion text | `selection-menu-action-accept-suggestion`, `selection-menu-action-reject-suggestion` | Requires review fixture. |
 | Editor | Link popover | Click a link or choose Link from selection menu | `link-popover`, `link-url-input`, `link-action-open`, `link-action-delete` | Use the plain fixture link. |
 | Editor | Context menu | Right-click in rich editor | `editor-context-menu` | Capture comment, suggestion, paste, and paste-markdown actions. |

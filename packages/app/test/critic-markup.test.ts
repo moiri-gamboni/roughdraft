@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
 import { Editor } from "@tiptap/core";
+import { GapCursor } from "@tiptap/pm/gapcursor";
+import { NodeSelection } from "@tiptap/pm/state";
+import { describe, expect, it } from "vitest";
 import {
   createCriticChange,
   createNextChangeId,
@@ -1149,5 +1151,194 @@ describe("Markdown rich-text round-trip regressions", () => {
     ].join("\n");
 
     expect(richTextRoundTrip(input)).toBe(input);
+  });
+});
+
+describe("image and point comments", () => {
+  const commentMapWith = (id: string, content: string) =>
+    new Map([[id, { id, content, createdAt: "2026-04-25T21:54:47.475Z" }]]);
+
+  it("parses a standalone image paragraph to a single block with provenance", () => {
+    const input = "Intro.\n\n![Sketch](./img.png)\n\nAfter.\n";
+    const { doc } = criticMarkdownToEditorState(input);
+
+    expect(doc.content?.map((node) => node.type)).toEqual([
+      "paragraph",
+      "image",
+      "paragraph",
+    ]);
+    expect(
+      doc.content?.every(
+        (node) => typeof node.attrs?.dataMdSource === "string",
+      ),
+    ).toBe(true);
+  });
+
+  it("anchors a comment on a selected image via setCommentRef", () => {
+    const input = "Intro.\n\n![Sketch](./img.png)\n\nAfter.\n";
+    const { doc } = criticMarkdownToEditorState(input);
+    const editor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: doc,
+    });
+
+    try {
+      let imagePos = -1;
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === "image") imagePos = pos;
+      });
+      editor.view.dispatch(
+        editor.state.tr.setSelection(
+          NodeSelection.create(editor.state.doc, imagePos),
+        ),
+      );
+
+      expect(editor.commands.setCommentRef({ commentIds: ["c1"] })).toBe(true);
+      expect(
+        editorStateToCriticMarkdown(
+          editor.getJSON(),
+          commentMapWith("c1", "test"),
+        ),
+      ).toBe(
+        'Intro.\n\n{==![Sketch](./img.png)==}{>>test<<}{id="c1" by="user" at="2026-04-25T21:54:47.475Z"}\n\nAfter.\n',
+      );
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("round-trips a commented image from source unchanged", () => {
+    const input =
+      'Intro.\n\n{==![Sketch](./img.png)==}{>>note<<}{id="c1" by="user" at="2026-04-25T21:54:47.475Z"}\n\nAfter.\n';
+
+    expect(richTextRoundTrip(input)).toBe(input);
+  });
+
+  it("inserts a point comment at a caret inside a paragraph", () => {
+    const input = "Intro text.\n\nAfter.\n";
+    const { doc } = criticMarkdownToEditorState(input);
+    const editor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: doc,
+    });
+
+    try {
+      const text = editor.state.doc.textBetween(
+        0,
+        editor.state.doc.content.size,
+        "\n",
+      );
+      const caret = text.indexOf("Intro text.") + "Intro text.".length + 1;
+      editor.commands.setTextSelection(caret);
+
+      expect(editor.commands.insertPointComment({ commentIds: ["c1"] })).toBe(
+        true,
+      );
+      expect(
+        editorStateToCriticMarkdown(
+          editor.getJSON(),
+          commentMapWith("c1", "a point note"),
+        ),
+      ).toBe(
+        'Intro text.{>>a point note<<}{id="c1" by="user" at="2026-04-25T21:54:47.475Z"}\n\nAfter.\n',
+      );
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("creates a standalone comment line from a gap cursor between blocks", () => {
+    const input = "Intro.\n\n![Sketch](./img.png)\n\nAfter.\n";
+    const { doc } = criticMarkdownToEditorState(input);
+    const editor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: doc,
+    });
+
+    try {
+      let imagePos = -1;
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === "image") imagePos = pos;
+      });
+      editor.view.dispatch(
+        editor.state.tr.setSelection(
+          new GapCursor(editor.state.doc.resolve(imagePos)),
+        ),
+      );
+
+      expect(editor.commands.insertPointComment({ commentIds: ["c1"] })).toBe(
+        true,
+      );
+      expect(
+        editorStateToCriticMarkdown(
+          editor.getJSON(),
+          commentMapWith("c1", "missing figure caption"),
+        ),
+      ).toBe(
+        'Intro.\n\n{>>missing figure caption<<}{id="c1" by="user" at="2026-04-25T21:54:47.475Z"}\n\n![Sketch](./img.png)\n\nAfter.\n',
+      );
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("removes an inline point comment's sentinel with the comment", () => {
+    const input =
+      'Intro text.{>>a point note<<}{id="c1" by="user" at="2026-04-25T21:54:47.475Z"}\n\nAfter.\n';
+    const { doc, comments } = criticMarkdownToEditorState(input);
+    const editor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: doc,
+    });
+
+    try {
+      expect(editor.commands.removeCommentId("c1")).toBe(true);
+      comments.delete("c1");
+      expect(editorStateToCriticMarkdown(editor.getJSON(), comments)).toBe(
+        "Intro text.\n\nAfter.\n",
+      );
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("removes a standalone point comment's whole line with the comment", () => {
+    const input =
+      'Intro.\n\n{>>a floating note<<}{id="c1" by="user" at="2026-04-25T21:54:47.475Z"}\n\nAfter.\n';
+    const { doc, comments } = criticMarkdownToEditorState(input);
+    const editor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: doc,
+    });
+
+    try {
+      expect(editor.commands.removeCommentId("c1")).toBe(true);
+      comments.delete("c1");
+      expect(editorStateToCriticMarkdown(editor.getJSON(), comments)).toBe(
+        "Intro.\n\nAfter.\n",
+      );
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("removes a comment from an image anchor", () => {
+    const input =
+      'Intro.\n\n{==![Sketch](./img.png)==}{>>note<<}{id="c1" by="user" at="2026-04-25T21:54:47.475Z"}\n\nAfter.\n';
+    const { doc, comments } = criticMarkdownToEditorState(input);
+    const editor = new Editor({
+      extensions: createEditorExtensions(""),
+      content: doc,
+    });
+
+    try {
+      expect(editor.commands.removeCommentId("c1")).toBe(true);
+      comments.delete("c1");
+      expect(editorStateToCriticMarkdown(editor.getJSON(), comments)).toBe(
+        "Intro.\n\n![Sketch](./img.png)\n\nAfter.\n",
+      );
+    } finally {
+      editor.destroy();
+    }
   });
 });
