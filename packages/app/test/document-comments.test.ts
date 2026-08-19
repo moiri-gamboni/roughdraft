@@ -421,7 +421,7 @@ describe("document comment layout helpers", () => {
     ]);
   });
 
-  it("keeps active-neighboring threads visible when active alignment would go negative", () => {
+  it("keeps the active thread pinned even when the thread above slides past the top edge", () => {
     const layouts = resolveCommentThreadRailLayouts(
       [
         {
@@ -458,14 +458,79 @@ describe("document comment layout helpers", () => {
     ).toEqual([
       {
         key: "c1",
-        railTop: 0,
-        railBottom: 100,
+        railTop: -36,
+        railBottom: 64,
       },
       {
         key: "c2",
-        railTop: 116,
-        railBottom: 236,
+        railTop: 80,
+        railBottom: 200,
       },
+    ]);
+  });
+
+  it("keeps the active rail card pinned to its anchor when the stack above overflows the top", () => {
+    const gap = 16;
+    const height = 120;
+    const anchorTops = [0, 10, 20, 30, 700];
+    const items = anchorTops.map((anchorTop, index) => ({
+      key: `item-${index}`,
+      anchorTop,
+      anchorBottom: anchorTop + 14,
+    }));
+    const heights = Object.fromEntries(
+      items.map((item) => [item.key, height] as const),
+    );
+
+    const layouts = resolveAnchoredRailLayouts(
+      items,
+      heights,
+      "item-4",
+      gap,
+      height,
+    );
+
+    const activeLayout = layouts[4];
+    expect(activeLayout?.railTop).toBe(700);
+    expect(activeLayout?.railBottom).toBe(820);
+
+    // Cards above the active one may sit above the viewport top, but they must
+    // stay ordered and never overlap the pinned active card.
+    const railTopsAbove = layouts.slice(0, 4).map((layout) => layout.railTop);
+    for (let index = 1; index < railTopsAbove.length; index += 1) {
+      expect(railTopsAbove[index]).toBeGreaterThan(railTopsAbove[index - 1]);
+    }
+    expect(layouts[3]?.railBottom).toBeLessThanOrEqual(
+      (activeLayout?.railTop ?? 0) - gap,
+    );
+  });
+
+  it("leaves cards above the active one at their resting position when they already clear it", () => {
+    const gap = 16;
+    const height = 120;
+    const items = [
+      { key: "item-0", anchorTop: 0, anchorBottom: 14 },
+      { key: "item-1", anchorTop: 10, anchorBottom: 24 },
+      { key: "item-2", anchorTop: 700, anchorBottom: 714 },
+    ];
+    const heights = Object.fromEntries(
+      items.map((item) => [item.key, height] as const),
+    );
+
+    const layouts = resolveAnchoredRailLayouts(
+      items,
+      heights,
+      "item-2",
+      gap,
+      height,
+    );
+
+    // item-1 rests at 136 (pushed below item-0); selecting item-2 far below
+    // must not snap it back up toward its own anchor at 10.
+    expect(layouts.map(({ key, railTop }) => ({ key, railTop }))).toEqual([
+      { key: "item-0", railTop: 0 },
+      { key: "item-1", railTop: 136 },
+      { key: "item-2", railTop: 700 },
     ]);
   });
 });
