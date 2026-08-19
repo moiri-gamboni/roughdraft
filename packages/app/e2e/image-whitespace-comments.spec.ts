@@ -76,12 +76,9 @@ test.describe("image and whitespace comments", () => {
     const filePath = writeProjectFile(
       projectDir,
       "point.md",
-      [
-        "# Point Comment",
-        "",
-        "Closing paragraph before the gap.",
-        "",
-      ].join("\n"),
+      ["# Point Comment", "", "Closing paragraph before the gap.", ""].join(
+        "\n",
+      ),
     );
 
     await openMarkdownFile(page, filePath);
