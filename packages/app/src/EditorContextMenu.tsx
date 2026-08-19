@@ -1,11 +1,10 @@
+import { NodeSelection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/react";
 import { useEditorState } from "@tiptap/react";
-import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bold,
-  Code2,
   Check,
+  Code2,
   ExternalLink,
   Italic,
   Link2,
@@ -16,6 +15,8 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getAddCommentShortcutLabel,
   matchesAddCommentShortcut,
@@ -308,14 +309,29 @@ export function EditorContextMenu({
       return;
     }
 
-    const range = getContainedSelectionRange(container);
+    // A node selection (a clicked image) has no usable DOM text range, so its
+    // rect comes from the selected node's own element.
+    let boundingRect: DOMRect | null = null;
+    const { selection } = editor.state;
 
-    if (!range) {
-      setSelectionActionPosition(null);
-      return;
+    if (selection instanceof NodeSelection) {
+      const nodeDom = editor.view.nodeDOM(selection.from);
+      if (nodeDom instanceof Element && container.contains(nodeDom)) {
+        boundingRect = nodeDom.getBoundingClientRect();
+      }
     }
 
-    const boundingRect = range.getBoundingClientRect();
+    if (!boundingRect) {
+      const range = getContainedSelectionRange(container);
+
+      if (!range) {
+        setSelectionActionPosition(null);
+        return;
+      }
+
+      boundingRect = range.getBoundingClientRect();
+    }
+
     if (boundingRect.width === 0 && boundingRect.height === 0) {
       setSelectionActionPosition(null);
       return;
@@ -549,10 +565,11 @@ export function EditorContextMenu({
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      // An empty selection is allowed through: the shortcut then drops a
+      // point comment at the caret.
       if (
         !onAddComment ||
         !editor.isFocused ||
-        editor.state.selection.empty ||
         !matchesAddCommentShortcut(event, getNavigatorPlatform())
       ) {
         return;
@@ -910,7 +927,7 @@ export function EditorContextMenu({
             type="button"
             data-testid="editor-context-menu-action-add-comment"
             className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-300 transition hover:bg-slate-50 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!editor || editor.state.selection.empty}
+            disabled={!editor || !onAddComment}
             onClick={() => {
               onAddComment?.();
               close();

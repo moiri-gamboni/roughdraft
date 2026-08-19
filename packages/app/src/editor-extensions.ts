@@ -1,6 +1,7 @@
-import { Extension, Mark, Node, mergeAttributes } from "@tiptap/core";
+import { Extension, Mark, mergeAttributes, Node } from "@tiptap/core";
 import Code from "@tiptap/extension-code";
 import CodeBlock from "@tiptap/extension-code-block";
+import Document from "@tiptap/extension-document";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -14,7 +15,7 @@ import type {
   Mark as ProseMirrorMark,
   Node as ProseMirrorNode,
 } from "@tiptap/pm/model";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { NodeSelection, Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
 import { rawMarkdownBlockAttribute } from "./markdown";
@@ -23,6 +24,7 @@ declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     commentRef: {
       setCommentRef: (attributes: { commentIds: string[] }) => ReturnType;
+      insertPointComment: (attributes: { commentIds: string[] }) => ReturnType;
       removeCommentId: (commentId: string) => ReturnType;
       unsetCommentRef: () => ReturnType;
     };
@@ -50,6 +52,14 @@ export interface CriticChangeAttrs {
 }
 
 export const SUGGESTED_PARAGRAPH_SENTINEL = "\u2060";
+
+/**
+ * A point comment (one with no highlighted text) anchors to an invisible
+ * word-joiner carrying only the commentRef mark; the serializer writes it as a
+ * standalone `{>>\u2026<<}` block. Same character as the suggested-paragraph
+ * sentinel, but the roles are unrelated.
+ */
+export const UNANCHORED_COMMENT_SENTINEL = "\u2060";
 
 const CommentRef = Mark.create({
   name: "commentRef",
@@ -98,8 +108,69 @@ const CommentRef = Mark.create({
     return {
       setCommentRef:
         (attributes) =>
-        ({ commands }) =>
-          commands.setMark(this.name, attributes),
+        ({ tr, state, dispatch, commands }) => {
+          const markType = state.schema.marks.commentRef;
+          const { selection } = state;
+
+          // A selected image takes the anchor as a node mark; whether a node
+          // may carry one is licensed by its parent, so images nested in
+          // blockquotes or lists refuse rather than silently losing the
+          // comment on save.
+          if (
+            markType &&
+            selection instanceof NodeSelection &&
+            selection.node.type.name === "image"
+          ) {
+            const parent = state.doc.resolve(selection.from).parent;
+            if (!parent.type.allowsMarkType(markType)) return false;
+
+            if (dispatch) {
+              const existing = selection.node.marks.find(
+                (mark) => mark.type === markType,
+              );
+              if (existing) tr.removeNodeMark(selection.from, existing);
+              tr.addNodeMark(selection.from, markType.create(attributes));
+              dispatch(tr);
+            }
+
+            return true;
+          }
+
+          return commands.setMark(this.name, attributes);
+        },
+      insertPointComment:
+        (attributes) =>
+        ({ state, chain }) => {
+          const { selection } = state;
+          if (!selection.empty) return false;
+
+          const sentinel = {
+            type: "text",
+            text: UNANCHORED_COMMENT_SENTINEL,
+            marks: [{ type: this.name, attrs: attributes }],
+          };
+
+          // A caret in a textblock takes the comment inline; a gap cursor
+          // between blocks needs a paragraph of its own to hold it, which
+          // serializes as a standalone comment line.
+          const inTextblock = selection.$from.parent.isTextblock;
+          const sentinelFrom = inTextblock
+            ? selection.from
+            : selection.from + 1;
+
+          // The sentinel ends up selected because the open comment thread is
+          // driven by the comment ids under the selection; a caret after a
+          // non-inclusive mark carries none.
+          return chain()
+            .insertContentAt(
+              selection.from,
+              inTextblock
+                ? sentinel
+                : { type: "paragraph", content: [sentinel] },
+            )
+            .setTextSelection({ from: sentinelFrom, to: sentinelFrom + 1 })
+            .run();
+        },
       removeCommentId:
         (commentId) =>
         ({ tr, state, dispatch }) => {
@@ -108,10 +179,9 @@ const CommentRef = Mark.create({
           if (!markType) return false;
 
           let found = false;
+          const deletions: Array<{ from: number; to: number }> = [];
 
           state.doc.descendants((node, pos) => {
-            if (!node.isText) return;
-
             const mark = node.marks.find(
               (candidate) =>
                 candidate.type === markType &&
@@ -123,11 +193,42 @@ const CommentRef = Mark.create({
 
             found = true;
 
-            const from = pos;
-            const to = pos + node.nodeSize;
             const nextIds = (mark.attrs.commentIds as string[]).filter(
               (id) => id !== commentId,
             );
+
+            if (!node.isText) {
+              tr.removeNodeMark(pos, mark);
+              if (nextIds.length > 0) {
+                tr.addNodeMark(pos, markType.create({ commentIds: nextIds }));
+              }
+              return;
+            }
+
+            // A point comment's sentinel exists only to carry the anchor:
+            // removing the last comment removes the character too, along with
+            // a top-level paragraph that held nothing else.
+            if (
+              nextIds.length === 0 &&
+              node.text === UNANCHORED_COMMENT_SENTINEL &&
+              node.marks.every((candidate) => candidate.type === markType)
+            ) {
+              const $pos = state.doc.resolve(pos);
+              const soleParagraphContent =
+                $pos.parent.type.name === "paragraph" &&
+                $pos.parent.childCount === 1 &&
+                $pos.depth === 1 &&
+                state.doc.childCount > 1;
+              deletions.push(
+                soleParagraphContent
+                  ? { from: pos - 1, to: pos + node.nodeSize + 1 }
+                  : { from: pos, to: pos + node.nodeSize },
+              );
+              return;
+            }
+
+            const from = pos;
+            const to = pos + node.nodeSize;
 
             tr.removeMark(from, to, markType);
 
@@ -135,6 +236,12 @@ const CommentRef = Mark.create({
               tr.addMark(from, to, markType.create({ commentIds: nextIds }));
             }
           });
+
+          // Mark edits above never move positions; deletions do, so they run
+          // last and back to front.
+          for (const range of deletions.sort((a, b) => b.from - a.from)) {
+            tr.delete(range.from, range.to);
+          }
 
           if (found && dispatch) {
             dispatch(tr);
@@ -460,8 +567,6 @@ function createCommentHighlightDecorations(
   }
 
   doc.descendants((node: ProseMirrorNode, pos: number) => {
-    if (!node.isText) return;
-
     const commentIds = [
       ...new Set(
         node.marks.flatMap((mark: ProseMirrorMark) =>
@@ -493,15 +598,17 @@ function createCommentHighlightDecorations(
       classNames.push("comment-decoration-on-critic-change");
     }
 
+    const attributes = {
+      class: classNames.join(" "),
+      "data-testid": classNames.includes("comment-decoration-on-critic-change")
+        ? "comment-decoration-on-critic-change"
+        : "comment-decoration",
+    };
+
     decorations.push(
-      Decoration.inline(pos, pos + node.nodeSize, {
-        class: classNames.join(" "),
-        "data-testid": classNames.includes(
-          "comment-decoration-on-critic-change",
-        )
-          ? "comment-decoration-on-critic-change"
-          : "comment-decoration",
-      }),
+      node.isText
+        ? Decoration.inline(pos, pos + node.nodeSize, attributes)
+        : Decoration.node(pos, pos + node.nodeSize, attributes),
     );
   });
 
@@ -731,6 +838,15 @@ const MarkdownCodeBlock = CodeBlock.extend({
   marks: "commentRef criticChange",
 });
 
+/**
+ * Whether a node may carry a mark is licensed by its parent's `marks` spec,
+ * and a parent with block content defaults to allowing none. Comment anchors
+ * on top-level images are node marks, so the document has to allow them.
+ */
+const MarkdownDocument = Document.extend({
+  marks: "commentRef",
+});
+
 const MarkdownImage = Image.extend({
   addAttributes() {
     return {
@@ -869,7 +985,9 @@ export function createEditorExtensions(placeholder: string) {
       code: false,
       codeBlock: false,
       link: false,
+      document: false,
     }),
+    MarkdownDocument,
     Placeholder.configure({
       placeholder,
     }),

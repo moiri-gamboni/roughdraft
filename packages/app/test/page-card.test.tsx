@@ -1,3 +1,4 @@
+import { NodeSelection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -1625,6 +1626,140 @@ describe("PageCard editor integration", () => {
       "doc-comment-empty-draft-1",
       expect.stringMatching(
         /\{==target==\}\{>>Draft comment<<\}\{id="c1" by="user" at="[^"]+"\}/,
+      ),
+    );
+  });
+
+  it("adds a comment to a selected image and saves it as an image anchor", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-image-comment-1",
+        title: "Doc Image Comment 1",
+        content: "Intro.\n\n![Sketch](./img.png)\n\nAfter.",
+      },
+      selected: true,
+    });
+
+    const editor = rendered.getEditor();
+    let imagePos = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "image") imagePos = pos;
+    });
+    expect(imagePos).toBeGreaterThanOrEqual(0);
+
+    await act(async () => {
+      editor.commands.focus();
+      editor.view.dispatch(
+        editor.state.tr.setSelection(
+          NodeSelection.create(editor.state.doc, imagePos),
+        ),
+      );
+    });
+    await flushReact();
+
+    await addCommentWithShortcut();
+
+    const commentEditor = queryByTestId<HTMLTextAreaElement>(
+      rendered.container,
+      "comment-banner-c1-editor",
+    );
+    expect(commentEditor).not.toBeNull();
+
+    vi.useFakeTimers();
+
+    await act(async () => {
+      if (!commentEditor) return;
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(commentEditor, "Swap this figure");
+      commentEditor.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    });
+
+    const saveButton = queryByTestId<HTMLButtonElement>(
+      rendered.container,
+      "comment-banner-c1-action-save",
+    );
+    expect(saveButton).not.toBeNull();
+
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledWith(
+      "doc-image-comment-1",
+      expect.stringMatching(
+        /\{==!\[Sketch\]\(\.\/img\.png\)==\}\{>>Swap this figure<<\}\{id="c1" by="user" at="[^"]+"\}/,
+      ),
+    );
+  });
+
+  it("adds a point comment at a collapsed caret and saves it standalone", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-point-comment-1",
+        title: "Doc Point Comment 1",
+        content: "Intro text.\n\nAfter.",
+      },
+      selected: true,
+    });
+
+    const editor = rendered.getEditor();
+    const range = findTextRange(editor, "Intro text.");
+    expect(range).not.toBeNull();
+    if (!range) throw new Error("missing range");
+
+    await act(async () => {
+      editor.commands.focus();
+      editor.commands.setTextSelection(range.to);
+    });
+    await flushReact();
+
+    await addCommentWithShortcut();
+
+    const commentEditor = queryByTestId<HTMLTextAreaElement>(
+      rendered.container,
+      "comment-banner-c1-editor",
+    );
+    expect(commentEditor).not.toBeNull();
+
+    vi.useFakeTimers();
+
+    await act(async () => {
+      if (!commentEditor) return;
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(commentEditor, "Needs a transition here");
+      commentEditor.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    });
+
+    const saveButton = queryByTestId<HTMLButtonElement>(
+      rendered.container,
+      "comment-banner-c1-action-save",
+    );
+    expect(saveButton).not.toBeNull();
+
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(rendered.onSave).toHaveBeenCalledWith(
+      "doc-point-comment-1",
+      expect.stringMatching(
+        /Intro text\.\{>>Needs a transition here<<\}\{id="c1" by="user" at="[^"]+"\}/,
       ),
     );
   });

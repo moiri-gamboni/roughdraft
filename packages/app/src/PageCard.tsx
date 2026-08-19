@@ -1,6 +1,6 @@
 import type { JSONContent } from "@tiptap/core";
 import type { Mark as ProseMirrorMark } from "@tiptap/pm/model";
-import { TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/react";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -155,8 +155,6 @@ function getSelectionCommentIds(editor: Editor | null): string[] {
     }
   } else {
     editor.state.doc.nodesBetween(from, to, (node) => {
-      if (!node.isText) return;
-
       for (const mark of node.marks) {
         if (mark.type.name !== "commentRef") continue;
 
@@ -225,9 +223,10 @@ function findCommentRange(editor: Editor | null, commentId: string) {
   let from: number | null = null;
   let to: number | null = null;
   let closed = false;
+  let isNodeAnchor = false;
 
   editor.state.doc.descendants((node, pos) => {
-    if (closed || !node.isText) return false;
+    if (closed) return false;
 
     const hasCommentId = node.marks.some(
       (mark) =>
@@ -237,7 +236,7 @@ function findCommentRange(editor: Editor | null, commentId: string) {
     );
 
     if (!hasCommentId) {
-      if (from != null && to != null && pos >= to) {
+      if (from != null && to != null && pos >= to && node.isLeaf) {
         closed = true;
       }
       return;
@@ -246,11 +245,13 @@ function findCommentRange(editor: Editor | null, commentId: string) {
     if (from == null || to == null) {
       from = pos;
       to = pos + node.nodeSize;
+      isNodeAnchor = !node.isText;
       return;
     }
 
     if (pos <= to) {
-      to = pos + node.nodeSize;
+      to = Math.max(to, pos + node.nodeSize);
+      isNodeAnchor = false;
       return;
     }
 
@@ -259,7 +260,7 @@ function findCommentRange(editor: Editor | null, commentId: string) {
 
   if (from == null || to == null) return null;
 
-  return { from, to };
+  return { from, to, isNodeAnchor };
 }
 
 function findCommentAnchorElement(editor: Editor | null, commentId: string) {
@@ -327,8 +328,6 @@ function addCommentIdsToAnchor(
   const tr = editor.state.tr;
 
   editor.state.doc.descendants((node, pos) => {
-    if (!node.isText) return;
-
     const mark = node.marks.find(
       (candidate) =>
         candidate.type === commentMarkType &&
@@ -340,14 +339,21 @@ function addCommentIdsToAnchor(
 
     found = true;
 
+    const nextMark = commentMarkType.create({
+      ...mark.attrs,
+      commentIds: nextCommentIds,
+    });
+
+    if (!node.isText) {
+      tr.removeNodeMark(pos, mark);
+      tr.addNodeMark(pos, nextMark);
+      return;
+    }
+
     const from = pos;
     const to = pos + node.nodeSize;
     tr.removeMark(from, to, commentMarkType);
-    tr.addMark(
-      from,
-      to,
-      commentMarkType.create({ ...mark.attrs, commentIds: nextCommentIds }),
-    );
+    tr.addMark(from, to, nextMark);
   });
 
   if (!found) return null;
@@ -1498,12 +1504,27 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
 
   const handleAddComment = useCallback(() => {
     const currentEditor = editorRef.current;
-    if (!currentEditor || currentEditor.state.selection.empty) return;
+    if (!currentEditor) return;
 
-    const existingIds = getSelectionCommentIds(currentEditor);
+    // An empty selection anchors a point comment at the caret instead of
+    // wrapping a text range.
+    const pointComment = currentEditor.state.selection.empty;
+    const existingIds = pointComment
+      ? []
+      : getSelectionCommentIds(currentEditor);
     const comment = createCriticComment(undefined, {
       existingComments: commentsRef.current.values(),
     });
+    const commentIds = [...existingIds, comment.id];
+
+    // Refuse before touching state when the anchor cannot apply (e.g. an
+    // image nested where the schema disallows the mark), so no phantom
+    // comment appears in the rail only to vanish on save.
+    const canAnchor = pointComment
+      ? currentEditor.can().insertPointComment({ commentIds })
+      : currentEditor.can().setCommentRef({ commentIds });
+    if (!canAnchor) return;
+
     const nextComments = new Map(commentsRef.current);
     nextComments.set(comment.id, comment);
     commentsRef.current = nextComments;
@@ -1513,11 +1534,11 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     );
 
     suppressNextMarkdownUpdateRef.current = true;
-    currentEditor
-      .chain()
-      .focus()
-      .setCommentRef({ commentIds: [...existingIds, comment.id] })
-      .run();
+    const chain = currentEditor.chain().focus();
+    (pointComment
+      ? chain.insertPointComment({ commentIds })
+      : chain.setCommentRef({ commentIds })
+    ).run();
     if (suppressNextMarkdownUpdateRef.current) {
       suppressNextMarkdownUpdateRef.current = false;
     }
@@ -1869,7 +1890,13 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
       currentEditor.commands.focus(undefined, { scrollIntoView: false });
       currentEditor.view.dispatch(
         currentEditor.state.tr.setSelection(
-          TextSelection.create(currentEditor.state.doc, range.from, range.to),
+          range.isNodeAnchor
+            ? NodeSelection.create(currentEditor.state.doc, range.from)
+            : TextSelection.create(
+                currentEditor.state.doc,
+                range.from,
+                range.to,
+              ),
         ),
       );
       return;
