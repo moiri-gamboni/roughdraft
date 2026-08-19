@@ -432,6 +432,21 @@ export function createMarkedRenderer(options?: MarkdownOptions) {
     return `<a href="${escapeHtml(renderedHref)}"${titleAttr}${markdownSrcAttr}${autolinkAttr}${bareAutolinkAttr}${externalAttr}>${text}</a>`;
   };
 
+  // The editor's image node is block-level, so an image inside a <p> gets
+  // lifted out of it during parsing and leaves an empty paragraph behind.
+  // That phantom block breaks the one-node-per-source-block mapping source
+  // preservation depends on, so a paragraph that is only an image (optionally
+  // wrapped in a comment anchor) is emitted without the <p>.
+  renderer.paragraph = function (token) {
+    const content = this.parser.parseInline(token.tokens);
+
+    if (/^(?:<span [^>]*>)?<img [^>]*>(?:<\/span>)?$/.test(content)) {
+      return `${content}\n`;
+    }
+
+    return `<p>${content}</p>\n`;
+  };
+
   renderer.image = ({ href, title, text }) => {
     const rawHref = href || "";
     const renderedHref = resolveRenderedUrl(rawHref, resolveFileUrl);

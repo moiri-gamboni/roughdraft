@@ -816,6 +816,7 @@ const SourceProvenance = Extension.create({
           "horizontalRule",
           "table",
           "rawMarkdownBlock",
+          "image",
         ],
         attributes: {
           dataMdSource: attribute,
