@@ -1616,7 +1616,7 @@ function serializeBody(
   // belongs to whichever block reaches it first; later claimants are new.
   const claimed = new Set<string>();
 
-  for (const node of blocks) {
+  for (const [index, node] of blocks.entries()) {
     const recordedText = node.attrs?.[SOURCE_TEXT_ATTRIBUTE];
     const isDuplicate =
       typeof recordedText === "string" && claimed.has(recordedText);
@@ -1648,9 +1648,17 @@ function serializeBody(
     }
 
     // Newly typed: nothing recorded its spacing, so separate it as a block.
+    // When the following block's recorded source opens with the blank lines
+    // that separated it from its old neighbour, those already provide the
+    // separation, and adding a newline here would double it.
     const separator =
       body === "" || /\n\n$/.test(body) ? "" : /\n$/.test(body) ? "\n" : "\n\n";
-    body += `${separator}${serialized}\n`;
+    const nextRecordedText = blocks[index + 1]?.attrs?.[SOURCE_TEXT_ATTRIBUTE];
+    const nextProvidesSeparation =
+      typeof nextRecordedText === "string" &&
+      !claimed.has(nextRecordedText) &&
+      /^[\r\n]/.test(nextRecordedText);
+    body += `${separator}${serialized}${nextProvidesSeparation ? "" : "\n"}`;
   }
 
   return `${body.replace(/\n+$/, "")}\n`;
