@@ -455,6 +455,53 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     vi.useRealTimers();
   });
 
+  it("copies from the file menu on an insecure origin without navigator.clipboard", async () => {
+    const originalClipboard = Object.getOwnPropertyDescriptor(
+      navigator,
+      "clipboard",
+    );
+    const originalExecCommand = Object.getOwnPropertyDescriptor(
+      document,
+      "execCommand",
+    );
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      writable: true,
+      value: execCommand,
+    });
+
+    try {
+      await renderWorkspace({
+        documentContent: "# Heading\n\nBody",
+        documentCopyPath: "/Users/me/project/test.md",
+      });
+      await openFileMenu();
+      await click(getByTestId(document.body, "document-file-menu-path"));
+
+      expect(execCommand).toHaveBeenCalledWith("copy");
+
+      const menu = getByTestId(document.body, "document-file-menu");
+      expect(menu.textContent).toContain("Copied!");
+      expect(menu.textContent).not.toContain("Copy:");
+    } finally {
+      if (originalClipboard) {
+        Object.defineProperty(navigator, "clipboard", originalClipboard);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
+      if (originalExecCommand) {
+        Object.defineProperty(document, "execCommand", originalExecCommand);
+      } else {
+        Reflect.deleteProperty(document, "execCommand");
+      }
+    }
+  });
+
   it("shows copy previews below each file menu action", async () => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,

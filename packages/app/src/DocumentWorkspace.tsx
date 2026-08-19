@@ -7,8 +7,8 @@ import {
   Copy,
   Eye,
   Loader2,
-  MessageSquarePlus,
   Maximize2,
+  MessageSquarePlus,
   Minimize2,
   PencilLine,
   RefreshCcw,
@@ -40,6 +40,7 @@ import {
   criticMarkdownHasReviewRail,
   criticMarkdownToRenderedHtml,
 } from "./critic-markup";
+import { copyTextToClipboard } from "./lib/clipboard";
 import { cn } from "./lib/utils";
 import {
   type DocumentInteractionMode,
@@ -162,7 +163,7 @@ function formatFileCopyPreview(value: string) {
 }
 
 async function writePlainTextToClipboard(text: string) {
-  await navigator.clipboard.writeText(text);
+  await copyTextToClipboard(text);
 }
 
 function markdownToPlainText(markdown: string) {
@@ -211,13 +212,15 @@ function markdownToCleanRichHtml(markdown: string) {
 }
 
 async function writeRichTextToClipboard(markdown: string) {
-  const clipboardWithRichText = navigator.clipboard as Clipboard & {
-    write?: Clipboard["write"];
-  };
+  const clipboardWithRichText = navigator.clipboard as
+    | (Clipboard & {
+        write?: Clipboard["write"];
+      })
+    | undefined;
   const html = markdownToCleanRichHtml(markdown);
   const plainText = markdownToPlainText(markdown);
 
-  if (clipboardWithRichText.write && typeof ClipboardItem !== "undefined") {
+  if (clipboardWithRichText?.write && typeof ClipboardItem !== "undefined") {
     await clipboardWithRichText.write([
       new ClipboardItem({
         "text/html": new Blob([html], { type: "text/html" }),
