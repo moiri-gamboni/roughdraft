@@ -51,6 +51,74 @@ describe("editor round-trip fidelity", () => {
   });
 });
 
+describe("emphasis stays emphasis after edits", () => {
+  function editRoundTrip(
+    markdown: string,
+    edit: (editor: Editor) => void,
+  ): { saved: string; reparsedText: string } {
+    const { doc, comments, frontmatter, endmatter } =
+      criticMarkdownToEditorState(markdown);
+    const editor = new Editor({
+      extensions: createEditorExtensions(),
+      content: doc,
+    });
+    edit(editor);
+    const saved = editorStateToCriticMarkdown(editor.getJSON(), comments, {
+      frontmatter,
+      endmatter,
+    });
+    editor.destroy();
+
+    const reparsed = new Editor({
+      extensions: createEditorExtensions(),
+      content: criticMarkdownToEditorState(saved).doc,
+    });
+    const reparsedText = reparsed.getText();
+    reparsed.destroy();
+    return { saved, reparsedText };
+  }
+
+  it("moves trailing punctuation out of bold glued to a word", () => {
+    // Deleting the space after the bold run: `**Both tiers:**the` cannot
+    // close, CommonMark shows the asterisks literally.
+    const { saved, reparsedText } = editRoundTrip(
+      "**Both tiers:** the field\n",
+      (editor) => editor.commands.deleteRange({ from: 12, to: 13 }),
+    );
+
+    expect(saved).toBe("**Both tiers**:the field\n");
+    expect(reparsedText).toBe("Both tiers:the field");
+  });
+
+  it("moves leading punctuation out of bold glued to a word", () => {
+    const { saved, reparsedText } = editRoundTrip(
+      "the **:bold** here\n",
+      (editor) => editor.commands.deleteRange({ from: 4, to: 5 }),
+    );
+
+    expect(saved).toBe("the:**bold** here\n");
+    expect(reparsedText).toBe("the:bold here");
+  });
+
+  it("keeps intraword emphasis readable", () => {
+    const { saved, reparsedText } = editRoundTrip(
+      "see *em text* here\n",
+      (editor) => editor.commands.deleteRange({ from: 4, to: 5 }),
+    );
+
+    expect(saved).toBe("see*em text* here\n");
+    expect(reparsedText).toBe("seeem text here");
+  });
+
+  it("leaves ordinary emphasis alone", () => {
+    const { saved } = editRoundTrip("the **bold text** here\n", (editor) =>
+      editor.commands.deleteRange({ from: 5, to: 10 }),
+    );
+
+    expect(saved).toBe("the **text** here\n");
+  });
+});
+
 describe("through a live editor", () => {
   /**
    * generateJSON does not add the trailing empty paragraph that the editor
