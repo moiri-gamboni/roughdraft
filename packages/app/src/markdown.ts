@@ -495,6 +495,73 @@ export function createMarkedRenderer(options?: MarkdownOptions) {
   return renderer;
 }
 
+const emphasisPunctuation = /[\p{P}\p{S}]/u;
+
+function isEmphasisPunctuation(character: string): boolean {
+  return emphasisPunctuation.test(character);
+}
+
+function isEmphasisAlphanumeric(character: string): boolean {
+  return (
+    character !== "" &&
+    !/\s/.test(character) &&
+    !isEmphasisPunctuation(character)
+  );
+}
+
+/**
+ * Wrap inline content in `*`/`**` so CommonMark actually reads the delimiters
+ * as emphasis. A closing run that follows punctuation must not be glued to a
+ * letter (`**tiers:**the` is literal), and the mirror holds for an opening
+ * run (`the**:tiers**`). Editing can produce exactly that, e.g. deleting the
+ * space after `**Both tiers:**`. The edge punctuation moves outside the
+ * delimiters: `**Both tiers**:the` renders as intended.
+ *
+ * Em uses `*` rather than turndown's `_` because `_` can never be intraword,
+ * so `s_em_` after a deleted space is literal however it is arranged.
+ */
+function wrapEmphasis(
+  content: string,
+  delimiter: string,
+  node: HTMLElement,
+): string {
+  const flanking = (
+    node as HTMLElement & {
+      flankingWhitespace?: { leading: string; trailing: string };
+    }
+  ).flankingWhitespace;
+  const previousCharacter = flanking?.leading
+    ? " "
+    : (node.previousSibling?.textContent?.slice(-1) ?? "");
+  const nextCharacter = flanking?.trailing
+    ? " "
+    : (node.nextSibling?.textContent?.charAt(0) ?? "");
+
+  let prefix = "";
+  let suffix = "";
+  let inner = content;
+
+  if (isEmphasisAlphanumeric(previousCharacter)) {
+    const match = inner.match(/^[\p{P}\p{S}]+/u);
+    if (match) {
+      prefix = match[0];
+      inner = inner.slice(prefix.length);
+    }
+  }
+
+  if (isEmphasisAlphanumeric(nextCharacter)) {
+    const match = inner.match(/[\p{P}\p{S}]+$/u);
+    if (match) {
+      suffix = match[0];
+      inner = inner.slice(0, inner.length - suffix.length);
+    }
+  }
+
+  if (!inner.trim()) return content;
+
+  return `${prefix}${delimiter}${inner}${delimiter}${suffix}`;
+}
+
 export function createTurndownService(): TurndownService {
   const service = new TurndownService({
     headingStyle: "atx",
@@ -668,6 +735,16 @@ export function createTurndownService(): TurndownService {
         ? ` "${title.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
         : "";
       return `![${alt}](${normalizedSrc}${titleMarkdown})`;
+    },
+  });
+
+  service.addRule("flankingSafeEmphasis", {
+    filter: ["em", "i", "strong", "b"],
+    replacement(content, node) {
+      if (!content.trim()) return "";
+      const delimiter =
+        node.nodeName === "STRONG" || node.nodeName === "B" ? "**" : "*";
+      return wrapEmphasis(content, delimiter, node as HTMLElement);
     },
   });
 
