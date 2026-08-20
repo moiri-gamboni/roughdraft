@@ -231,7 +231,12 @@ export function buildCommentThreadRailItems(
   groups: CommentGroupAnchor[],
   comments: ReadonlyMap<string, CriticComment>,
 ): CommentThreadRailItem[] {
-  const items: CommentThreadRailItem[] = [];
+  // Keyed by thread root: a comment whose range partially overlaps another
+  // comment's is anchored under two different id sets (e.g. `[c1]` and
+  // `[c1, c2]`), so the same thread shows up in several groups. Rendering it
+  // once per group duplicates React keys and the rail's height map, and the
+  // cards pile onto each other.
+  const items = new Map<string, CommentThreadRailItem>();
 
   for (const group of groups) {
     const visibleComments = collectAnchoredThreadComments(
@@ -246,7 +251,23 @@ export function buildCommentThreadRailItems(
 
       if (threadComments.length === 0) continue;
 
-      items.push({
+      const existing = items.get(thread.comment.id);
+      if (existing) {
+        existing.anchorTop = Math.min(existing.anchorTop, group.anchorTop);
+        existing.anchorBottom = Math.max(
+          existing.anchorBottom,
+          group.anchorBottom,
+        );
+        existing.commentIds = [
+          ...new Set([
+            ...existing.commentIds,
+            ...threadComments.map((comment) => comment.id),
+          ]),
+        ];
+        continue;
+      }
+
+      items.set(thread.comment.id, {
         key: thread.comment.id,
         anchorGroupKey: group.key,
         rootCommentId: thread.comment.id,
@@ -257,7 +278,9 @@ export function buildCommentThreadRailItems(
     }
   }
 
-  return items;
+  return [...items.values()].sort(
+    (left, right) => left.anchorTop - right.anchorTop,
+  );
 }
 
 export function resolveCommentRailLayouts(

@@ -61,4 +61,23 @@ describe("buildCommentThreadRailItems", () => {
     expect(items).toHaveLength(1);
     expect(items[0]?.commentIds).toEqual(["c1", "c2"]);
   });
+
+  it("renders a thread once when its anchor is split across groups", () => {
+    // Commenting on a range that partially overlaps an existing comment
+    // leaves c1 anchored as `[c1]` on one side and `[c1, c2]` on the other.
+    const { comments } = criticMarkdownToRenderedHtml(
+      "{==a {==b==}{>>c2<<}{#c2} c==}{>>c1<<}{#c1}",
+    );
+
+    const items = buildCommentThreadRailItems(
+      [
+        { ...anchorGroupFor(["c1"]), anchorTop: 0, anchorBottom: 20 },
+        { ...anchorGroupFor(["c1", "c2"]), anchorTop: 30, anchorBottom: 50 },
+      ],
+      comments,
+    );
+
+    expect(items.map((item) => item.key)).toEqual(["c1", "c2"]);
+    expect(items[0]).toMatchObject({ anchorTop: 0, anchorBottom: 50 });
+  });
 });
