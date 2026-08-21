@@ -44,10 +44,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./components/ui/dialog";
-import {
-  DocumentWorkspace,
-  type DraftRestoreOffer,
-} from "./DocumentWorkspace";
+import { DocumentWorkspace, type DraftRestoreOffer } from "./DocumentWorkspace";
 import { BackendUnavailableError, detectBackend } from "./detect-backend";
 import { logDraftEvent } from "./draft-store";
 import {
@@ -1923,9 +1920,7 @@ export function App() {
           attemptedContent: content,
           currentContent: error.current.content,
           draftBaseContent:
-            record?.baseContent ??
-            documentPageRef.current?.content ??
-            null,
+            record?.baseContent ?? documentPageRef.current?.content ?? null,
           editorContent: documentDraftContentRef.current ?? content,
         });
         logDraftEvent("conflict-classified", { resolution });

@@ -169,7 +169,11 @@ export function updateBase(
   guardedSetItem(
     storage,
     key,
-    serialize({ content: existing.content, baseContent, updatedAt: Date.now() }),
+    serialize({
+      content: existing.content,
+      baseContent,
+      updatedAt: Date.now(),
+    }),
   );
 }
 
