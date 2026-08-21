@@ -57,10 +57,11 @@ type EditorViewMode = "rich-text" | "code";
 export type DocumentInteractionMode = "viewing" | "suggesting" | "editing";
 
 /**
- * Where a local content change came from. Only `"edit"` is the user changing
- * the document; the other two are the card adopting content it was handed.
+ * Where a local content change came from. `"edit"` is the user changing the
+ * document; `"adopt"` is the card taking content it was handed, whether from
+ * disk or from a restored draft. Nothing downstream needs those two apart.
  */
-export type LocalContentOrigin = "edit" | "adopt" | "restore";
+export type LocalContentOrigin = "edit" | "adopt";
 
 /**
  * An unsent draft the app wants put back into the editor.
@@ -2277,7 +2278,7 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
       setMarkdown(nextMarkdown);
       setRichTextSourceMarkdown(nextMarkdown);
       setRichTextSourceVersion((current) => current + 1);
-      onLocalContentChange?.(nextMarkdown, markSaved ? "adopt" : "restore");
+      onLocalContentChange?.(nextMarkdown, "adopt");
       reportDirtyState(!markSaved);
       onSaveStateChange(markSaved ? "saved" : "unsaved");
     },

@@ -2263,7 +2263,7 @@ describe("PageCard editor integration", () => {
       });
 
       const calls = rendered.onLocalContentChange.mock.calls;
-      expect(calls).toContainEqual(["Adopted from disk", "adopt"]);
+      expect(calls.map((call) => call[0])).toContain("Adopted from disk");
       expect(calls.every((call) => call[1] !== "edit")).toBe(true);
     });
   });
@@ -2280,10 +2280,13 @@ describe("PageCard editor integration", () => {
 
       expect(rendered.getEditor().getText()).toContain("Unsent draft body");
       expect(rendered.onDirtyStateChange).toHaveBeenLastCalledWith(true);
-      expect(rendered.onLocalContentChange.mock.calls).toContainEqual([
+      const restoreCalls = rendered.onLocalContentChange.mock.calls;
+      expect(restoreCalls.map((call) => call[0])).toContain(
         "Unsent draft body",
-        "restore",
-      ]);
+      );
+      // Restored content is the app handing back what it already stored, so it
+      // must not be re-recorded as fresh unsent work.
+      expect(restoreCalls.every((call) => call[1] !== "edit")).toBe(true);
       // Delivering it is the whole point of restoring it.
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 700));
