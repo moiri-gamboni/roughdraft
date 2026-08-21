@@ -45,6 +45,7 @@ import {
 } from "./components/ui/dialog";
 import { DocumentWorkspace } from "./DocumentWorkspace";
 import { detectBackend } from "./detect-backend";
+import { logDraftEvent } from "./draft-store";
 import {
   getCommentAnchorMeasurements,
   groupCommentAnchorMeasurements,
@@ -56,8 +57,10 @@ import { cn } from "./lib/utils";
 import type { DocumentSaveState, LocalContentOrigin } from "./PageCard";
 import { PreviewBackend } from "./preview-backend";
 import { RoughdraftFormatDemo } from "./RoughdraftFormatDemo";
+import { resolveConflict } from "./save-recovery";
 import {
   type CompleteReviewOptions,
+  type DocumentDiskChangeState,
   MarkdownFileConflictError,
   type Page,
   type StorageBackend,
@@ -66,11 +69,24 @@ import { UpdateNotice } from "./UpdateNotice";
 import { fetchUpdateStatus, type UpdateStatus } from "./update-status";
 import { useDraftPersistence } from "./useDraftPersistence";
 
-export type DocumentDiskChangeState =
-  | "clean"
-  | "changed"
-  | "conflict"
-  | "paused";
+/**
+ * The page a backend that returns nothing on save leaves us with: the content
+ * we just sent, titled from its first heading.
+ */
+function pageFromSavedContent(
+  id: string,
+  content: string,
+  version: string | undefined,
+): Page {
+  const firstLine = content.split("\n")[0] || "";
+  const fallbackTitle = id.split("/").at(-1) || id;
+  return {
+    id,
+    content,
+    title: firstLine.replace(/^#*\s*/, "") || fallbackTitle,
+    version,
+  };
+}
 
 export function shouldWarnBeforeUnload({
   activeDocumentPath,
@@ -1506,12 +1522,23 @@ export function App() {
   const documentDirtyRef = useRef(false);
   const documentSaveStateRef = useRef<DocumentSaveState>("saved");
   const documentDraftContentRef = useRef<string | null>(null);
-  const draftPersistence = useDraftPersistence();
+  const documentDiskChangeStateRef = useRef<DocumentDiskChangeState>("clean");
+  const previousDiskChangeStateRef = useRef<DocumentDiskChangeState>("clean");
+  const saveDraftContentRef = useRef<(content: string) => Promise<void>>(
+    async () => {},
+  );
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const { draft: draftPersistence, retryPending: documentRetryPending } =
+    useDraftPersistence({
+      save: (content) => saveDraftContentRef.current(content),
+      getDiskChangeState: () => documentDiskChangeStateRef.current,
+    });
 
   backendRef.current = backend;
   documentPageRef.current = documentPage;
   activeDocumentPathRef.current = activeDocumentPath;
   documentSaveStateRef.current = documentSaveState;
+  documentDiskChangeStateRef.current = documentDiskChangeState;
 
   const applyDocumentPage = useCallback((nextDocument: Page) => {
     setDocumentPage(nextDocument);
@@ -1673,45 +1700,128 @@ export function App() {
     requestedPathState.rawPath,
   ]);
 
-  const handleSaveDocument = useCallback(
-    async (id: string, content: string) => {
-      if (!activeDocumentPath) return;
+  /** Serialize every save so the retry cannot interleave with the debounce. */
+  const runExclusively = useCallback(<T,>(task: () => Promise<T>) => {
+    const run = saveChainRef.current.then(task, task);
+    saveChainRef.current = run.catch(() => undefined);
+    return run;
+  }, []);
+
+  const deliverDocumentSave = useCallback(
+    async (
+      id: string,
+      content: string,
+      expectedVersion: string | undefined,
+      allowConflictResend: boolean,
+    ): Promise<void> => {
+      const currentBackend = backendRef.current;
+      const currentPath = activeDocumentPathRef.current;
+      // Resolving here would report a save that never happened as a success,
+      // and the editor would drop the edits as delivered.
+      if (!currentBackend || !currentPath) {
+        throw new Error("Roughdraft has no open document to save to.");
+      }
+
+      const settleSaved = (savedDocument: Page) => {
+        applyDocumentPage(savedDocument);
+        documentDirtyRef.current = false;
+        draftPersistence.noteSaveSuccess(content);
+      };
+
+      try {
+        const savedDocument = await currentBackend.saveMarkdownFile(
+          currentPath,
+          content,
+          expectedVersion,
+        );
+        settleSaved(
+          savedDocument ?? pageFromSavedContent(id, content, expectedVersion),
+        );
+        return;
+      } catch (error) {
+        if (!(error instanceof MarkdownFileConflictError)) throw error;
+
+        const record = draftPersistence.read();
+        const resolution = resolveConflict({
+          attemptedContent: content,
+          currentContent: error.current.content,
+          draftBaseContent:
+            record?.baseKnown === true
+              ? record.baseContent
+              : (documentPageRef.current?.content ?? null),
+          editorContent: documentDraftContentRef.current ?? content,
+        });
+        logDraftEvent("conflict-classified", { resolution });
+
+        if (resolution === "already-applied") {
+          settleSaved(error.current);
+          return;
+        }
+
+        if (resolution === "base-unchanged" && allowConflictResend) {
+          // Nothing was lost: the destination still holds what we based on, so
+          // re-send once with the version it just told us about.
+          await deliverDocumentSave(id, content, error.current.version, false);
+          return;
+        }
+
+        setDocumentDiskChangeState("conflict");
+        throw error;
+      }
+    },
+    [applyDocumentPage, draftPersistence],
+  );
+
+  const saveDocumentContent = useCallback(
+    (id: string, content: string) => {
       const expectedVersion =
         documentPageRef.current?.id === id
           ? documentPageRef.current.version
           : undefined;
+      return runExclusively(() =>
+        deliverDocumentSave(id, content, expectedVersion, true),
+      );
+    },
+    [deliverDocumentSave, runExclusively],
+  );
 
-      let savedDocument: Page | undefined;
+  saveDraftContentRef.current = async (content: string) => {
+    const currentDocument = documentPageRef.current;
+    if (!currentDocument) {
+      throw new Error("Roughdraft has no open document to save to.");
+    }
+    await saveDocumentContent(currentDocument.id, content);
+  };
+
+  const handleSaveDocument = useCallback(
+    async (id: string, content: string) => {
+      // This save carries at least what the pending retry was going to send.
+      draftPersistence.cancelRetry();
+
       try {
-        savedDocument = await backendRef.current?.saveMarkdownFile(
-          activeDocumentPath,
-          content,
-          expectedVersion,
-        );
+        await saveDocumentContent(id, content);
       } catch (error) {
-        if (error instanceof MarkdownFileConflictError) {
-          setDocumentDiskChangeState("conflict");
+        // A real conflict is the banner's to resolve; anything else is worth
+        // retrying until the destination comes back.
+        if (!(error instanceof MarkdownFileConflictError)) {
+          draftPersistence.noteSaveFailure();
         }
         throw error;
       }
-
-      const firstLine = content.split("\n")[0] || "";
-      const fallbackTitle = id.split("/").at(-1) || id;
-      const title = firstLine.replace(/^#*\s*/, "") || fallbackTitle;
-      const nextDocument = savedDocument ?? {
-        id,
-        content,
-        title,
-        version: expectedVersion,
-      };
-
-      applyDocumentPage(nextDocument);
-      documentDirtyRef.current = false;
-      draftPersistence.noteSaveSuccess(content);
-      setDocumentDiskChangeState("clean");
     },
-    [activeDocumentPath, applyDocumentPage, draftPersistence],
+    [draftPersistence, saveDocumentContent],
   );
+
+  useEffect(() => {
+    const previousDiskChangeState = previousDiskChangeStateRef.current;
+    previousDiskChangeStateRef.current = documentDiskChangeState;
+
+    if (!documentRetryPending) return;
+    if (documentDiskChangeState !== "clean") return;
+    if (previousDiskChangeState === "clean") return;
+
+    draftPersistence.retryNow();
+  }, [documentDiskChangeState, documentRetryPending, draftPersistence]);
 
   const handleDocumentDirtyStateChange = useCallback((isDirty: boolean) => {
     documentDirtyRef.current = isDirty;
@@ -1785,18 +1895,13 @@ export function App() {
     if (!currentBackend || !currentPath || !currentDocument) return;
 
     const content = documentDraftContentRef.current ?? currentDocument.content;
-    const firstLine = content.split("\n")[0] || "";
-    const fallbackTitle =
-      currentDocument.id.split("/").at(-1) || currentDocument.id;
-    const title = firstLine.replace(/^#*\s*/, "") || fallbackTitle;
-    const savedDocument = (await currentBackend.saveMarkdownFile(
-      currentPath,
-      content,
-    )) ?? {
-      ...currentDocument,
-      content,
-      title,
-    };
+    const savedDocument =
+      (await currentBackend.saveMarkdownFile(currentPath, content)) ??
+      pageFromSavedContent(
+        currentDocument.id,
+        content,
+        currentDocument.version,
+      );
 
     applyDocumentPage(savedDocument);
     documentDirtyRef.current = false;
@@ -1819,20 +1924,13 @@ export function App() {
       const content =
         documentDraftContentRef.current ?? currentDocument.content;
       const expectedVersion = currentDocument.version;
-      const firstLine = content.split("\n")[0] || "";
-      const fallbackTitle =
-        currentDocument.id.split("/").at(-1) || currentDocument.id;
-      const title = firstLine.replace(/^#*\s*/, "") || fallbackTitle;
-
-      const savedDocument = (await currentBackend.saveMarkdownFile(
-        currentPath,
-        content,
-        expectedVersion,
-      )) ?? {
-        ...currentDocument,
-        content,
-        title,
-      };
+      const savedDocument =
+        (await currentBackend.saveMarkdownFile(
+          currentPath,
+          content,
+          expectedVersion,
+        )) ??
+        pageFromSavedContent(currentDocument.id, content, expectedVersion);
 
       applyDocumentPage(savedDocument);
       documentDirtyRef.current = false;
@@ -1966,6 +2064,7 @@ export function App() {
         onDocumentDirtyStateChange={handleDocumentDirtyStateChange}
         onDocumentLocalContentChange={handleDocumentLocalContentChange}
         documentDiskChangeState={documentDiskChangeState}
+        documentRetryPending={documentRetryPending}
         documentForceResetKey={documentForceResetKey}
         onReloadDocumentFromDisk={handleReloadDocumentFromDisk}
         onKeepEditingWithoutAutosave={handleKeepEditingWithoutAutosave}

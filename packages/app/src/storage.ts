@@ -21,6 +21,17 @@ export class MarkdownFileConflictError extends Error {
   }
 }
 
+/**
+ * How the open document relates to what the destination holds. Lives here
+ * rather than in `App` so `DocumentWorkspace` can name it without importing
+ * back up into its own parent.
+ */
+export type DocumentDiskChangeState =
+  | "clean"
+  | "changed"
+  | "conflict"
+  | "paused";
+
 export interface StoredAsset {
   markdownPath: string;
   previewUrl: string;

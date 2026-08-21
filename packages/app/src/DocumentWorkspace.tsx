@@ -56,11 +56,15 @@ import {
   PageCard,
 } from "./PageCard";
 import { RobotsHighFiveToy } from "./RobotsHighFiveToy";
-import type { CompleteReviewOptions, Page, StorageBackend } from "./storage";
+import type {
+  CompleteReviewOptions,
+  DocumentDiskChangeState,
+  Page,
+  StorageBackend,
+} from "./storage";
 import { useReadingWidth } from "./useReadingWidth";
 import { useReviewLayoutShiftAnimation } from "./useReviewLayoutShiftAnimation";
 
-type DiskChangeState = "clean" | "changed" | "conflict" | "paused";
 type ReviewHandoffState =
   | "idle"
   | "notifying"
@@ -133,7 +137,7 @@ const documentInteractionModeOptions = [
 }[];
 
 const conflictNoticeCopy: Record<
-  Exclude<DiskChangeState, "clean">,
+  Exclude<DocumentDiskChangeState, "clean">,
   {
     title: string;
     body: string;
@@ -242,7 +246,8 @@ async function writeRichTextToClipboard(markdown: string) {
 
 function getSaveStatusViewModel(
   saveState: DocumentSaveState,
-  diskChangeState: DiskChangeState,
+  diskChangeState: DocumentDiskChangeState,
+  retryPending: boolean,
 ) {
   if (diskChangeState === "conflict") {
     return {
@@ -281,6 +286,18 @@ function getSaveStatusViewModel(
   }
 
   if (saveState === "error") {
+    // The edits are durable in the browser either way; only say "failed" once
+    // nothing is still working to deliver them.
+    if (retryPending) {
+      const retryingLabel = "Changes saved in this browser, retrying";
+      return {
+        label: retryingLabel,
+        ariaLabel: retryingLabel,
+        tone: "warning" as const,
+        Icon: RefreshCcw,
+      };
+    }
+
     return {
       label: "Save failed",
       ariaLabel: "Save failed",
@@ -309,11 +326,17 @@ function getSaveStatusViewModel(
 export function DocumentSaveStatusIndicator({
   saveState,
   diskChangeState,
+  retryPending = false,
 }: {
   saveState: DocumentSaveState;
-  diskChangeState: DiskChangeState;
+  diskChangeState: DocumentDiskChangeState;
+  retryPending?: boolean;
 }) {
-  const saveStatus = getSaveStatusViewModel(saveState, diskChangeState);
+  const saveStatus = getSaveStatusViewModel(
+    saveState,
+    diskChangeState,
+    retryPending,
+  );
   const SaveStatusIcon = saveStatus.Icon;
 
   return (
@@ -348,7 +371,7 @@ export function isReviewHandoffDisabled({
   reviewHandoffState,
 }: {
   saveState: DocumentSaveState;
-  documentDiskChangeState: DiskChangeState;
+  documentDiskChangeState: DocumentDiskChangeState;
   reviewHandoffState: ReviewHandoffState;
 }) {
   // Transient save states ("saving"/"unsaved") intentionally do NOT disable the
@@ -404,7 +427,9 @@ interface DocumentWorkspaceProps {
     markdown: string,
     origin: LocalContentOrigin,
   ) => void;
-  documentDiskChangeState: DiskChangeState;
+  documentDiskChangeState: DocumentDiskChangeState;
+  /** A failed save is still being retried, so the edits are not lost. */
+  documentRetryPending?: boolean;
   documentForceResetKey: string | null;
   onReloadDocumentFromDisk: () => void | Promise<void>;
   onKeepEditingWithoutAutosave: () => void;
@@ -427,6 +452,7 @@ export function DocumentWorkspace({
   onDocumentDirtyStateChange,
   onDocumentLocalContentChange,
   documentDiskChangeState,
+  documentRetryPending = false,
   documentForceResetKey,
   onReloadDocumentFromDisk,
   onKeepEditingWithoutAutosave,
@@ -765,6 +791,7 @@ export function DocumentWorkspace({
           <DocumentSaveStatusIndicator
             saveState={saveState}
             diskChangeState={documentDiskChangeState}
+            retryPending={documentRetryPending}
           />
         </div>
       ) : null}
