@@ -36,10 +36,7 @@ import { copyTextToClipboard } from "./lib/clipboard";
 import { cn } from "./lib/utils";
 import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
 import { toHtml } from "./markdown";
-import {
-  resolveCommentAnchor,
-  resolveSuggestedDeletion,
-} from "./review-selection";
+import { canSuggestDeletion, resolveCommentAnchor } from "./review-selection";
 import type { Page, StorageBackend } from "./storage";
 import { useCommentAnchorLayout } from "./useCommentAnchorLayout";
 import { useReviewLayoutShiftAnimation } from "./useReviewLayoutShiftAnimation";
@@ -1565,48 +1562,16 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     if (!currentEditor || currentEditor.state.selection.empty) return;
 
     // A deletion mark on pure whitespace does not survive serialization, so
-    // deleting a whitespace-only selection becomes a substitution that
-    // absorbs the neighbouring characters (see resolveSuggestedDeletion).
+    // a whitespace-only selection is refused like an empty one (see
+    // canSuggestDeletion).
     const { from, to } = currentEditor.state.selection;
-    const resolution = resolveSuggestedDeletion(currentEditor.state, from, to);
-    if (!resolution) return;
+    if (!canSuggestDeletion(currentEditor.state, from, to)) return;
 
-    if (resolution.kind === "deletion") {
-      const change = createCriticChange("deletion", undefined, {
-        existingChanges: getDocumentCriticChanges(currentEditor),
-      });
-
-      currentEditor.chain().focus().setCriticChange(change).run();
-      emitMarkdownChange(currentEditor.getJSON());
-      refreshCriticChanges();
-      return;
-    }
-
-    const change = createCriticChange("substitution-old", undefined, {
+    const change = createCriticChange("deletion", undefined, {
       existingChanges: getDocumentCriticChanges(currentEditor),
     });
-    const replacementChange: CriticChangeAttrs = {
-      ...change,
-      kind: "substitution-new",
-    };
 
-    currentEditor
-      .chain()
-      .focus()
-      .setTextSelection({ from: resolution.from, to: resolution.to })
-      .setCriticChange(change)
-      .insertContentAt(resolution.to, {
-        type: "text",
-        text: resolution.replacement,
-        marks: [
-          {
-            type: "criticChange",
-            attrs: replacementChange,
-          },
-        ],
-      })
-      .run();
-    setSelectedChangeId(change.changeId);
+    currentEditor.chain().focus().setCriticChange(change).run();
     emitMarkdownChange(currentEditor.getJSON());
     refreshCriticChanges();
   }, [emitMarkdownChange, refreshCriticChanges]);
