@@ -23,7 +23,6 @@ describe("resolveRestore", () => {
   const draft = {
     content: "draft body",
     baseContent: "disk body",
-    baseKnown: true,
   };
 
   it("does nothing when no draft was stored", () => {
@@ -45,7 +44,7 @@ describe("resolveRestore", () => {
   it("does nothing when the draft matches even with an unknown base", () => {
     expect(
       resolveRestore({
-        draft: { content: "disk body", baseContent: "", baseKnown: false },
+        draft: { content: "disk body", baseContent: null },
         diskContent: "disk body",
         mode: "local",
       }),
@@ -71,7 +70,7 @@ describe("resolveRestore", () => {
   it("asks when the base is unknown even though disk is empty", () => {
     expect(
       resolveRestore({
-        draft: { content: "draft body", baseContent: "", baseKnown: false },
+        draft: { content: "draft body", baseContent: null },
         diskContent: "",
         mode: "local",
       }),
@@ -81,7 +80,7 @@ describe("resolveRestore", () => {
   it("asks in local mode when the base is unknown and disk is non-empty", () => {
     expect(
       resolveRestore({
-        draft: { content: "draft body", baseContent: "", baseKnown: false },
+        draft: { content: "draft body", baseContent: null },
         diskContent: "disk body",
         mode: "local",
       }),

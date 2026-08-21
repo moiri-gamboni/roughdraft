@@ -133,7 +133,6 @@ describe("draft records", () => {
     expect(readDraft(storage, key)).toMatchObject({
       content: "draft",
       baseContent: "disk",
-      baseKnown: true,
     });
   });
 
@@ -143,7 +142,7 @@ describe("draft records", () => {
 
     expect(readDraft(storage, key)).toMatchObject({
       content: "draft",
-      baseKnown: false,
+      baseContent: null,
     });
   });
 
@@ -161,7 +160,6 @@ describe("draft records", () => {
     expect(readDraft(storage, key)).toMatchObject({
       content: "second",
       baseContent: "first",
-      baseKnown: true,
     });
   });
 
@@ -192,16 +190,28 @@ describe("draft records", () => {
         schema: 99,
         content: "future draft",
         baseContent: "disk",
-        baseKnown: true,
         updatedAt: 1,
       }),
     );
 
     expect(readDraft(storage, key)).toMatchObject({
       content: "future draft",
-      baseKnown: false,
+      baseContent: null,
     });
     expect(storage.getItem(key)).not.toBeNull();
+  });
+
+  it("surfaces an unknown base when the stored one is not a string", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      key,
+      JSON.stringify({ schema: 1, content: "draft", baseContent: 42 }),
+    );
+
+    expect(readDraft(storage, key)).toMatchObject({
+      content: "draft",
+      baseContent: null,
+    });
   });
 
   it("survives storage being unavailable", () => {
@@ -224,8 +234,7 @@ describe("quota pressure", () => {
       JSON.stringify({
         schema: 1,
         content: "old",
-        baseContent: "",
-        baseKnown: false,
+        baseContent: null,
         updatedAt: 1,
       }),
     );
@@ -234,8 +243,7 @@ describe("quota pressure", () => {
       JSON.stringify({
         schema: 1,
         content: "newer",
-        baseContent: "",
-        baseKnown: false,
+        baseContent: null,
         updatedAt: 2,
       }),
     );
@@ -260,8 +268,7 @@ describe("quota pressure", () => {
       JSON.stringify({
         schema: 1,
         content: "old",
-        baseContent: "",
-        baseKnown: false,
+        baseContent: null,
         updatedAt: 1,
       }),
     );
@@ -270,8 +277,7 @@ describe("quota pressure", () => {
       JSON.stringify({
         schema: 1,
         content: "newer",
-        baseContent: "",
-        baseKnown: false,
+        baseContent: null,
         updatedAt: 2,
       }),
     );
