@@ -2,10 +2,7 @@ import { Editor } from "@tiptap/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { criticMarkdownToEditorState } from "./critic-markup";
 import { createEditorExtensions } from "./editor-extensions";
-import {
-  resolveCommentAnchor,
-  resolveSuggestedDeletion,
-} from "./review-selection";
+import { canSuggestDeletion, resolveCommentAnchor } from "./review-selection";
 
 const editor = new Editor({
   extensions: createEditorExtensions(),
@@ -40,42 +37,19 @@ describe("resolveCommentAnchor", () => {
   });
 });
 
-describe("resolveSuggestedDeletion", () => {
-  it("keeps a solid selection as a plain deletion", () => {
+describe("canSuggestDeletion", () => {
+  it("allows a selection with visible text", () => {
     load("the field\n");
-    expect(resolveSuggestedDeletion(editor.state, 5, 10)).toEqual({
-      kind: "deletion",
-      from: 5,
-      to: 10,
-    });
+    expect(canSuggestDeletion(editor.state, 5, 10)).toBe(true);
   });
 
-  it("turns a deleted space into a substitution absorbing its neighbors", () => {
+  it("refuses a whitespace-only selection", () => {
     load("the field\n");
-    expect(resolveSuggestedDeletion(editor.state, 4, 5)).toEqual({
-      kind: "substitution",
-      from: 3,
-      to: 6,
-      replacement: "ef",
-    });
+    expect(canSuggestDeletion(editor.state, 4, 5)).toBe(false);
   });
 
-  it("keeps unselected whitespace of the run in the replacement", () => {
-    // Markdown collapses doubled spaces at parse, so type the second one.
-    load("a b\n");
-    editor.commands.insertContentAt(2, { type: "text", text: " " });
-    // Select only the second space of the doubled run.
-    expect(resolveSuggestedDeletion(editor.state, 3, 4)).toEqual({
-      kind: "substitution",
-      from: 1,
-      to: 5,
-      replacement: "a b",
-    });
-  });
-
-  it("refuses at a paragraph edge", () => {
-    load("ab \n\ncd\n");
-    // Trailing space of the first paragraph has no right neighbor.
-    expect(resolveSuggestedDeletion(editor.state, 3, 4)).toBeNull();
+  it("refuses an empty selection", () => {
+    load("the field\n");
+    expect(canSuggestDeletion(editor.state, 5, 5)).toBe(false);
   });
 });

@@ -8,10 +8,7 @@ import {
   editorStateToCriticMarkdown,
 } from "./critic-markup";
 import { createEditorExtensions } from "./editor-extensions";
-import {
-  resolveCommentAnchor,
-  resolveSuggestedDeletion,
-} from "./review-selection";
+import { canSuggestDeletion, resolveCommentAnchor } from "./review-selection";
 
 /**
  * Seeded fuzz over the edit -> save -> reparse cycle. Each case applies a
@@ -154,52 +151,26 @@ const OPS: Record<string, FuzzOp> = {
     return `deleteComment(${id})`;
   },
   suggestDelete(context) {
-    // Mirrors PageCard's handleSuggestDeletion: a whitespace-only selection
-    // becomes a substitution absorbing the neighbouring characters.
+    // Mirrors PageCard's handleSuggestDeletion: whitespace-only selections
+    // are refused (a deletion mark on pure whitespace cannot survive
+    // serialization).
     const range = randomRange(context, 8);
     if (!range) return null;
-    const resolution = resolveSuggestedDeletion(
-      context.editor.state,
-      range.from,
-      range.to,
-    );
-    if (!resolution) return null;
-    const existingChanges = [
-      ...collectMarkIds(
-        context.editor.getJSON(),
-        "criticChange",
-        "changeId",
-        new Set<string>(),
-      ),
-    ].map((changeId) => ({ changeId }));
-    if (resolution.kind === "deletion") {
-      const change = createCriticChange("deletion", undefined, {
-        existingChanges,
-      });
-      context.editor.commands.setTextSelection(range);
-      if (!context.editor.commands.setCriticChange(change)) return null;
-      return `suggestDelete(${range.from},${range.to})=${change.changeId}`;
-    }
-    const change = createCriticChange("substitution-old", undefined, {
-      existingChanges,
+    if (!canSuggestDeletion(context.editor.state, range.from, range.to))
+      return null;
+    const change = createCriticChange("deletion", undefined, {
+      existingChanges: [
+        ...collectMarkIds(
+          context.editor.getJSON(),
+          "criticChange",
+          "changeId",
+          new Set<string>(),
+        ),
+      ].map((changeId) => ({ changeId })),
     });
-    const applied = context.editor
-      .chain()
-      .setTextSelection({ from: resolution.from, to: resolution.to })
-      .setCriticChange(change)
-      .insertContentAt(resolution.to, {
-        type: "text",
-        text: resolution.replacement,
-        marks: [
-          {
-            type: "criticChange",
-            attrs: { ...change, kind: "substitution-new" },
-          },
-        ],
-      })
-      .run();
-    if (!applied) return null;
-    return `substituteWhitespace(${resolution.from},${resolution.to})=${change.changeId}`;
+    context.editor.commands.setTextSelection(range);
+    if (!context.editor.commands.setCriticChange(change)) return null;
+    return `suggestDelete(${range.from},${range.to})=${change.changeId}`;
   },
   resolveSuggestion(context) {
     const ids = [
