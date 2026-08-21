@@ -36,7 +36,7 @@ import { copyTextToClipboard } from "./lib/clipboard";
 import { cn } from "./lib/utils";
 import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
 import { toHtml } from "./markdown";
-import { canSuggestDeletion, resolveCommentAnchor } from "./review-selection";
+import { resolveCommentAnchor } from "./review-selection";
 import type { Page, StorageBackend } from "./storage";
 import { useCommentAnchorLayout } from "./useCommentAnchorLayout";
 import { useReviewLayoutShiftAnimation } from "./useReviewLayoutShiftAnimation";
@@ -1560,12 +1560,6 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
   const handleSuggestDeletion = useCallback(() => {
     const currentEditor = editorRef.current;
     if (!currentEditor || currentEditor.state.selection.empty) return;
-
-    // A deletion mark on pure whitespace does not survive serialization, so
-    // a whitespace-only selection is refused like an empty one (see
-    // canSuggestDeletion).
-    const { from, to } = currentEditor.state.selection;
-    if (!canSuggestDeletion(currentEditor.state, from, to)) return;
 
     const change = createCriticChange("deletion", undefined, {
       existingChanges: getDocumentCriticChanges(currentEditor),

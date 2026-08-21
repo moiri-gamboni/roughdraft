@@ -1,6 +1,7 @@
 import { Editor } from "@tiptap/core";
 import { describe, expect, it } from "vitest";
 import {
+  createCriticChange,
   createCriticComment,
   criticMarkdownToEditorState,
   editorStateToCriticMarkdown,

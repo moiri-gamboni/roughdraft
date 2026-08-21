@@ -595,13 +595,11 @@ export function createTurndownService(): TurndownService {
     headingStyle: "atx",
     codeBlockStyle: "fenced",
     bulletListMarker: "-",
-    // Known limitation: turndown replaces whitespace-only ("blank") nodes
-    // here before any rule can see them, so a review span anchored on pure
-    // whitespace (a comment or suggested deletion on a lone space) does not
-    // survive serialization. Emitting `{-- --}` is not enough either: the
-    // flanking whitespace is re-added outside the marker and ProseMirror
-    // drops a whitespace-only mark span on reparse. A real fix needs
-    // sentinel text through serializer, parser and editor.
+    // Turndown replaces whitespace-only ("blank") nodes here before any
+    // rule can see them. Review spans holding only whitespace (a suggested
+    // deletion of a lone space) are kept out of this path by the CriticMarkup
+    // serializer, which shields them with a private-use character before
+    // turndown parses the HTML (see shieldBlankReviewSpans).
     blankReplacement(_content, node) {
       if (node.hasAttribute(rawMarkdownBlockAttribute)) {
         return `\n\n${decodeRawMarkdownBlock(

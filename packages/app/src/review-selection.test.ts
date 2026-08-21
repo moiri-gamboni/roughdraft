@@ -2,7 +2,7 @@ import { Editor } from "@tiptap/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { criticMarkdownToEditorState } from "./critic-markup";
 import { createEditorExtensions } from "./editor-extensions";
-import { canSuggestDeletion, resolveCommentAnchor } from "./review-selection";
+import { resolveCommentAnchor } from "./review-selection";
 
 const editor = new Editor({
   extensions: createEditorExtensions(),
@@ -34,22 +34,5 @@ describe("resolveCommentAnchor", () => {
       kind: "point",
       at: 4,
     });
-  });
-});
-
-describe("canSuggestDeletion", () => {
-  it("allows a selection with visible text", () => {
-    load("the field\n");
-    expect(canSuggestDeletion(editor.state, 5, 10)).toBe(true);
-  });
-
-  it("refuses a whitespace-only selection", () => {
-    load("the field\n");
-    expect(canSuggestDeletion(editor.state, 4, 5)).toBe(false);
-  });
-
-  it("refuses an empty selection", () => {
-    load("the field\n");
-    expect(canSuggestDeletion(editor.state, 5, 5)).toBe(false);
   });
 });
