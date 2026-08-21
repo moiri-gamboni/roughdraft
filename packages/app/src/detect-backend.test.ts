@@ -71,27 +71,6 @@ describe("detectBackend", () => {
     expect(createRemoteBackend).not.toHaveBeenCalled();
   });
 
-  it("does not hide a broken remote session by falling back to local storage", async () => {
-    window.history.replaceState(null, "", "/?session=missing&token=bad");
-    global.fetch = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            backend: "local-files",
-            capabilities: { remoteDocuments: true },
-          }),
-          { status: 200 },
-        ),
-    ) as unknown as typeof fetch;
-    vi.spyOn(RemoteBackend, "create").mockRejectedValue(
-      new Error("Could not load remote document session missing: 404"),
-    );
-
-    await expect(detectBackend()).rejects.toThrow(
-      /Could not load remote document session/,
-    );
-  });
-
   it("uses local storage when no server is available", async () => {
     global.fetch = vi.fn(async () => {
       throw new Error("offline");
@@ -126,7 +105,7 @@ describe("detectBackend", () => {
     );
   });
 
-  it("classifies a session that cannot be reopened as unreachable", async () => {
+  it("reports a session that cannot be reopened rather than falling back to local storage", async () => {
     window.history.replaceState(null, "", "/?session=missing");
     global.fetch = vi.fn(
       async () =>
@@ -142,8 +121,12 @@ describe("detectBackend", () => {
       new Error("Could not load remote document session missing: 404"),
     );
 
-    await expect(detectBackend()).rejects.toBeInstanceOf(
-      BackendUnavailableError,
-    );
+    // The boot retries on BackendUnavailableError and gives up on anything
+    // else, so the class matters as much as the message the reviewer reads.
+    const rejection = await detectBackend().catch((error: unknown) => error);
+    expect(rejection).toBeInstanceOf(BackendUnavailableError);
+    expect(rejection).toMatchObject({
+      message: expect.stringMatching(/Could not load remote document session/),
+    });
   });
 });
