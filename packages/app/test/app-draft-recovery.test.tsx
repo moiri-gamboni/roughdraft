@@ -244,6 +244,39 @@ describe("recovering unsent edits on boot", () => {
     expect(saved).toEqual([]);
   });
 
+  it("keeps the remote draft on the shelf while the restore is still on offer", async () => {
+    // A remote save that never reached the CLI leaves the server holding the
+    // pre-save content, so the bootstrap GET returns text the draft has moved
+    // past. That draft is the only durable copy of the unsent work: offering
+    // the restore must not consume it.
+    const draftKey = `${DRAFT_KEY_PREFIX}origin:/work/origin.md`;
+    window.history.replaceState(null, "", "/?session=abc123&editor=code");
+    localStorage.setItem(
+      `${DRAFT_KEY_PREFIX}session:abc123`,
+      "/work/origin.md",
+    );
+    writeDraftRecord({
+      content: "# Plan\n\nUnsent body.\n",
+      baseContent: "# Plan\n\nOn disk.\n",
+      key: draftKey,
+    });
+    const { backend } = createFakeBackend({
+      kind: "remote",
+      sessionId: "abc123",
+      originPath: "/work/origin.md",
+    });
+    detectBackendMock.mockResolvedValue(backend);
+
+    await renderApp();
+    await waitFor(() => queryByTestId("draft-restore-notice") !== null);
+
+    const stored = localStorage.getItem(draftKey);
+    expect(stored).not.toBeNull();
+    expect(JSON.parse(stored as string).content).toBe(
+      "# Plan\n\nUnsent body.\n",
+    );
+  });
+
   it("leaves nothing behind when the draft already reached the file", async () => {
     const { backend, saved } = createFakeBackend();
     detectBackendMock.mockResolvedValue(backend);
