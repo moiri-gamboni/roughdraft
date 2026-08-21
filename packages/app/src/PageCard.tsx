@@ -1538,20 +1538,22 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
       currentEditor.commands.setTextSelection(anchor.at);
     }
     const pointComment = anchor.kind === "point";
-    const existingIds = pointComment
-      ? []
-      : getSelectionCommentIds(currentEditor);
     const comment = createCriticComment(undefined, {
       existingComments: commentsRef.current.values(),
     });
-    const commentIds = [...existingIds, comment.id];
+    const commentIds = [comment.id];
+    const { from: anchorFrom, to: anchorTo } = currentEditor.state.selection;
 
     // Refuse before touching state when the anchor cannot apply (e.g. an
     // image nested where the schema disallows the mark), so no phantom
     // comment appears in the rail only to vanish on save.
     const canAnchor = pointComment
       ? currentEditor.can().insertPointComment({ commentIds })
-      : currentEditor.can().setCommentRef({ commentIds });
+      : currentEditor.state.selection instanceof NodeSelection
+        ? currentEditor.can().setCommentRef({ commentIds })
+        : currentEditor
+            .can()
+            .addCommentIdToRange(comment.id, anchorFrom, anchorTo);
     if (!canAnchor) return;
 
     const nextComments = new Map(commentsRef.current);
@@ -1566,7 +1568,9 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     const chain = currentEditor.chain().focus();
     (pointComment
       ? chain.insertPointComment({ commentIds })
-      : chain.setCommentRef({ commentIds })
+      : currentEditor.state.selection instanceof NodeSelection
+        ? chain.setCommentRef({ commentIds })
+        : chain.addCommentIdToRange(comment.id, anchorFrom, anchorTo)
     ).run();
     if (suppressNextMarkdownUpdateRef.current) {
       suppressNextMarkdownUpdateRef.current = false;

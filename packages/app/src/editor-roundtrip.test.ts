@@ -204,6 +204,101 @@ describe("fuzz-found round-trip bugs", () => {
     expect(saved).toBe(markdown);
   });
 
+  it("round-trips a suggested deletion of a single space", () => {
+    // Suggesting mode turns Backspace over a space into a deletion mark on
+    // that space alone. Turndown treats whitespace-only nodes as blank, so
+    // the suggestion used to vanish from the saved file.
+    const markdown = "the field here\n";
+    const { doc, comments, frontmatter, endmatter } =
+      criticMarkdownToEditorState(markdown);
+    const editor = new Editor({
+      extensions: createEditorExtensions(),
+      content: doc,
+    });
+    const change = createCriticChange("deletion", undefined, {
+      existingChanges: [],
+    });
+    editor.commands.setTextSelection({ from: 10, to: 11 });
+    editor.commands.setCriticChange(change);
+    const saved = editorStateToCriticMarkdown(editor.getJSON(), comments, {
+      frontmatter,
+      endmatter,
+    });
+    editor.destroy();
+
+    expect(saved).toContain("the field{-- --}");
+    expect(saved).toContain("}here");
+
+    const reparsed = new Editor({
+      extensions: createEditorExtensions(),
+      content: criticMarkdownToEditorState(saved).doc,
+    });
+    const markedTexts: string[] = [];
+    reparsed.state.doc.descendants((node) => {
+      for (const mark of node.marks) {
+        if (mark.type.name === "criticChange") {
+          markedTexts.push(node.text ?? "");
+        }
+      }
+    });
+    expect(reparsed.getText()).toBe("the field here");
+    expect(markedTexts).toEqual([" "]);
+    reparsed.destroy();
+  });
+
+  it("keeps an inner comment's anchor when a wider comment overlaps it", () => {
+    // Commenting a superset of an existing comment used to rewrite the
+    // existing anchor to the wider range: setCommentRef merged the id lists
+    // into one mark across the whole selection.
+    const { doc, comments, frontmatter, endmatter } =
+      criticMarkdownToEditorState("alpha beta gamma\n");
+    const editor = new Editor({
+      extensions: createEditorExtensions(),
+      content: doc,
+    });
+    editor.commands.setTextSelection({ from: 7, to: 11 });
+    editor.commands.setCommentRef({ commentIds: ["c1"] });
+    comments.set("c1", createCriticComment({ id: "c1", content: "inner" }, {}));
+    expect(editor.commands.addCommentIdToRange("c2", 1, 17)).toBe(true);
+    comments.set("c2", createCriticComment({ id: "c2", content: "outer" }, {}));
+
+    const segments: Array<[string, string[]]> = [];
+    editor.state.doc.descendants((node) => {
+      if (!node.isText) return;
+      const mark = node.marks.find((m) => m.type.name === "commentRef");
+      if (mark) segments.push([node.text ?? "", mark.attrs.commentIds]);
+    });
+    expect(segments).toEqual([
+      ["alpha ", ["c2"]],
+      ["beta", ["c1", "c2"]],
+      [" gamma", ["c2"]],
+    ]);
+
+    // And the segmentation survives a save/reparse cycle.
+    const saved = editorStateToCriticMarkdown(editor.getJSON(), comments, {
+      frontmatter,
+      endmatter,
+    });
+    editor.destroy();
+    const reparsed = new Editor({
+      extensions: createEditorExtensions(),
+      content: criticMarkdownToEditorState(saved).doc,
+    });
+    const reparsedSegments: Array<[string, string[]]> = [];
+    reparsed.state.doc.descendants((node) => {
+      if (!node.isText) return;
+      const mark = node.marks.find((m) => m.type.name === "commentRef");
+      if (mark) reparsedSegments.push([node.text ?? "", mark.attrs.commentIds]);
+    });
+    // Edge whitespace inside an anchor is shed by turndown's flanking
+    // handling (pre-existing, for every comment); the layering property is
+    // that the id sets per word survive.
+    expect(reparsedSegments).toEqual(
+      segments.map(([text, ids]) => [text.trim(), ids]),
+    );
+    reparsed.destroy();
+  });
+
   it("escapes typed markdown delimiters so text stays text", () => {
     const { saved, reparsed } = roundTrip("plain *em words* here\n", (editor) =>
       editor.commands.insertContentAt(9, { type: "text", text: "a*b `c`" }),
