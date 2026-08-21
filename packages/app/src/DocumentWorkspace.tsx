@@ -53,8 +53,6 @@ import {
   type DocumentInteractionMode,
   type DocumentSaveController,
   type DocumentSaveState,
-  type DraftRestore,
-  type LocalContentOrigin,
   PageCard,
 } from "./PageCard";
 import { RobotsHighFiveToy } from "./RobotsHighFiveToy";
@@ -62,6 +60,8 @@ import type { DraftMode } from "./save-recovery";
 import type {
   CompleteReviewOptions,
   DocumentDiskChangeState,
+  DraftRestore,
+  LocalContentOrigin,
   Page,
   StorageBackend,
 } from "./storage";
