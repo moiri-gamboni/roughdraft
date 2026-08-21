@@ -377,12 +377,13 @@ export function EditorContextMenu({
         resolveLinkUrl,
         (editor.getAttributes("link").href as string | null) || anchor.href,
       );
+      const containerRect = containerRef.current.getBoundingClientRect();
       const next = {
         ...current,
         href,
         rawHref,
-        left: rect.left + rect.width / 2,
-        top: rect.top - 12,
+        left: rect.left + rect.width / 2 - containerRect.left,
+        top: rect.top - containerRect.top - 12,
       };
 
       return next.href === current.href &&
@@ -428,11 +429,18 @@ export function EditorContextMenu({
         (linkAttrs.href as string | null) || anchor.href,
       );
 
+      const containerRect = containerRef.current?.getBoundingClientRect();
+      if (!containerRect) return;
+
       setLinkPopoverState({
         href,
         rawHref,
-        left: rect.left + rect.width / 2,
-        top: rect.top - 12,
+        // Container-relative, like the selection menu: the wrapper is
+        // absolutely positioned inside the container, so raw viewport
+        // coordinates drift by the scroll offset and put the popover far
+        // from the link (typically offscreen) in a scrolled document.
+        left: rect.left + rect.width / 2 - containerRect.left,
+        top: rect.top - containerRect.top - 12,
         existingLink: true,
         focusInput: false,
       });
@@ -459,6 +467,7 @@ export function EditorContextMenu({
     const rawHref =
       (editor.getAttributes("link").dataMarkdownSrc as string | null) || "";
 
+    const containerRect = containerRef.current.getBoundingClientRect();
     setLinkPopoverState({
       href: resolveEditableLinkTarget(
         rawHref,
@@ -467,8 +476,8 @@ export function EditorContextMenu({
         rawHref || "https://",
       ),
       rawHref,
-      left: rect.left + rect.width / 2,
-      top: rect.top - 12,
+      left: rect.left + rect.width / 2 - containerRect.left,
+      top: rect.top - containerRect.top - 12,
       existingLink: false,
       focusInput: true,
     });
@@ -830,7 +839,7 @@ export function EditorContextMenu({
         <div
           ref={linkPopoverRef}
           data-testid="link-popover"
-          className="fixed z-[220] flex -translate-x-1/2 -translate-y-full items-center rounded-[18px] border border-slate-200/90 dark:border-slate-700/90 bg-white/95 dark:bg-slate-800/95 px-3 py-2 shadow-[0_18px_48px_rgba(15,23,42,0.16)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.4)] backdrop-blur-xl"
+          className="absolute z-[220] flex -translate-x-1/2 -translate-y-full items-center rounded-[18px] border border-slate-200/90 dark:border-slate-700/90 bg-white/95 dark:bg-slate-800/95 px-3 py-2 shadow-[0_18px_48px_rgba(15,23,42,0.16)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.4)] backdrop-blur-xl"
           style={{
             left: linkPopoverState.left,
             top: linkPopoverState.top,
