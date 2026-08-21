@@ -1,9 +1,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "../src/App";
+import { App, MAX_BOOT_RETRIES } from "../src/App";
 import { BackendUnavailableError, detectBackend } from "../src/detect-backend";
-import { DRAFT_KEY_PREFIX } from "../src/draft-store";
+import { DRAFT_KEY_PREFIX, DRAFT_SCHEMA } from "../src/draft-store";
+import { nextRetryDelayMs } from "../src/save-recovery";
 import {
   MarkdownFileConflictError,
   type Page,
@@ -115,10 +116,9 @@ function writeDraftRecord({
   localStorage.setItem(
     key,
     JSON.stringify({
-      schema: 1,
+      schema: DRAFT_SCHEMA,
       content,
-      baseContent: baseContent ?? "",
-      baseKnown: baseContent !== null,
+      baseContent,
       updatedAt: Date.now(),
     }),
   );
@@ -244,6 +244,39 @@ describe("recovering unsent edits on boot", () => {
     expect(saved).toEqual([]);
   });
 
+  it("keeps the remote draft on the shelf while the restore is still on offer", async () => {
+    // A remote save that never reached the CLI leaves the server holding the
+    // pre-save content, so the bootstrap GET returns text the draft has moved
+    // past. That draft is the only durable copy of the unsent work: offering
+    // the restore must not consume it.
+    const draftKey = `${DRAFT_KEY_PREFIX}origin:/work/origin.md`;
+    window.history.replaceState(null, "", "/?session=abc123&editor=code");
+    localStorage.setItem(
+      `${DRAFT_KEY_PREFIX}session:abc123`,
+      "/work/origin.md",
+    );
+    writeDraftRecord({
+      content: "# Plan\n\nUnsent body.\n",
+      baseContent: "# Plan\n\nOn disk.\n",
+      key: draftKey,
+    });
+    const { backend } = createFakeBackend({
+      kind: "remote",
+      sessionId: "abc123",
+      originPath: "/work/origin.md",
+    });
+    detectBackendMock.mockResolvedValue(backend);
+
+    await renderApp();
+    await waitFor(() => queryByTestId("draft-restore-notice") !== null);
+
+    const stored = localStorage.getItem(draftKey);
+    expect(stored).not.toBeNull();
+    expect(JSON.parse(stored as string).content).toBe(
+      "# Plan\n\nUnsent body.\n",
+    );
+  });
+
   it("leaves nothing behind when the draft already reached the file", async () => {
     const { backend, saved } = createFakeBackend();
     detectBackendMock.mockResolvedValue(backend);
@@ -319,6 +352,51 @@ describe("recovering unsent edits on boot", () => {
     expect(container.textContent).not.toContain(
       "Could not open that markdown file",
     );
+  });
+
+  it("says it is still trying while the boot ladder has attempts left", async () => {
+    detectBackendMock.mockRejectedValue(
+      new BackendUnavailableError("Roughdraft could not reach the server."),
+    );
+
+    await renderApp();
+
+    expect(queryByTestId("backend-unavailable-notice")?.textContent).toContain(
+      "keeps trying",
+    );
+  });
+
+  it("says retries have stopped once the boot ladder is exhausted", async () => {
+    // The ladder gives up after MAX_BOOT_RETRIES, and the only live recovery
+    // left is the button. Claiming it "keeps trying" would leave the reviewer
+    // waiting on a retry that is never coming.
+    vi.useFakeTimers();
+    try {
+      detectBackendMock.mockRejectedValue(
+        new BackendUnavailableError("Roughdraft could not reach the server."),
+      );
+
+      await renderApp();
+      expect(
+        queryByTestId("backend-unavailable-notice")?.textContent,
+      ).toContain("keeps trying");
+
+      // Walk the real backoff rather than clicking Try again: the claim under
+      // test is about the automatic ladder running out, and driving the shared
+      // counter by hand would prove only that the counter can reach the ceiling.
+      for (let attempt = 1; attempt <= MAX_BOOT_RETRIES; attempt += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(nextRetryDelayMs(attempt));
+        });
+      }
+
+      const notice = queryByTestId("backend-unavailable-notice");
+      expect(notice?.textContent).toContain("stopped retrying");
+      expect(notice?.textContent).not.toContain("keeps trying");
+      expect(queryByTestId("backend-unavailable-retry")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("still reports a document it genuinely cannot open", async () => {

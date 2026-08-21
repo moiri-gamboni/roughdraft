@@ -15,7 +15,14 @@ const RECORD_PREFIXES = [
   `${DRAFT_KEY_PREFIX}file:`,
   `${DRAFT_KEY_PREFIX}origin:`,
 ];
-const DRAFT_SCHEMA = 1;
+/**
+ * Bumped to 2 when `baseKnown` was dropped in favour of a nullable
+ * `baseContent`. A v1 record spelled "base unknown" as `baseContent: ""`, which
+ * under the v2 rules would read as a base known to be empty — and silently
+ * restore over an empty file instead of asking. The version keeps them apart;
+ * a v1 record keeps its content and comes back with an unknown base.
+ */
+export const DRAFT_SCHEMA = 2;
 
 export interface DraftRecord extends DraftSnapshot {
   updatedAt: number;
@@ -121,18 +128,17 @@ export function readDraft(
   const record = parsed as Partial<DraftRecord> & { schema?: unknown };
   if (typeof record.content !== "string") return null;
 
-  // An unknown schema keeps its content but loses its base, which routes the
-  // decision through the explicit "ask" branch instead of destroying the draft.
-  const schemaMatches = record.schema === DRAFT_SCHEMA;
-  const baseKnown =
-    schemaMatches &&
-    record.baseKnown === true &&
-    typeof record.baseContent === "string";
+  // An unknown schema — or a record whose base is missing or malformed — keeps
+  // its content but loses its base, which routes the decision through the
+  // explicit "ask" branch instead of destroying the draft.
+  const baseContent =
+    record.schema === DRAFT_SCHEMA && typeof record.baseContent === "string"
+      ? record.baseContent
+      : null;
 
   return {
     content: record.content,
-    baseContent: baseKnown ? (record.baseContent as string) : "",
-    baseKnown,
+    baseContent,
     updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : 0,
   };
 }
@@ -150,12 +156,7 @@ export function writeDraft(
   return guardedSetItem(
     storage,
     key,
-    serialize({
-      content,
-      baseContent: baseContent ?? "",
-      baseKnown: baseContent !== null,
-      updatedAt: Date.now(),
-    }),
+    serialize({ content, baseContent, updatedAt: Date.now() }),
   );
 }
 
@@ -177,8 +178,7 @@ export function updateBase(
     key,
     serialize({
       content: existing.content,
-      baseContent: baseContent ?? "",
-      baseKnown: baseContent !== null,
+      baseContent,
       updatedAt: Date.now(),
     }),
   );

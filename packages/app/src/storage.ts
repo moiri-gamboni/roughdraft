@@ -36,6 +36,24 @@ export type DocumentDiskChangeState =
   | "paused"
   | "draft-restore";
 
+/**
+ * Where a local content change came from. `"edit"` is the user changing the
+ * document; `"adopt"` is the card taking content it was handed, whether from
+ * disk or from a restored draft. Nothing downstream needs those two apart.
+ */
+export type LocalContentOrigin = "edit" | "adopt";
+
+/**
+ * An unsent draft the app wants put back into the editor.
+ *
+ * Each offer is a distinct object, and that identity is the signal: restoring
+ * the same bytes twice is a real request, not a repeat, so the value must come
+ * from state rather than be built inline while rendering.
+ */
+export interface DraftRestore {
+  content: string;
+}
+
 export interface StoredAsset {
   markdownPath: string;
   previewUrl: string;

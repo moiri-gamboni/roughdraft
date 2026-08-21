@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   clearDraft,
   DRAFT_KEY_PREFIX,
+  DRAFT_SCHEMA,
   draftKeyFromUrl,
   readDraft,
   updateBase,
@@ -133,7 +134,6 @@ describe("draft records", () => {
     expect(readDraft(storage, key)).toMatchObject({
       content: "draft",
       baseContent: "disk",
-      baseKnown: true,
     });
   });
 
@@ -143,7 +143,7 @@ describe("draft records", () => {
 
     expect(readDraft(storage, key)).toMatchObject({
       content: "draft",
-      baseKnown: false,
+      baseContent: null,
     });
   });
 
@@ -161,7 +161,6 @@ describe("draft records", () => {
     expect(readDraft(storage, key)).toMatchObject({
       content: "second",
       baseContent: "first",
-      baseKnown: true,
     });
   });
 
@@ -192,16 +191,55 @@ describe("draft records", () => {
         schema: 99,
         content: "future draft",
         baseContent: "disk",
-        baseKnown: true,
         updatedAt: 1,
       }),
     );
 
     expect(readDraft(storage, key)).toMatchObject({
       content: "future draft",
-      baseKnown: false,
+      baseContent: null,
     });
     expect(storage.getItem(key)).not.toBeNull();
+  });
+
+  it("treats a pre-null-base record's empty sentinel as an unknown base", () => {
+    // The v1 shape spelled "base unknown" as `baseContent: ""` plus
+    // `baseKnown: false`. Read under the current rules that sentinel would look
+    // like a base known to be empty, which silently restores over an empty file
+    // instead of asking. The schema bump is what keeps them apart.
+    const storage = new MemoryStorage();
+    storage.setItem(
+      key,
+      JSON.stringify({
+        schema: 1,
+        content: "draft",
+        baseContent: "",
+        baseKnown: false,
+        updatedAt: 1,
+      }),
+    );
+
+    expect(readDraft(storage, key)).toMatchObject({
+      content: "draft",
+      baseContent: null,
+    });
+  });
+
+  it("surfaces an unknown base when the stored one is not a string", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      key,
+      JSON.stringify({
+        schema: DRAFT_SCHEMA,
+        content: "draft",
+        baseContent: 42,
+      }),
+    );
+
+    expect(readDraft(storage, key)).toMatchObject({
+      content: "draft",
+      baseContent: null,
+    });
   });
 
   it("survives storage being unavailable", () => {
@@ -222,20 +260,18 @@ describe("quota pressure", () => {
     storage.setItem(
       `${DRAFT_KEY_PREFIX}file:/work/old.md`,
       JSON.stringify({
-        schema: 1,
+        schema: DRAFT_SCHEMA,
         content: "old",
-        baseContent: "",
-        baseKnown: false,
+        baseContent: null,
         updatedAt: 1,
       }),
     );
     storage.setItem(
       `${DRAFT_KEY_PREFIX}file:/work/newer.md`,
       JSON.stringify({
-        schema: 1,
+        schema: DRAFT_SCHEMA,
         content: "newer",
-        baseContent: "",
-        baseKnown: false,
+        baseContent: null,
         updatedAt: 2,
       }),
     );
@@ -258,20 +294,18 @@ describe("quota pressure", () => {
     storage.setItem(
       `${DRAFT_KEY_PREFIX}file:/work/old.md`,
       JSON.stringify({
-        schema: 1,
+        schema: DRAFT_SCHEMA,
         content: "old",
-        baseContent: "",
-        baseKnown: false,
+        baseContent: null,
         updatedAt: 1,
       }),
     );
     storage.setItem(
       `${DRAFT_KEY_PREFIX}file:/work/newer.md`,
       JSON.stringify({
-        schema: 1,
+        schema: DRAFT_SCHEMA,
         content: "newer",
-        baseContent: "",
-        baseKnown: false,
+        baseContent: null,
         updatedAt: 2,
       }),
     );
@@ -306,7 +340,7 @@ describe("secrets", () => {
 
     const stored = [...Array(storage.length).keys()].map((index) => {
       const storedKey = storage.key(index) ?? "";
-      return `${storedKey} ${storage.getItem(storedKey) ?? ""}`;
+      return `${storedKey} ${storage.getItem(storedKey) ?? ""}`;
     });
 
     expect(stored.join("\n")).not.toContain("SUPERSECRET");
@@ -326,7 +360,7 @@ describe("secrets", () => {
 
     const stored = [...Array(storage.length).keys()].map((index) => {
       const storedKey = storage.key(index) ?? "";
-      return `${storedKey} ${storage.getItem(storedKey) ?? ""}`;
+      return `${storedKey} ${storage.getItem(storedKey) ?? ""}`;
     });
 
     expect(stored.join("\n")).not.toContain("SUPERSECRET");

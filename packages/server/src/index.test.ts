@@ -3,9 +3,15 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Response } from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "./index";
+import {
+  createApp,
+  REMOTE_SESSION_TTL_MS,
+  type RemoteSession,
+  sweepRemoteSessions,
+} from "./index";
 
 const SSE_READ_TIMEOUT_MS = 2_000;
 
@@ -1012,7 +1018,7 @@ describe("createApp", () => {
     );
   });
 
-  it("returns 503 and holds the version back when PUT lands with no active CLI session listener", async () => {
+  it("returns 503 and keeps both content and version back when PUT lands with no active CLI session listener", async () => {
     // The browser's save is meaningless if no CLI is connected to receive it
     // and write to disk. Surfacing 503 (instead of silently 200-ing) prevents
     // the browser from believing a save succeeded that never reached disk.
@@ -1033,10 +1039,12 @@ describe("createApp", () => {
     // failure into a phantom 409.
     expect(update.body.version).toBe(register.body.version);
 
-    // The undelivered bytes are still retained in server memory, so a browser
-    // that reloads mid-outage recovers its content from the bootstrap GET.
+    // The undelivered bytes must not be retained either. Echoing them back on
+    // the bootstrap GET makes the browser's localStorage draft — the only
+    // durable copy of that unsent work — look like it already reached the
+    // destination, and the restore policy then discards it.
     const fetched = await request(app).get("/api/remote-document/s2");
-    expect(fetched.body.content).toBe("v2");
+    expect(fetched.body.content).toBe("v1");
     expect(fetched.body.version).toBe(register.body.version);
   });
 
@@ -1164,5 +1172,64 @@ describe("createApp", () => {
 
       expect(await cli.waitFor("event: save")).toContain('"content":"after"');
     });
+  });
+});
+
+describe("sweepRemoteSessions", () => {
+  function fakeViewer(): Response & { ended: boolean } {
+    const viewer = { ended: false, end: () => (viewer.ended = true) };
+    return viewer as unknown as Response & { ended: boolean };
+  }
+
+  function session(overrides: Partial<RemoteSession> = {}): RemoteSession {
+    return {
+      id: "s1",
+      originPath: "/draft.md",
+      content: "body",
+      version: "v1",
+      saveClient: null,
+      viewers: new Set(),
+      disconnectedAt: null,
+      ...overrides,
+    };
+  }
+
+  it("ends the viewer streams of a session it drops", () => {
+    // A viewer left attached to a forgotten session keeps receiving keepalives
+    // forever: its EventSource never errors, so the browser's re-open loop
+    // never runs and the tab goes stale without ever saying so.
+    const viewer = fakeViewer();
+    const sessions = new Map([
+      ["s1", session({ disconnectedAt: 1_000, viewers: new Set([viewer]) })],
+    ]);
+
+    sweepRemoteSessions(sessions, 1_000 + REMOTE_SESSION_TTL_MS + 1);
+
+    expect(sessions.has("s1")).toBe(false);
+    expect(viewer.ended).toBe(true);
+  });
+
+  it("leaves a session still inside its grace period alone", () => {
+    const viewer = fakeViewer();
+    const sessions = new Map([
+      ["s1", session({ disconnectedAt: 1_000, viewers: new Set([viewer]) })],
+    ]);
+
+    sweepRemoteSessions(sessions, 1_000 + REMOTE_SESSION_TTL_MS);
+
+    expect(sessions.has("s1")).toBe(true);
+    expect(viewer.ended).toBe(false);
+  });
+
+  it("leaves a connected session alone however old it is", () => {
+    const viewer = fakeViewer();
+    const sessions = new Map([
+      ["s1", session({ disconnectedAt: null, viewers: new Set([viewer]) })],
+    ]);
+
+    sweepRemoteSessions(sessions, Number.MAX_SAFE_INTEGER);
+
+    expect(sessions.has("s1")).toBe(true);
+    expect(viewer.ended).toBe(false);
   });
 });

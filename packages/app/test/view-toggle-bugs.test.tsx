@@ -9,6 +9,7 @@ import {
 import {
   DocumentSaveStatusIndicator,
   DocumentWorkspace,
+  type DraftRestoreOffer,
   getReviewHandoffButtonLabel,
   isReviewHandoffDisabled,
   shouldLatchDocumentChangedSinceOpen,
@@ -223,18 +224,18 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     documentCopyPath = "test.md",
     watcherCount = 0,
     onSaveDocument = async () => {},
-    draftRestoreMode = "local",
-    onRestoreDraft = () => {},
-    onDiscardDraft = () => {},
+    draftRestoreOffer = {
+      mode: "local",
+      onRestore: () => {},
+      onDiscard: () => {},
+    },
   }: {
     documentDiskChangeState?: DocumentDiskChangeState;
     documentContent?: string;
     documentCopyPath?: string | null;
     watcherCount?: number;
     onSaveDocument?: (id: string, content: string) => Promise<void>;
-    draftRestoreMode?: "local" | "remote";
-    onRestoreDraft?: () => void;
-    onDiscardDraft?: () => void;
+    draftRestoreOffer?: DraftRestoreOffer | null;
   } = {}) {
     (
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -255,9 +256,7 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
           onDocumentLocalContentChange={() => {}}
           documentDiskChangeState={documentDiskChangeState}
           documentForceResetKey={null}
-          draftRestoreMode={draftRestoreMode}
-          onRestoreDraft={onRestoreDraft}
-          onDiscardDraft={onDiscardDraft}
+          draftRestoreOffer={draftRestoreOffer}
           onReloadDocumentFromDisk={() => {}}
           onKeepEditingWithoutAutosave={() => {}}
           onOverwriteDocumentOnDisk={() => {}}
@@ -611,8 +610,11 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     const onDiscardDraft = vi.fn();
     await renderWorkspace({
       documentDiskChangeState: "draft-restore",
-      onRestoreDraft,
-      onDiscardDraft,
+      draftRestoreOffer: {
+        mode: "local",
+        onRestore: onRestoreDraft,
+        onDiscard: onDiscardDraft,
+      },
     });
 
     expect(queryByTestId(container, "file-conflict-notice")).toBeNull();
@@ -626,10 +628,25 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     expect(onDiscardDraft).toHaveBeenCalledTimes(1);
   });
 
+  it("shows no restore banner to a caller that offers no way to answer it", async () => {
+    // The banner's buttons are the only way out of the draft-restore state, so
+    // a caller with no handlers must not be shown a banner it cannot action.
+    await renderWorkspace({
+      documentDiskChangeState: "draft-restore",
+      draftRestoreOffer: null,
+    });
+
+    expect(queryByTestId(container, "draft-restore-notice")).toBeNull();
+  });
+
   it("names the origin file when the unsent draft belongs to a remote session", async () => {
     await renderWorkspace({
       documentDiskChangeState: "draft-restore",
-      draftRestoreMode: "remote",
+      draftRestoreOffer: {
+        mode: "remote",
+        onRestore: () => {},
+        onDiscard: () => {},
+      },
     });
 
     expect(
