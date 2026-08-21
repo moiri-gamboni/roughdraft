@@ -983,15 +983,19 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return;
     }
 
+    // Retain the bytes either way: a browser that reloads while the CLI is
+    // gone recovers them from the bootstrap GET. The version is what must wait
+    // for delivery — moving it on a failed save would make the browser's retry
+    // (which carries the same expectedVersion) look like a stale write.
     session.content = content;
-    session.version = remoteSessionVersion(content);
+    const nextVersion = remoteSessionVersion(content);
 
     let deliveredToClient = true;
     if (session.saveClient) {
       try {
         writeRemoteSessionEvent(session.saveClient, "save", {
-          content: session.content,
-          version: session.version,
+          content,
+          version: nextVersion,
         });
       } catch {
         deliveredToClient = false;
@@ -1010,6 +1014,8 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return;
     }
 
+    session.version = nextVersion;
+
     res.json({ id: session.id, version: session.version });
   });
 
@@ -1024,7 +1030,10 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return;
     }
 
-    const role = req.query.role === "viewer" ? "viewer" : "cli";
+    // Only the literal role=cli attaches as the CLI: that role receives saves
+    // and displaces the incumbent, so an absent or mistyped role must degrade
+    // to the unprivileged viewer rather than take the document over.
+    const role = req.query.role === "cli" ? "cli" : "viewer";
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
