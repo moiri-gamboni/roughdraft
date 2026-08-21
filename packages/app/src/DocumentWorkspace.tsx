@@ -52,6 +52,7 @@ import {
   type DocumentInteractionMode,
   type DocumentSaveController,
   type DocumentSaveState,
+  type LocalContentOrigin,
   PageCard,
 } from "./PageCard";
 import { RobotsHighFiveToy } from "./RobotsHighFiveToy";
@@ -399,7 +400,10 @@ interface DocumentWorkspaceProps {
   onSaveDocument: (id: string, content: string) => Promise<void>;
   onDocumentSaveStateChange: (state: DocumentSaveState) => void;
   onDocumentDirtyStateChange: (isDirty: boolean) => void;
-  onDocumentLocalContentChange: (markdown: string) => void;
+  onDocumentLocalContentChange: (
+    markdown: string,
+    origin: LocalContentOrigin,
+  ) => void;
   documentDiskChangeState: DiskChangeState;
   documentForceResetKey: string | null;
   onReloadDocumentFromDisk: () => void | Promise<void>;
