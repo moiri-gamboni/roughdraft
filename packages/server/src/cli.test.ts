@@ -1659,7 +1659,7 @@ describe("cli", () => {
       "  --no-watch           Open the file without waiting",
     );
     expect(test.logs).toContain(
-      "  --timeout <seconds>  Maximum watch time; omitted means no timeout",
+      "  --timeout <seconds>  Maximum time to wait for Done Reviewing, or to",
     );
   });
 
