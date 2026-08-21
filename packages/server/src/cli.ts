@@ -1324,11 +1324,20 @@ async function runRemoteOpen(
   );
   eventsUrl.searchParams.set("role", "cli");
 
+  // The deadline covers the connect only. An AbortSignal handed to fetch also
+  // governs the response body, so a timeout signal would tear the save-back
+  // stream down once it elapsed; clearing the timer on headers keeps the
+  // stream open for the life of the session.
+  const connectAbort = new AbortController();
+  const connectDeadline = setTimeout(() => {
+    connectAbort.abort(new Error("Timed out opening the remote event stream"));
+  }, SSE_CONNECT_TIMEOUT_MS);
+
   let eventsResponse: Response;
   try {
     eventsResponse = await deps.fetchImpl(eventsUrl.toString(), {
       headers: { Accept: "text/event-stream", ...authHeaders },
-      signal: AbortSignal.timeout(SSE_CONNECT_TIMEOUT_MS),
+      signal: connectAbort.signal,
     });
   } catch (error) {
     deps.error(
@@ -1337,6 +1346,8 @@ async function runRemoteOpen(
       }`,
     );
     return 1;
+  } finally {
+    clearTimeout(connectDeadline);
   }
 
   if (!eventsResponse.ok || !eventsResponse.body) {
