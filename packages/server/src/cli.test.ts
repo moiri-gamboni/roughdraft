@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateRoughdraftMarkdown } from "@roughdraft/rfm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCliDependencies,
   createDefaultOpenUrl,
@@ -68,6 +68,16 @@ async function listenOnLoopbackServers(
       );
     },
   };
+}
+
+// Resolves once the microtask queue has drained repeatedly, so racing it
+// against a CLI run distinguishes "already finishing" from "still blocked"
+// without depending on a clock the test has faked.
+async function settled<T>(value: T): Promise<T> {
+  for (let turn = 0; turn < 20; turn += 1) {
+    await Promise.resolve();
+  }
+  return value;
 }
 
 describe("cli", () => {
@@ -2381,6 +2391,137 @@ describe("runCli open in remote mode", () => {
     } finally {
       await browserEventsReader?.cancel().catch(() => undefined);
       await remote.close();
+    }
+  });
+
+  // The connect deadline is 10s. Waiting it out for real is the only way to
+  // prove the deadline does not reach the response body: Node's
+  // AbortSignal.timeout runs off an internal timer that fake timers cannot
+  // drive, so a faked clock would pass against the buggy code too.
+  it(
+    "keeps writing remote saves that arrive after the connect deadline",
+    { timeout: 40_000 },
+    async () => {
+      const remote = await startRemoteHost();
+      try {
+        const filePath = path.join(projectDir, "draft.md");
+        fs.writeFileSync(filePath, "before\n");
+
+        const errors: string[] = [];
+        let openedUrl: string | null = null;
+
+        const cliPromise = runCli(["open", filePath], {
+          env: { ROUGHDRAFT_HOST: remote.url },
+          cwd: projectDir,
+          log: () => {},
+          error: (m) => errors.push(m),
+          sleepImpl: async () => {},
+          openUrl: (url) => {
+            openedUrl = url;
+            return "disabled";
+          },
+          resolveUpdateStatus: async () => ({
+            packageName: "roughdraft",
+            currentVersion: "0.1.0",
+            latestVersion: "0.1.0",
+            updateAvailable: false,
+            updateCommand: "",
+          }),
+        });
+
+        const openDeadline = Date.now() + 4000;
+        while (openedUrl === null && Date.now() < openDeadline) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        expect(openedUrl).not.toBeNull();
+        const sessionId = new URL(
+          openedUrl as unknown as string,
+        ).searchParams.get("session");
+        expect(sessionId).toBeTruthy();
+
+        await new Promise((resolve) => setTimeout(resolve, 11_000));
+
+        const putResponse = await fetch(
+          `${remote.url}/api/remote-document/${sessionId}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: "late\n" }),
+          },
+        );
+        // 503 here means the server no longer has a CLI attached, i.e. the
+        // connect deadline killed the save-back stream.
+        expect(putResponse.status).toBe(200);
+
+        const writeDeadline = Date.now() + 4000;
+        while (
+          fs.readFileSync(filePath, "utf-8") !== "late\n" &&
+          Date.now() < writeDeadline
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        expect(fs.readFileSync(filePath, "utf-8")).toBe("late\n");
+        expect(errors).toEqual([]);
+
+        await remote.close();
+        await cliPromise;
+      } finally {
+        await remote.close();
+      }
+    },
+  );
+
+  it("gives up when the remote host never answers the event stream", async () => {
+    const filePath = path.join(projectDir, "draft.md");
+    fs.writeFileSync(filePath, "before\n");
+
+    const errors: string[] = [];
+    let eventsRequested = false;
+    vi.useFakeTimers();
+    try {
+      const cliPromise = runCli(["open", filePath], {
+        env: { ROUGHDRAFT_HOST: "http://remote.test" },
+        cwd: projectDir,
+        log: () => {},
+        error: (m) => errors.push(m),
+        sleepImpl: async () => {},
+        openUrl: () => "disabled",
+        fetchImpl: async (input, init) => {
+          const url = typeof input === "string" ? input : String(input);
+          if (url.endsWith("/api/remote-document")) {
+            return new Response(
+              JSON.stringify({ id: "session-1", version: "v1" }),
+              { status: 201, headers: { "Content-Type": "application/json" } },
+            );
+          }
+          // Headers never arrive; only the connect deadline can end this.
+          eventsRequested = true;
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(init.signal?.reason ?? new Error("aborted"));
+            });
+          });
+        },
+        resolveUpdateStatus: async () => ({
+          packageName: "roughdraft",
+          currentVersion: "0.1.0",
+          latestVersion: "0.1.0",
+          updateAvailable: false,
+          updateCommand: "",
+        }),
+      });
+
+      for (let tick = 0; tick < 100 && !eventsRequested; tick += 1) {
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      expect(eventsRequested).toBe(true);
+      await vi.advanceTimersByTimeAsync(10_500);
+      const outcome = await Promise.race([cliPromise, settled("connecting")]);
+
+      expect(outcome).toBe(1);
+      expect(errors.join("\n")).toContain("Lost connection to remote host");
+    } finally {
+      vi.useRealTimers();
     }
   });
 });
