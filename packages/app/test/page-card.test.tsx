@@ -2231,122 +2231,126 @@ describe("PageCard editor integration", () => {
     expect(getEditable(rendered.container)).toBe(initialEditable);
     expect(rendered.getEditor().getText()).toContain("Heading");
   });
-});
 
-describe("PageCard local content origin", () => {
-  it("reports a typed change as a genuine edit", async () => {
-    const rendered = await renderPageCard({
-      page: { id: "origin-1", title: "Origin 1", content: "Start" },
+  describe("PageCard local content origin", () => {
+    it("reports a typed change as a genuine edit", async () => {
+      const rendered = await renderPageCard({
+        page: { id: "origin-1", title: "Origin 1", content: "Start" },
+      });
+      rendered.onLocalContentChange.mockClear();
+
+      await insertTextAtEnd(rendered.getEditor(), " typed");
+
+      const origins = rendered.onLocalContentChange.mock.calls.map(
+        (call) => call[1],
+      );
+      expect(origins.length).toBeGreaterThan(0);
+      expect(new Set(origins)).toEqual(new Set(["edit"]));
     });
-    rendered.onLocalContentChange.mockClear();
 
-    await insertTextAtEnd(rendered.getEditor(), " typed");
+    it("reports adopting fresh page content as not a genuine edit", async () => {
+      const rendered = await renderPageCard({
+        page: { id: "origin-2", title: "Origin 2", content: "Start" },
+      });
+      rendered.onLocalContentChange.mockClear();
 
-    const origins = rendered.onLocalContentChange.mock.calls.map(
-      (call) => call[1],
-    );
-    expect(origins.length).toBeGreaterThan(0);
-    expect(new Set(origins)).toEqual(new Set(["edit"]));
+      await rendered.rerender({
+        page: {
+          id: "origin-2",
+          title: "Origin 2",
+          content: "Adopted from disk",
+        },
+      });
+
+      const calls = rendered.onLocalContentChange.mock.calls;
+      expect(calls).toContainEqual(["Adopted from disk", "adopt"]);
+      expect(calls.every((call) => call[1] !== "edit")).toBe(true);
+    });
   });
 
-  it("reports adopting fresh page content as not a genuine edit", async () => {
-    const rendered = await renderPageCard({
-      page: { id: "origin-2", title: "Origin 2", content: "Start" },
-    });
-    rendered.onLocalContentChange.mockClear();
+  describe("PageCard draft restore", () => {
+    it("puts the unsent draft back as work still owed to the file", async () => {
+      const rendered = await renderPageCard({
+        page: { id: "restore-1", title: "Restore 1", content: "On disk" },
+      });
 
-    await rendered.rerender({
-      page: { id: "origin-2", title: "Origin 2", content: "Adopted from disk" },
-    });
+      await rendered.rerender({
+        draftRestore: { content: "Unsent draft body" },
+      });
 
-    const calls = rendered.onLocalContentChange.mock.calls;
-    expect(calls).toContainEqual(["Adopted from disk", "adopt"]);
-    expect(calls.every((call) => call[1] !== "edit")).toBe(true);
-  });
-});
-
-describe("PageCard draft restore", () => {
-  it("puts the unsent draft back as work still owed to the file", async () => {
-    const rendered = await renderPageCard({
-      page: { id: "restore-1", title: "Restore 1", content: "On disk" },
-    });
-
-    await rendered.rerender({
-      draftRestore: { content: "Unsent draft body" },
-    });
-
-    expect(rendered.getEditor().getText()).toContain("Unsent draft body");
-    expect(rendered.onDirtyStateChange).toHaveBeenLastCalledWith(true);
-    expect(rendered.onLocalContentChange.mock.calls).toContainEqual([
-      "Unsent draft body",
-      "restore",
-    ]);
-    // Delivering it is the whole point of restoring it.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 700));
-    });
-    expect(rendered.onSave).toHaveBeenCalledWith(
-      "restore-1",
-      "Unsent draft body",
-    );
-  });
-
-  it("keeps a draft that was already pending when the card mounted", async () => {
-    // The boot-recovery shape: the card is created with the restore in hand,
-    // so its very first reconciliation pass runs against the restored content.
-    const rendered = await renderPageCard({
-      page: { id: "restore-boot", title: "Restore boot", content: "On disk" },
-      draftRestore: { content: "Unsent draft body" },
+      expect(rendered.getEditor().getText()).toContain("Unsent draft body");
+      expect(rendered.onDirtyStateChange).toHaveBeenLastCalledWith(true);
+      expect(rendered.onLocalContentChange.mock.calls).toContainEqual([
+        "Unsent draft body",
+        "restore",
+      ]);
+      // Delivering it is the whole point of restoring it.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      });
+      expect(rendered.onSave).toHaveBeenCalledWith(
+        "restore-1",
+        "Unsent draft body",
+      );
     });
 
-    await flushReact();
-    await flushReact();
+    it("keeps a draft that was already pending when the card mounted", async () => {
+      // The boot-recovery shape: the card is created with the restore in hand,
+      // so its very first reconciliation pass runs against the restored content.
+      const rendered = await renderPageCard({
+        page: { id: "restore-boot", title: "Restore boot", content: "On disk" },
+        draftRestore: { content: "Unsent draft body" },
+      });
 
-    expect(rendered.getEditor().getText()).toContain("Unsent draft body");
-  });
+      await flushReact();
+      await flushReact();
 
-  it("does not report the restored draft as already saved", async () => {
-    const rendered = await renderPageCard({
-      page: { id: "restore-2", title: "Restore 2", content: "On disk" },
-    });
-    rendered.onSaveStateChange.mockClear();
-
-    await rendered.rerender({
-      draftRestore: { content: "Unsent draft body" },
+      expect(rendered.getEditor().getText()).toContain("Unsent draft body");
     });
 
-    expect(rendered.onSaveStateChange).not.toHaveBeenCalledWith("saved");
-  });
+    it("does not report the restored draft as already saved", async () => {
+      const rendered = await renderPageCard({
+        page: { id: "restore-2", title: "Restore 2", content: "On disk" },
+      });
+      rendered.onSaveStateChange.mockClear();
 
-  it("keeps the restored draft when the file content arrives again", async () => {
-    const rendered = await renderPageCard({
-      page: { id: "restore-3", title: "Restore 3", content: "On disk" },
-    });
-    await rendered.rerender({
-      draftRestore: { content: "Unsent draft body" },
-    });
+      await rendered.rerender({
+        draftRestore: { content: "Unsent draft body" },
+      });
 
-    await rendered.rerender({
-      page: { id: "restore-3", title: "Restore 3", content: "On disk again" },
+      expect(rendered.onSaveStateChange).not.toHaveBeenCalledWith("saved");
     });
 
-    expect(rendered.getEditor().getText()).toContain("Unsent draft body");
-  });
+    it("keeps the restored draft when the file content arrives again", async () => {
+      const rendered = await renderPageCard({
+        page: { id: "restore-3", title: "Restore 3", content: "On disk" },
+      });
+      await rendered.rerender({
+        draftRestore: { content: "Unsent draft body" },
+      });
 
-  it("restores again when the same draft is offered a second time", async () => {
-    const rendered = await renderPageCard({
-      page: { id: "restore-4", title: "Restore 4", content: "On disk" },
-    });
-    await rendered.rerender({
-      draftRestore: { content: "Unsent draft body" },
-    });
-    await insertTextAtEnd(rendered.getEditor(), " and more");
+      await rendered.rerender({
+        page: { id: "restore-3", title: "Restore 3", content: "On disk again" },
+      });
 
-    await rendered.rerender({
-      draftRestore: { content: "Unsent draft body" },
+      expect(rendered.getEditor().getText()).toContain("Unsent draft body");
     });
 
-    expect(rendered.getEditor().getText()).not.toContain("and more");
-    expect(rendered.getEditor().getText()).toContain("Unsent draft body");
+    it("restores again when the same draft is offered a second time", async () => {
+      const rendered = await renderPageCard({
+        page: { id: "restore-4", title: "Restore 4", content: "On disk" },
+      });
+      await rendered.rerender({
+        draftRestore: { content: "Unsent draft body" },
+      });
+      await insertTextAtEnd(rendered.getEditor(), " and more");
+
+      await rendered.rerender({
+        draftRestore: { content: "Unsent draft body" },
+      });
+
+      expect(rendered.getEditor().getText()).not.toContain("and more");
+      expect(rendered.getEditor().getText()).toContain("Unsent draft body");
+    });
   });
 });
