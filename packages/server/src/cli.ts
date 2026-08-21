@@ -908,7 +908,12 @@ function printCommandHelp(
       "  --print-url          Print only the document URL and do not open it",
     );
     log("  --no-watch           Open the file without waiting");
-    log("  --timeout <seconds>  Maximum watch time; omitted means no timeout");
+    log(
+      "  --timeout <seconds>  Maximum time to wait for Done Reviewing, or to",
+    );
+    log(
+      "                       hold a remote session; omitted means no timeout",
+    );
     log("  --replay             Allow watch to return retained older events");
     log("  --json               Print machine-readable output");
     log("  --port <port>        Preferred server port");
@@ -921,7 +926,9 @@ function printCommandHelp(
     );
     log("                        (remote mode). The CLI registers a session,");
     log("                        opens an SSE channel, and writes save events");
-    log("                        back to disk.");
+    log("                        back to disk. A dropped channel is retried");
+    log("                        with the same session id; the CLI exits");
+    log("                        non-zero after five consecutive failures.");
     log(
       "  ROUGHDRAFT_TOKEN      Bearer token sent on remote-document requests.",
     );
