@@ -44,7 +44,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./components/ui/dialog";
-import { DocumentWorkspace } from "./DocumentWorkspace";
+import {
+  DocumentWorkspace,
+  type DraftRestoreOffer,
+} from "./DocumentWorkspace";
 import { BackendUnavailableError, detectBackend } from "./detect-backend";
 import { logDraftEvent } from "./draft-store";
 import {
@@ -2054,6 +2057,15 @@ export function App() {
     setDocumentDiskChangeState("clean");
   }, [draftPersistence]);
 
+  const draftRestoreOffer = useMemo<DraftRestoreOffer>(
+    () => ({
+      mode: draftPersistence.getKey()?.mode ?? "local",
+      onRestore: handleRestoreDraft,
+      onDiscard: handleDiscardDraft,
+    }),
+    [draftPersistence, handleRestoreDraft, handleDiscardDraft],
+  );
+
   const handleReloadDocumentFromDisk = useCallback(async () => {
     const currentBackend = backendRef.current;
     const currentPath = activeDocumentPathRef.current;
@@ -2305,9 +2317,7 @@ export function App() {
         documentRetryPending={documentRetryPending}
         documentForceResetKey={documentForceResetKey}
         draftRestore={draftRestore}
-        draftRestoreMode={draftPersistence.getKey()?.mode ?? "local"}
-        onRestoreDraft={handleRestoreDraft}
-        onDiscardDraft={handleDiscardDraft}
+        draftRestoreOffer={draftRestoreOffer}
         onReloadDocumentFromDisk={handleReloadDocumentFromDisk}
         onKeepEditingWithoutAutosave={handleKeepEditingWithoutAutosave}
         onOverwriteDocumentOnDisk={handleOverwriteDocumentOnDisk}
