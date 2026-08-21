@@ -14,7 +14,7 @@ import {
 import { nextRetryDelayMs } from "./save-recovery";
 import type { DocumentDiskChangeState } from "./storage";
 
-export interface DraftPersistenceOptions {
+interface DraftPersistenceOptions {
   /**
    * Deliver the given content to the destination. Rejecting arms the retry, so
    * the caller must reject for anything it wants retried and settle anything
