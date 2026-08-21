@@ -24,6 +24,11 @@ declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     commentRef: {
       setCommentRef: (attributes: { commentIds: string[] }) => ReturnType;
+      addCommentIdToRange: (
+        commentId: string,
+        from: number,
+        to: number,
+      ) => ReturnType;
       insertPointComment: (attributes: { commentIds: string[] }) => ReturnType;
       removeCommentId: (commentId: string) => ReturnType;
       unsetCommentRef: () => ReturnType;
@@ -137,6 +142,43 @@ const CommentRef = Mark.create({
           }
 
           return commands.setMark(this.name, attributes);
+        },
+      // Layer a new comment over a range without disturbing the comments
+      // already there: each segment keeps its own id set and gains the new
+      // id. Writing one merged mark across the whole range instead (as
+      // setCommentRef would) rewrites every overlapped comment's anchor to
+      // the new, wider selection.
+      addCommentIdToRange:
+        (commentId, from, to) =>
+        ({ tr, state, dispatch }) => {
+          const markType = state.schema.marks.commentRef;
+          if (!markType || to <= from) return false;
+
+          let applied = false;
+          state.doc.nodesBetween(from, to, (node, pos) => {
+            if (!node.isInline) return;
+
+            const segmentFrom = Math.max(pos, from);
+            const segmentTo = Math.min(pos + node.nodeSize, to);
+            if (segmentFrom >= segmentTo) return;
+
+            const parent = state.doc.resolve(segmentFrom).parent;
+            if (!parent.type.allowsMarkType(markType)) return;
+
+            const existing = node.marks.find((mark) => mark.type === markType);
+            const commentIds = [
+              ...new Set([
+                ...((existing?.attrs.commentIds as string[] | undefined) ?? []),
+                commentId,
+              ]),
+            ];
+            tr.addMark(segmentFrom, segmentTo, markType.create({ commentIds }));
+            applied = true;
+          });
+
+          if (!applied) return false;
+          if (dispatch) dispatch(tr);
+          return true;
         },
       insertPointComment:
         (attributes) =>
