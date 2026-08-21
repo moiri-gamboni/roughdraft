@@ -68,7 +68,7 @@ import { useReadingWidth } from "./useReadingWidth";
 import { useReviewLayoutShiftAnimation } from "./useReviewLayoutShiftAnimation";
 
 /** Whether the unsent draft belongs to a local file or a remote session. */
-export type DraftRestoreMode = "local" | "remote";
+type DraftRestoreMode = "local" | "remote";
 type ReviewHandoffState =
   | "idle"
   | "notifying"

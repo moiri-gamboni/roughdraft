@@ -21,7 +21,7 @@ export interface DraftSnapshot {
 
 export type DraftMode = "local" | "remote";
 
-export type RestoreDecision = "nothing" | "silent" | "ask";
+type RestoreDecision = "nothing" | "silent" | "ask";
 
 /**
  * Decide what to do with a stored draft once the document has loaded.
@@ -49,7 +49,7 @@ export function resolveRestore({
   return draft.baseContent === diskContent ? "silent" : "ask";
 }
 
-export type ConflictResolution = "already-applied" | "base-unchanged" | "real";
+type ConflictResolution = "already-applied" | "base-unchanged" | "real";
 
 /**
  * Classify a save conflict reported by the backend.
