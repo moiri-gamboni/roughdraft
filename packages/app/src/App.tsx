@@ -58,11 +58,7 @@ import {
 } from "./document-comments";
 import { copyTextToClipboard } from "./lib/clipboard";
 import { cn } from "./lib/utils";
-import type {
-  DocumentSaveState,
-  DraftRestore,
-  LocalContentOrigin,
-} from "./PageCard";
+import type { DocumentSaveState } from "./PageCard";
 import { PreviewBackend } from "./preview-backend";
 import { RoughdraftFormatDemo } from "./RoughdraftFormatDemo";
 import {
@@ -74,6 +70,8 @@ import {
 import {
   type CompleteReviewOptions,
   type DocumentDiskChangeState,
+  type DraftRestore,
+  type LocalContentOrigin,
   MarkdownFileConflictError,
   type Page,
   type StorageBackend,
