@@ -120,7 +120,10 @@ suggestions:
 | Document | Save status: saved | Any clean document after autosave | `document-save-status` | Checkmark should sit fixed in the top-left corner and fade out over 2 seconds; accessible label remains `Saved`. |
 | Document | Save status: unsaved | Type in a local document before save completes | `document-save-status` | Spinner-only pending state; accessible label is `Unsaved changes`. Transient; often easier with save throttling or network mocking. |
 | Document | Save status: saving | Type and capture during autosave | `document-save-status` | Spinner-only pending state; accessible label is `Saving`. Transient; easiest with mocked delayed save. |
-| Document | Save status: failed | Force save error | `document-save-status` | Icon-only error state; accessible label is `Save failed`. Use backend/API mocking or a component harness. |
+| Document | Save status: failed | Force save error and let the retry ceiling pass, or block the save with the retry cancelled | `document-save-status` | Icon-only error state; accessible label is `Save failed`. Use backend/API mocking or a component harness. |
+| Document | Save status: retrying | Abort the save PUT (`page.route(...).abort()`), then type | `document-save-status` | Icon-only warning state; accessible label is `Changes saved in this browser, retrying`. Must not read as danger: the edits are durable in the browser. |
+| Document | Unsent draft found | Abort the save PUT, type, then reload the page | `draft-restore-notice`, `draft-restore-action-restore`, `draft-restore-action-discard` | Banner title: `Unsent edits found in this browser`. Slate, not the conflict banner's amber, and never rendered together with `file-conflict-notice`. Remote sessions show it even when nothing diverged. |
+| Document | Server unreachable | Open a local file with the server stopped | `backend-unavailable-notice`, `backend-unavailable-retry` | Title: `Roughdraft can't reach the server`. Body names the unsent draft only when one exists; capture both variants. |
 | Document | Disk changed | Open local file, modify file externally while browser content is clean | `file-conflict-notice`, `file-conflict-action-reload`, `file-conflict-action-overwrite` | Banner title: `File changed on disk`. |
 | Document | Save conflict | Edit in browser, then modify file externally before autosave resolves | `file-conflict-notice`, `file-conflict-action-keep-editing` | Banner title: `Save conflict`; autosave pauses. |
 | Document | Autosave paused | Keep editing after conflict | `file-conflict-notice`, `file-conflict-action-overwrite` | Banner title: `Autosave paused`; no keep-editing action. |
@@ -178,6 +181,8 @@ These are real product states, but they are awkward to capture deterministically
 - Save status: saving, failed, and sometimes unsaved
   
 - Disk conflict and autosave paused
+  
+- Save status: retrying, unsent-draft banner, and server unreachable
   
 - Review handoff undelivered/error
   

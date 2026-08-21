@@ -61,6 +61,15 @@ export type DocumentInteractionMode = "viewing" | "suggesting" | "editing";
  */
 export type LocalContentOrigin = "edit" | "adopt" | "restore";
 
+/**
+ * An unsent draft the app wants put back into the editor. `key` must change on
+ * every offer: restoring the same bytes twice is a real request, not a repeat.
+ */
+export interface DraftRestore {
+  key: string;
+  content: string;
+}
+
 interface PageCardProps {
   page: Page;
   activeDocumentPath?: string | null;
@@ -79,6 +88,7 @@ interface PageCardProps {
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
+  draftRestore?: DraftRestore | null;
 }
 
 interface PageCardEditorSurfaceProps {
@@ -99,6 +109,7 @@ interface PageCardEditorSurfaceProps {
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
+  draftRestore?: DraftRestore | null;
 }
 
 interface RichTextEditorSurfaceProps {
@@ -2197,6 +2208,7 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
   onSaveControllerChange,
   saveBlocked = false,
   forceResetKey = null,
+  draftRestore = null,
 }: PageCardEditorSurfaceProps) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightSaveRef = useRef<Promise<ManualSaveResult> | null>(null);
@@ -2206,6 +2218,9 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
   const lastAcceptedMarkdownRef = useRef(page.content);
   const localDirtyRef = useRef(false);
   const forceResetKeyRef = useRef(forceResetKey);
+  // Starts null, not at the current key: a restore that is already pending
+  // when the card mounts is exactly the boot-recovery case.
+  const draftRestoreKeyRef = useRef<string | null>(null);
   const [markdown, setMarkdown] = useState(page.content);
   const [richTextSourceMarkdown, setRichTextSourceMarkdown] = useState(
     page.content,
@@ -2363,6 +2378,20 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     [onLocalContentChange, reportDirtyState, scheduleSave],
   );
 
+  /**
+   * Put an unsent draft back in the editor and send it. It is adopted as
+   * unsaved work, so the reconciliation effect below leaves it alone and the
+   * card keeps warning about it until the destination confirms.
+   */
+  useEffect(() => {
+    if (!draftRestore) return;
+    if (draftRestoreKeyRef.current === draftRestore.key) return;
+    draftRestoreKeyRef.current = draftRestore.key;
+
+    acceptMarkdown(draftRestore.content, { markSaved: false });
+    scheduleSave(draftRestore.content);
+  }, [acceptMarkdown, draftRestore, scheduleSave]);
+
   useEffect(() => {
     const forceResetChanged = forceResetKeyRef.current !== forceResetKey;
     forceResetKeyRef.current = forceResetKey;
@@ -2491,6 +2520,7 @@ export function PageCard({
   onSaveControllerChange,
   saveBlocked,
   forceResetKey,
+  draftRestore,
 }: PageCardProps) {
   const [saveState, setSaveState] = useState<DocumentSaveState>("saved");
 
@@ -2518,6 +2548,7 @@ export function PageCard({
         onSaveControllerChange={onSaveControllerChange}
         saveBlocked={saveBlocked}
         forceResetKey={forceResetKey}
+        draftRestore={draftRestore}
       />
     </div>
   );

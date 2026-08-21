@@ -1,5 +1,6 @@
 import type { StorageBackend } from "./storage";
 import { ApiBackend } from "./api-backend";
+import { getRequestedPathState } from "./app-navigation";
 import { LocalStorageBackend } from "./local-storage-backend";
 import { RemoteBackend } from "./remote-backend";
 
@@ -8,6 +9,18 @@ interface StatusPayload {
   projectDir?: string;
   stateless?: boolean;
   capabilities?: { remoteDocuments?: boolean };
+}
+
+/**
+ * The document the URL asks for exists somewhere Roughdraft cannot reach right
+ * now. Distinct from a document that genuinely cannot be opened, because this
+ * one is worth retrying and any unsent edits for it are still safe.
+ */
+export class BackendUnavailableError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "BackendUnavailableError";
+  }
 }
 
 export async function detectBackend(): Promise<StorageBackend> {
@@ -35,7 +48,12 @@ export async function detectBackend(): Promise<StorageBackend> {
         return await RemoteBackend.create(sessionId, token);
       } catch (error) {
         console.error("Could not initialize remote backend:", error);
-        throw error;
+        throw new BackendUnavailableError(
+          error instanceof Error
+            ? error.message
+            : `Could not load remote document session ${sessionId}`,
+          { cause: error },
+        );
       }
     }
 
@@ -49,6 +67,14 @@ export async function detectBackend(): Promise<StorageBackend> {
         projectPath: statusPayload.projectDir,
       });
     }
+  }
+
+  // No server answered. Falling back to browser storage when the URL names a
+  // real document would show an empty page for a file that is fine on disk.
+  if (sessionId || getRequestedPathState().rawPath) {
+    throw new BackendUnavailableError(
+      "Roughdraft could not reach the local server.",
+    );
   }
 
   return new LocalStorageBackend();
