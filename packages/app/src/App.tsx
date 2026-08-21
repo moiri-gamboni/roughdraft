@@ -53,7 +53,7 @@ import {
 } from "./document-comments";
 import { copyTextToClipboard } from "./lib/clipboard";
 import { cn } from "./lib/utils";
-import type { DocumentSaveState } from "./PageCard";
+import type { DocumentSaveState, LocalContentOrigin } from "./PageCard";
 import { PreviewBackend } from "./preview-backend";
 import { RoughdraftFormatDemo } from "./RoughdraftFormatDemo";
 import {
@@ -64,6 +64,7 @@ import {
 } from "./storage";
 import { UpdateNotice } from "./UpdateNotice";
 import { fetchUpdateStatus, type UpdateStatus } from "./update-status";
+import { useDraftPersistence } from "./useDraftPersistence";
 
 export type DocumentDiskChangeState =
   | "clean"
@@ -1505,6 +1506,7 @@ export function App() {
   const documentDirtyRef = useRef(false);
   const documentSaveStateRef = useRef<DocumentSaveState>("saved");
   const documentDraftContentRef = useRef<string | null>(null);
+  const draftPersistence = useDraftPersistence();
 
   backendRef.current = backend;
   documentPageRef.current = documentPage;
@@ -1705,9 +1707,10 @@ export function App() {
 
       applyDocumentPage(nextDocument);
       documentDirtyRef.current = false;
+      draftPersistence.noteSaveSuccess(content);
       setDocumentDiskChangeState("clean");
     },
-    [activeDocumentPath, applyDocumentPage],
+    [activeDocumentPath, applyDocumentPage, draftPersistence],
   );
 
   const handleDocumentDirtyStateChange = useCallback((isDirty: boolean) => {
@@ -1722,9 +1725,19 @@ export function App() {
     [],
   );
 
-  const handleDocumentLocalContentChange = useCallback((markdown: string) => {
-    documentDraftContentRef.current = markdown;
-  }, []);
+  const handleDocumentLocalContentChange = useCallback(
+    (markdown: string, origin: LocalContentOrigin) => {
+      documentDraftContentRef.current = markdown;
+      // Only the user's own edits are unsent work. Adopting content the app
+      // handed the editor would re-record what is already on disk.
+      if (origin !== "edit") return;
+      draftPersistence.recordLocalContent(
+        markdown,
+        documentPageRef.current?.content ?? null,
+      );
+    },
+    [draftPersistence],
+  );
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {

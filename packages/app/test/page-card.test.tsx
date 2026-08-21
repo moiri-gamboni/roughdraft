@@ -284,6 +284,8 @@ type RenderedPageCard = {
   container: HTMLDivElement;
   onSave: ReturnType<typeof vi.fn>;
   onSaveStateChange: ReturnType<typeof vi.fn>;
+  onLocalContentChange: ReturnType<typeof vi.fn>;
+  onDirtyStateChange: ReturnType<typeof vi.fn>;
   getEditor: () => Editor;
   getSaveController: () => DocumentSaveController;
   rerender: (overrides?: PageCardTestOptions) => Promise<void>;
@@ -301,6 +303,8 @@ async function renderPageCard(
   const backend = options.backend ?? createBackend();
   const onSave = vi.fn().mockResolvedValue(undefined);
   const onSaveStateChange = vi.fn();
+  const onLocalContentChange = vi.fn();
+  const onDirtyStateChange = vi.fn();
   let editor: Editor | null = null;
   let saveController: DocumentSaveController | null = null;
 
@@ -317,6 +321,8 @@ async function renderPageCard(
     interactionMode: options.interactionMode ?? "editing",
     onSave,
     onSaveStateChange,
+    onLocalContentChange,
+    onDirtyStateChange,
     backend,
     onEditorReady: (nextEditor: Editor | null) => {
       editor = nextEditor;
@@ -352,6 +358,8 @@ async function renderPageCard(
     container,
     onSave,
     onSaveStateChange,
+    onLocalContentChange,
+    onDirtyStateChange,
     getEditor() {
       expect(editor).not.toBeNull();
       return editor as Editor;
@@ -2220,5 +2228,37 @@ describe("PageCard editor integration", () => {
     expect(rendered.getEditor()).toBe(initialEditor);
     expect(getEditable(rendered.container)).toBe(initialEditable);
     expect(rendered.getEditor().getText()).toContain("Heading");
+  });
+});
+
+describe("PageCard local content origin", () => {
+  it("reports a typed change as a genuine edit", async () => {
+    const rendered = await renderPageCard({
+      page: { id: "origin-1", title: "Origin 1", content: "Start" },
+    });
+    rendered.onLocalContentChange.mockClear();
+
+    await insertTextAtEnd(rendered.getEditor(), " typed");
+
+    const origins = rendered.onLocalContentChange.mock.calls.map(
+      (call) => call[1],
+    );
+    expect(origins.length).toBeGreaterThan(0);
+    expect(new Set(origins)).toEqual(new Set(["edit"]));
+  });
+
+  it("reports adopting fresh page content as not a genuine edit", async () => {
+    const rendered = await renderPageCard({
+      page: { id: "origin-2", title: "Origin 2", content: "Start" },
+    });
+    rendered.onLocalContentChange.mockClear();
+
+    await rendered.rerender({
+      page: { id: "origin-2", title: "Origin 2", content: "Adopted from disk" },
+    });
+
+    const calls = rendered.onLocalContentChange.mock.calls;
+    expect(calls).toContainEqual(["Adopted from disk", "adopt"]);
+    expect(calls.every((call) => call[1] !== "edit")).toBe(true);
   });
 });

@@ -55,6 +55,12 @@ export interface DocumentSaveController {
 type EditorViewMode = "rich-text" | "code";
 export type DocumentInteractionMode = "viewing" | "suggesting" | "editing";
 
+/**
+ * Where a local content change came from. Only `"edit"` is the user changing
+ * the document; the other two are the card adopting content it was handed.
+ */
+export type LocalContentOrigin = "edit" | "adopt" | "restore";
+
 interface PageCardProps {
   page: Page;
   activeDocumentPath?: string | null;
@@ -69,7 +75,7 @@ interface PageCardProps {
   onEditorReady?: (editor: Editor | null) => void;
   onCommentRailPresenceChange?: (hasCommentRailSpace: boolean) => void;
   onDirtyStateChange?: (isDirty: boolean) => void;
-  onLocalContentChange?: (markdown: string) => void;
+  onLocalContentChange?: (markdown: string, origin: LocalContentOrigin) => void;
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
@@ -89,7 +95,7 @@ interface PageCardEditorSurfaceProps {
   onEditorReady?: (editor: Editor | null) => void;
   onCommentRailPresenceChange?: (hasCommentRailSpace: boolean) => void;
   onDirtyStateChange?: (isDirty: boolean) => void;
-  onLocalContentChange?: (markdown: string) => void;
+  onLocalContentChange?: (markdown: string, origin: LocalContentOrigin) => void;
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
@@ -2215,16 +2221,27 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     [onDirtyStateChange],
   );
 
+  /**
+   * Adopt content the card was handed rather than content the user typed.
+   *
+   * With `markSaved: false` the content is treated as an unsaved local draft:
+   * the last-accepted marker stays on what the destination actually holds, so
+   * the card stays dirty and the reconciliation effect will not quietly
+   * replace the restored text with the copy on disk.
+   */
   const acceptMarkdown = useCallback(
-    (nextMarkdown: string) => {
+    (
+      nextMarkdown: string,
+      { markSaved = true }: { markSaved?: boolean } = {},
+    ) => {
       pendingMarkdownRef.current = nextMarkdown;
-      lastAcceptedMarkdownRef.current = nextMarkdown;
+      if (markSaved) lastAcceptedMarkdownRef.current = nextMarkdown;
       setMarkdown(nextMarkdown);
       setRichTextSourceMarkdown(nextMarkdown);
       setRichTextSourceVersion((current) => current + 1);
-      onLocalContentChange?.(nextMarkdown);
-      reportDirtyState(false);
-      onSaveStateChange("saved");
+      onLocalContentChange?.(nextMarkdown, markSaved ? "adopt" : "restore");
+      reportDirtyState(!markSaved);
+      onSaveStateChange(markSaved ? "saved" : "unsaved");
     },
     [onLocalContentChange, onSaveStateChange, reportDirtyState],
   );
@@ -2339,7 +2356,7 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     (nextMarkdown: string) => {
       pendingMarkdownRef.current = nextMarkdown;
       setMarkdown(nextMarkdown);
-      onLocalContentChange?.(nextMarkdown);
+      onLocalContentChange?.(nextMarkdown, "edit");
       reportDirtyState(nextMarkdown !== lastAcceptedMarkdownRef.current);
       scheduleSave(nextMarkdown);
     },
