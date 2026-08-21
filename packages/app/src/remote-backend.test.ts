@@ -2,6 +2,55 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RemoteBackend } from "./remote-backend";
 import { MarkdownFileConflictError } from "./storage";
 
+class FakeEventSource {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
+
+  readonly url: string;
+  readyState: number = FakeEventSource.OPEN;
+  onerror: ((event: Event) => void) | null = null;
+  closed = false;
+
+  private readonly listeners = new Map<string, Array<(event: Event) => void>>();
+
+  constructor(url: string) {
+    this.url = url;
+  }
+
+  addEventListener(type: string, listener: (event: Event) => void): void {
+    const existing = this.listeners.get(type) ?? [];
+    existing.push(listener);
+    this.listeners.set(type, existing);
+  }
+
+  close(): void {
+    this.closed = true;
+    this.readyState = FakeEventSource.CLOSED;
+  }
+
+  /** Deliver a server-sent event to the listeners the backend registered. */
+  emit(type: string, data?: string): void {
+    const event =
+      data === undefined ? new Event(type) : new MessageEvent(type, { data });
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event);
+    }
+  }
+}
+
+function installFakeEventSource(): FakeEventSource[] {
+  const sources: FakeEventSource[] = [];
+  class TrackedEventSource extends FakeEventSource {
+    constructor(url: string) {
+      super(url);
+      sources.push(this);
+    }
+  }
+  global.EventSource = TrackedEventSource as unknown as typeof EventSource;
+  return sources;
+}
+
 describe("RemoteBackend", () => {
   const originalFetch = global.fetch;
   const originalEventSource = global.EventSource;
@@ -200,36 +249,7 @@ describe("RemoteBackend", () => {
   });
 
   it("watchMarkdownFile opens a viewer event stream with the token in the query string", () => {
-    const instances: Array<{
-      url: string;
-      listeners: Record<string, Array<(event: Event) => void>>;
-      readyState: number;
-      close: () => void;
-    }> = [];
-
-    class FakeEventSource {
-      static CLOSED = 2;
-      url: string;
-      listeners: Record<string, Array<(event: Event) => void>> = {};
-      readyState = 1;
-      onerror: ((event: Event) => void) | null = null;
-
-      constructor(url: string) {
-        this.url = url;
-        instances.push(this);
-      }
-
-      addEventListener(type: string, listener: (event: Event) => void) {
-        this.listeners[type] ??= [];
-        this.listeners[type].push(listener);
-      }
-
-      close() {
-        this.readyState = FakeEventSource.CLOSED;
-      }
-    }
-
-    global.EventSource = FakeEventSource as unknown as typeof EventSource;
+    const sources = installFakeEventSource();
 
     const backend = new RemoteBackend(
       {
@@ -252,19 +272,35 @@ describe("RemoteBackend", () => {
     backend.onSessionStatusChange((status) => statuses.push(status));
 
     const stopWatching = backend.watchMarkdownFile("ignored.md", () => {});
-    expect(instances).toHaveLength(1);
+    expect(sources).toHaveLength(1);
 
-    const eventsUrl = new URL(instances[0].url);
+    const eventsUrl = new URL(sources[0].url);
     expect(eventsUrl.pathname).toBe("/api/remote-document/session-1/events");
     expect(eventsUrl.searchParams.get("role")).toBe("viewer");
     expect(eventsUrl.searchParams.get("token")).toBe("secret-token");
 
-    instances[0].listeners.connected?.forEach((listener) => {
-      listener(new Event("connected"));
-    });
+    sources[0].emit("connected");
     expect(statuses).toEqual(["disconnected", "connected"]);
 
     stopWatching();
+    expect(statuses).toEqual(["disconnected", "connected", "disconnected"]);
+  });
+
+  it("flips the session status when the server pushes a disconnected event", () => {
+    const sources = installFakeEventSource();
+    const backend = bootstrap();
+    const statuses: string[] = [];
+    backend.onSessionStatusChange((status) => statuses.push(status));
+
+    backend.watchMarkdownFile("ignored.md", () => {});
+    sources[0].emit("connected");
+    expect(statuses).toEqual(["disconnected", "connected"]);
+
+    // The CLI's stream died; the viewer's own stream is still healthy, so the
+    // server's push is the only signal that the session is gone.
+    sources[0].emit("disconnected");
+
+    expect(sources[0].readyState).toBe(FakeEventSource.OPEN);
     expect(statuses).toEqual(["disconnected", "connected", "disconnected"]);
   });
 });

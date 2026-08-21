@@ -184,6 +184,12 @@ export class RemoteBackend implements StorageBackend {
       this.setSessionStatus("connected");
     });
 
+    // The server pushes this when the CLI's stream drops. The viewer's own
+    // stream stays healthy, so it is the only signal that the session is gone.
+    source.addEventListener("disconnected", () => {
+      this.setSessionStatus("disconnected");
+    });
+
     source.addEventListener("save", (event) => {
       try {
         const payload = JSON.parse((event as MessageEvent<string>).data) as {
