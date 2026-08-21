@@ -703,8 +703,12 @@ export function createTurndownService(): TurndownService {
     },
   });
 
-  // We own the markdown parser and want stable round-trips without doubled escapes.
-  service.escape = (value: string) => value;
+  // Turndown's default escape doubles backslashes and guards line-start
+  // syntax, rewriting text the parser never treated as markup. But inline
+  // delimiters do need escaping: typed text like `woa*brds` inside emphasis
+  // otherwise saves as `*em woa*brds*` and comes back as different markup.
+  // A backslash before ASCII punctuation never changes the rendered text.
+  service.escape = (value: string) => value.replace(/[*_`~[\]]/g, "\\$&");
 
   service.addRule("markdownAwareLinks", {
     filter: "a",
