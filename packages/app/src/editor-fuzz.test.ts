@@ -6,9 +6,11 @@ import {
   createCriticComment,
   criticMarkdownToEditorState,
   editorStateToCriticMarkdown,
+  getCommentDescendantIds,
 } from "./critic-markup";
+import { reconcileCommentsWithDoc } from "./document-comments";
 import { createEditorExtensions } from "./editor-extensions";
-import { canSuggestDeletion, resolveCommentAnchor } from "./review-selection";
+import { resolveCommentAnchor } from "./review-selection";
 
 /**
  * Seeded fuzz over the edit -> save -> reparse cycle. Each case applies a
@@ -85,6 +87,8 @@ function collectMarkIds(
 interface FuzzContext {
   editor: Editor;
   comments: Map<string, CriticComment>;
+  graveyard: Map<string, CriticComment>;
+  everAnchored: Set<string>;
   random: () => number;
 }
 
@@ -98,6 +102,22 @@ function randomRange(context: FuzzContext, maxLength: number) {
     from + 1 + Math.floor(context.random() * maxLength),
   );
   return to > from ? { from, to } : null;
+}
+
+function isEdgeWhitespaceRange(
+  context: FuzzContext,
+  range: { from: number; to: number },
+): boolean {
+  const doc = context.editor.state.doc;
+  const text = doc.textBetween(range.from, range.to, "\n", "\uFFFC");
+  if (text.trim().length > 0) return false;
+
+  const $from = doc.resolve(range.from);
+  const $to = doc.resolve(range.to);
+  if (!$from.sameParent($to)) return true;
+  const before = doc.textBetween($from.start(), range.from, "\n", "\uFFFC");
+  const after = doc.textBetween(range.to, $from.end(), "\n", "\uFFFC");
+  return before.trim().length === 0 || after.trim().length === 0;
 }
 
 const OPS: Record<string, FuzzOp> = {
@@ -137,27 +157,41 @@ const OPS: Record<string, FuzzOp> = {
       context.comments.set(comment.id, comment);
       return `pointComment(${anchor.at})=${comment.id}`;
     }
-    if (!context.editor.commands.setCommentRef({ commentIds: [comment.id] }))
+    if (
+      !context.editor.commands.addCommentIdToRange(
+        comment.id,
+        range.from,
+        range.to,
+      )
+    )
       return null;
     context.comments.set(comment.id, comment);
     return `comment(${range.from},${range.to})=${comment.id}`;
   },
   deleteComment(context) {
+    // Mirrors PageCard's deleteComment: replies go with their root.
     const ids = [...context.comments.keys()];
     const id = ids[Math.floor(context.random() * ids.length)];
     if (!id) return null;
-    context.comments.delete(id);
-    context.editor.chain().removeCommentId(id).run();
-    return `deleteComment(${id})`;
+    const toDelete = [id, ...getCommentDescendantIds(id, context.comments)];
+    const chain = context.editor.chain();
+    for (const deletedId of toDelete) {
+      const comment = context.comments.get(deletedId);
+      if (comment) context.graveyard.set(deletedId, comment);
+      context.comments.delete(deletedId);
+      chain.removeCommentId(deletedId);
+    }
+    chain.run();
+    return `deleteComment(${toDelete.join("+")})`;
   },
   suggestDelete(context) {
-    // Mirrors PageCard's handleSuggestDeletion: whitespace-only selections
-    // are refused (a deletion mark on pure whitespace cannot survive
-    // serialization).
     const range = randomRange(context, 8);
     if (!range) return null;
-    if (!canSuggestDeletion(context.editor.state, range.from, range.to))
-      return null;
+    // Documented substrate limit: markdown cannot carry whitespace at a
+    // block edge (trailing spaces in a paragraph or table cell vanish,
+    // marked or not), so a whitespace-only deletion there cannot round-trip
+    // and is skipped rather than asserted on.
+    if (isEdgeWhitespaceRange(context, range)) return null;
     const change = createCriticChange("deletion", undefined, {
       existingChanges: [
         ...collectMarkIds(
@@ -202,9 +236,10 @@ describe("editor round-trip fuzz", () => {
     reparseEditor.destroy();
   });
 
-  // ~50ms/case; sized for a deep FUZZ_CASES run, not just the default 120.
+  // ~50ms/case alone, several times that under load; sized for a deep
+  // FUZZ_CASES run, not just the default 120.
   it(`holds invariants across ${CASE_COUNT} random edit sequences`, {
-    timeout: 30_000 + CASE_COUNT * 300,
+    timeout: 30_000 + CASE_COUNT * 800,
   }, () => {
     const failures: string[] = [];
 
@@ -212,10 +247,20 @@ describe("editor round-trip fuzz", () => {
       const random = mulberry32(caseIndex);
       const markdown =
         CORPUS[Math.floor(random() * CORPUS.length)] ?? CORPUS[0]!;
-      const { doc, comments, frontmatter, endmatter } =
-        criticMarkdownToEditorState(markdown);
+      const {
+        doc,
+        comments: parsedComments,
+        frontmatter,
+        endmatter,
+      } = criticMarkdownToEditorState(markdown);
       editor.commands.setContent(doc, { emitUpdate: false });
-      const context: FuzzContext = { editor, comments, random };
+      const context: FuzzContext = {
+        editor,
+        comments: parsedComments,
+        graveyard: new Map(),
+        everAnchored: new Set(),
+        random,
+      };
 
       const applied: string[] = [];
       const opCount = 1 + Math.floor(random() * 3);
@@ -233,6 +278,18 @@ describe("editor round-trip fuzz", () => {
         }
 
         const editedJson = editor.getJSON();
+        // PageCard reconciles the comment maps against the document on every
+        // update; without this step the resurrection invariant below would
+        // model a component that does not exist.
+        const reconciled = reconcileCommentsWithDoc(
+          editedJson,
+          context.comments,
+          context.graveyard,
+          context.everAnchored,
+        );
+        context.comments = reconciled.live;
+        context.graveyard = reconciled.graveyard;
+        const comments = context.comments;
         const editedText = normalizeText(editor.getText());
         const anchoredCommentIds = collectMarkIds(
           editedJson,
@@ -270,6 +327,35 @@ describe("editor round-trip fuzz", () => {
               `${id} saved=${JSON.stringify(saved)}`,
             );
           }
+        }
+
+        // A deleted comment must not resurrect from the saved file: stale
+        // inline blocks or endmatter entries confuse whoever reads the file.
+        for (const id of reparsed.comments.keys()) {
+          if (!comments.has(id)) {
+            fail(
+              "deleted comment survived in the file",
+              `${id} saved=${JSON.stringify(saved)}`,
+            );
+          }
+        }
+
+        // A leftover point-comment sentinel with no mark is invisible
+        // garbage in the text.
+        let straySentinel = false;
+        const walkForSentinel = (node: JSONContent) => {
+          if (
+            typeof node.text === "string" &&
+            node.text.includes("\u2060") &&
+            !(node.marks ?? []).some((mark) => mark.type === "commentRef")
+          ) {
+            straySentinel = true;
+          }
+          for (const child of node.content ?? []) walkForSentinel(child);
+        };
+        walkForSentinel(reparsed.doc);
+        if (straySentinel) {
+          fail("stray comment sentinel", `saved=${JSON.stringify(saved)}`);
         }
 
         const reparsedChangeIds = collectMarkIds(
