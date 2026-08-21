@@ -1,6 +1,7 @@
 import { Editor } from "@tiptap/core";
 import { describe, expect, it } from "vitest";
 import {
+  createCriticComment,
   criticMarkdownToEditorState,
   editorStateToCriticMarkdown,
 } from "./critic-markup";
@@ -116,6 +117,104 @@ describe("emphasis stays emphasis after edits", () => {
     );
 
     expect(saved).toBe("the **text** here\n");
+  });
+});
+
+// Regression pins from editor-fuzz.test.ts findings (2026-08-21).
+describe("fuzz-found round-trip bugs", () => {
+  function roundTrip(markdown: string, edit: (editor: Editor) => void) {
+    const { doc, comments, frontmatter, endmatter } =
+      criticMarkdownToEditorState(markdown);
+    const editor = new Editor({
+      extensions: createEditorExtensions(),
+      content: doc,
+    });
+    edit(editor);
+    const saved = editorStateToCriticMarkdown(editor.getJSON(), comments, {
+      frontmatter,
+      endmatter,
+    });
+    editor.destroy();
+    return { saved, reparsed: criticMarkdownToEditorState(saved) };
+  }
+
+  it("keeps text around a suggestion when a comment overlaps it", () => {
+    // The comment anchor contains the deletion suggestion plus plain text;
+    // serializing only the suggestion dropped "ep " from the file.
+    const markdown =
+      'keep {--removed--}{#s1} word\n\n---\nsuggestions:\n  s1:\n    by: user\n    at: "2026-01-01T00:00:00.000Z"\n';
+    const { saved, reparsed } = roundTrip(markdown, (editor) => {
+      const comment = createCriticComment({ content: "note" }, {});
+      editor.commands.setTextSelection({ from: 3, to: 13 });
+      editor.commands.setCommentRef({ commentIds: [comment.id] });
+    });
+
+    expect(saved).toContain("ep ");
+    const editor = new Editor({
+      extensions: createEditorExtensions(),
+      content: reparsed.doc,
+    });
+    expect(editor.getText()).toBe("keep removed word");
+    editor.destroy();
+  });
+
+  it("keeps an endmatter reply orphaned by deleting its root", () => {
+    // Rejecting the whole endmatter over the dangling `re:` dumped the YAML
+    // into the document body as text.
+    const markdown =
+      'plain {==anchored==}{>>root<<}{#c1} text\n\n---\ncomments:\n  c1:\n    by: user\n    at: "2026-01-01T00:00:00.000Z"\n  c2:\n    body: reply\n    by: AI\n    at: "2026-01-01T00:01:00.000Z"\n    re: c1\n';
+    const { saved, reparsed } = roundTrip(markdown, (editor) => {
+      editor.chain().removeCommentId("c1").run();
+    });
+
+    expect(saved).toContain("re: c1");
+    expect(reparsed.endmatter).not.toBeNull();
+    const editor = new Editor({
+      extensions: createEditorExtensions(),
+      content: reparsed.doc,
+    });
+    expect(editor.getText()).toBe("plain anchored text");
+    editor.destroy();
+  });
+
+  it("keeps emphasis between two comment anchors parsed", () => {
+    // marked's blockSkip masked everything from one comment's `<<}` to the
+    // next comment's `{>>` as a bogus <tag>, so emphasis between two
+    // comments came back as literal asterisks (patched in markdown.ts).
+    const markdown =
+      'a {==x==}{>>n<<}{#c1}**bold** and *em* {==y==}{>>n<<}{#c2} b\n\n---\ncomments:\n  c1:\n    by: user\n    at: "2026-01-01T00:00:00.000Z"\n  c2:\n    by: user\n    at: "2026-01-01T00:00:00.000Z"\n';
+    const { saved, reparsedText } = (() => {
+      const { doc, comments, frontmatter, endmatter } =
+        criticMarkdownToEditorState(markdown);
+      const editor = new Editor({
+        extensions: createEditorExtensions(),
+        content: doc,
+      });
+      const reparsedText = editor.getText();
+      const saved = editorStateToCriticMarkdown(editor.getJSON(), comments, {
+        frontmatter,
+        endmatter,
+      });
+      editor.destroy();
+      return { saved, reparsedText };
+    })();
+
+    expect(reparsedText).toBe("a xbold and em y b");
+    expect(saved).toBe(markdown);
+  });
+
+  it("escapes typed markdown delimiters so text stays text", () => {
+    const { saved, reparsed } = roundTrip("plain *em words* here\n", (editor) =>
+      editor.commands.insertContentAt(9, { type: "text", text: "a*b `c`" }),
+    );
+
+    expect(saved).toBe("plain *ema\\*b \\`c\\` words* here\n");
+    const editor = new Editor({
+      extensions: createEditorExtensions(),
+      content: reparsed.doc,
+    });
+    expect(editor.getText()).toBe("plain ema*b `c` words here");
+    editor.destroy();
   });
 });
 

@@ -23,6 +23,8 @@ Prefer the fastest test that remains predictive. Escalate to integration or e2e 
 
 `docs/solutions/` contains documented solutions to past problems, organized by category with YAML frontmatter (`module`, `tags`, `problem_type`). It is relevant context when implementing, debugging, or choosing tests in documented areas.
 
+Two seeded fuzz harnesses run as part of the app suite: `packages/app/src/editor-fuzz.test.ts` (random edit sequences through the real editor and serializer, checking text/comment/suggestion survival across save→reparse) and `packages/app/src/rail-layout-fuzz.test.ts` (rail layout and threading invariants). Both are deterministic and scale with `FUZZ_CASES` (e.g. `FUZZ_CASES=5000 pnpm vitest run src/editor-fuzz.test.ts`) — run a deep pass after changing the serializer, parser, or rail layout. A failure prints a self-contained repro; pin it as a named regression test when it reveals a new bug class.
+
 ## Bug Fix Workflow
 
 When the user asks you to fix something, first have a subagent reproduce the bug with a failing test case before implementing the fix. The subagent should focus on the smallest behavioral test that demonstrates the problem, and should report the failing command, changed test files, and why the failure captures the requested bug.
