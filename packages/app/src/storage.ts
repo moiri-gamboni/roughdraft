@@ -21,6 +21,21 @@ export class MarkdownFileConflictError extends Error {
   }
 }
 
+/**
+ * How the open document relates to what the destination holds. Lives here
+ * rather than in `App` so `DocumentWorkspace` can name it without importing
+ * back up into its own parent.
+ *
+ * Every state but `"clean"` pauses autosave, warns before unload and blocks
+ * the review handoff, so adding one is a decision about all three.
+ */
+export type DocumentDiskChangeState =
+  | "clean"
+  | "changed"
+  | "conflict"
+  | "paused"
+  | "draft-restore";
+
 export interface StoredAsset {
   markdownPath: string;
   previewUrl: string;

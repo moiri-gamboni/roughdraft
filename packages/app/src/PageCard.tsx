@@ -56,6 +56,23 @@ export interface DocumentSaveController {
 type EditorViewMode = "rich-text" | "code";
 export type DocumentInteractionMode = "viewing" | "suggesting" | "editing";
 
+/**
+ * Where a local content change came from. Only `"edit"` is the user changing
+ * the document; the other two are the card adopting content it was handed.
+ */
+export type LocalContentOrigin = "edit" | "adopt" | "restore";
+
+/**
+ * An unsent draft the app wants put back into the editor.
+ *
+ * Each offer is a distinct object, and that identity is the signal: restoring
+ * the same bytes twice is a real request, not a repeat, so the value must come
+ * from state rather than be built inline while rendering.
+ */
+export interface DraftRestore {
+  content: string;
+}
+
 interface PageCardProps {
   page: Page;
   activeDocumentPath?: string | null;
@@ -70,10 +87,11 @@ interface PageCardProps {
   onEditorReady?: (editor: Editor | null) => void;
   onCommentRailPresenceChange?: (hasCommentRailSpace: boolean) => void;
   onDirtyStateChange?: (isDirty: boolean) => void;
-  onLocalContentChange?: (markdown: string) => void;
+  onLocalContentChange?: (markdown: string, origin: LocalContentOrigin) => void;
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
+  draftRestore?: DraftRestore | null;
 }
 
 interface PageCardEditorSurfaceProps {
@@ -90,10 +108,11 @@ interface PageCardEditorSurfaceProps {
   onEditorReady?: (editor: Editor | null) => void;
   onCommentRailPresenceChange?: (hasCommentRailSpace: boolean) => void;
   onDirtyStateChange?: (isDirty: boolean) => void;
-  onLocalContentChange?: (markdown: string) => void;
+  onLocalContentChange?: (markdown: string, origin: LocalContentOrigin) => void;
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
+  draftRestore?: DraftRestore | null;
 }
 
 interface RichTextEditorSurfaceProps {
@@ -2215,6 +2234,7 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
   onSaveControllerChange,
   saveBlocked = false,
   forceResetKey = null,
+  draftRestore = null,
 }: PageCardEditorSurfaceProps) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightSaveRef = useRef<Promise<ManualSaveResult> | null>(null);
@@ -2239,16 +2259,27 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     [onDirtyStateChange],
   );
 
+  /**
+   * Adopt content the card was handed rather than content the user typed.
+   *
+   * With `markSaved: false` the content is treated as an unsaved local draft:
+   * the last-accepted marker stays on what the destination actually holds, so
+   * the card stays dirty and the reconciliation effect will not quietly
+   * replace the restored text with the copy on disk.
+   */
   const acceptMarkdown = useCallback(
-    (nextMarkdown: string) => {
+    (
+      nextMarkdown: string,
+      { markSaved = true }: { markSaved?: boolean } = {},
+    ) => {
       pendingMarkdownRef.current = nextMarkdown;
-      lastAcceptedMarkdownRef.current = nextMarkdown;
+      if (markSaved) lastAcceptedMarkdownRef.current = nextMarkdown;
       setMarkdown(nextMarkdown);
       setRichTextSourceMarkdown(nextMarkdown);
       setRichTextSourceVersion((current) => current + 1);
-      onLocalContentChange?.(nextMarkdown);
-      reportDirtyState(false);
-      onSaveStateChange("saved");
+      onLocalContentChange?.(nextMarkdown, markSaved ? "adopt" : "restore");
+      reportDirtyState(!markSaved);
+      onSaveStateChange(markSaved ? "saved" : "unsaved");
     },
     [onLocalContentChange, onSaveStateChange, reportDirtyState],
   );
@@ -2363,12 +2394,32 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     (nextMarkdown: string) => {
       pendingMarkdownRef.current = nextMarkdown;
       setMarkdown(nextMarkdown);
-      onLocalContentChange?.(nextMarkdown);
+      onLocalContentChange?.(nextMarkdown, "edit");
       reportDirtyState(nextMarkdown !== lastAcceptedMarkdownRef.current);
       scheduleSave(nextMarkdown);
     },
     [onLocalContentChange, reportDirtyState, scheduleSave],
   );
+
+  /**
+   * Put an unsent draft back in the editor and send it. It is adopted as
+   * unsaved work, so the reconciliation effect below leaves it alone and the
+   * card keeps warning about it until the destination confirms.
+   */
+  // Only the offer itself is a dependency. Including the callbacks would
+  // re-restore whenever an unrelated prop changed their identity, and the
+  // effect has to stay safe to run twice for one offer anyway: React discards
+  // and replays mount effects, which cancels the save this schedules.
+  const restoreDraftRef = useRef({ acceptMarkdown, scheduleSave });
+  restoreDraftRef.current = { acceptMarkdown, scheduleSave };
+
+  useEffect(() => {
+    if (!draftRestore) return;
+    restoreDraftRef.current.acceptMarkdown(draftRestore.content, {
+      markSaved: false,
+    });
+    restoreDraftRef.current.scheduleSave(draftRestore.content);
+  }, [draftRestore]);
 
   useEffect(() => {
     const forceResetChanged = forceResetKeyRef.current !== forceResetKey;
@@ -2385,10 +2436,16 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
       lastAcceptedMarkdownRef.current = page.content;
       pendingMarkdownRef.current = markdown;
       reportDirtyState(markdown !== page.content);
+      // Only ever upgrade to "saved": if the editor has moved on since, the
+      // save already in flight owns the state and knows better.
+      if (markdown === page.content) onSaveStateChange("saved");
       return;
     }
 
-    if (localDirtyRef.current && markdown !== page.content) {
+    // Compare against the pending content, not this render's `markdown`: a
+    // restore adopted during this same commit has already moved the pending
+    // content on, and reading the stale state would adopt the file over it.
+    if (localDirtyRef.current && pendingMarkdownRef.current !== page.content) {
       return;
     }
 
@@ -2396,11 +2453,21 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
       lastAcceptedMarkdownRef.current = page.content;
       pendingMarkdownRef.current = page.content;
       reportDirtyState(false);
+      // The destination now holds what the editor holds, however it got there
+      // — an autosave, a retry that ran outside this card, or an overwrite.
+      onSaveStateChange("saved");
       return;
     }
 
     acceptMarkdown(page.content);
-  }, [acceptMarkdown, forceResetKey, markdown, page.content, reportDirtyState]);
+  }, [
+    acceptMarkdown,
+    forceResetKey,
+    markdown,
+    onSaveStateChange,
+    page.content,
+    reportDirtyState,
+  ]);
 
   useEffect(() => {
     if (!saveBlocked || !saveTimer.current) return;
@@ -2498,6 +2565,7 @@ export function PageCard({
   onSaveControllerChange,
   saveBlocked,
   forceResetKey,
+  draftRestore,
 }: PageCardProps) {
   const [saveState, setSaveState] = useState<DocumentSaveState>("saved");
 
@@ -2525,6 +2593,7 @@ export function PageCard({
         onSaveControllerChange={onSaveControllerChange}
         saveBlocked={saveBlocked}
         forceResetKey={forceResetKey}
+        draftRestore={draftRestore}
       />
     </div>
   );
