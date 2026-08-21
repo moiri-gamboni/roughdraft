@@ -306,7 +306,7 @@ describe("secrets", () => {
 
     const stored = [...Array(storage.length).keys()].map((index) => {
       const storedKey = storage.key(index) ?? "";
-      return `${storedKey} ${storage.getItem(storedKey) ?? ""}`;
+      return `${storedKey} ${storage.getItem(storedKey) ?? ""}`;
     });
 
     expect(stored.join("\n")).not.toContain("SUPERSECRET");
@@ -326,7 +326,7 @@ describe("secrets", () => {
 
     const stored = [...Array(storage.length).keys()].map((index) => {
       const storedKey = storage.key(index) ?? "";
-      return `${storedKey} ${storage.getItem(storedKey) ?? ""}`;
+      return `${storedKey} ${storage.getItem(storedKey) ?? ""}`;
     });
 
     expect(stored.join("\n")).not.toContain("SUPERSECRET");
