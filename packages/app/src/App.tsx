@@ -2066,15 +2066,20 @@ export function App() {
     if (!currentBackend || !currentPath || !currentDocument) return;
 
     const content = documentDraftContentRef.current ?? currentDocument.content;
-    const savedDocument =
-      (await currentBackend.saveMarkdownFile(currentPath, content)) ??
-      pageFromSavedContent(
-        currentDocument.id,
-        content,
-        currentDocument.version,
-      );
+    // Through the same latch as the autosave and the retry: this deliberately
+    // sends no expectedVersion, so it must not overlap a save that does.
+    const savedDocument = await runExclusively(async () =>
+      currentBackend.saveMarkdownFile(currentPath, content),
+    );
 
-    applyDocumentPage(savedDocument);
+    applyDocumentPage(
+      savedDocument ??
+        pageFromSavedContent(
+          currentDocument.id,
+          content,
+          currentDocument.version,
+        ),
+    );
     documentDirtyRef.current = false;
     draftPersistence.noteSaveSuccess(content);
     handleDocumentSaveStateChange("saved");
@@ -2085,6 +2090,7 @@ export function App() {
     draftPersistence,
     handleDocumentSaveStateChange,
     nextForceResetKey,
+    runExclusively,
   ]);
 
   const handleCompleteReview = useCallback(
@@ -2099,15 +2105,14 @@ export function App() {
       const content =
         documentDraftContentRef.current ?? currentDocument.content;
       const expectedVersion = currentDocument.version;
-      const savedDocument =
-        (await currentBackend.saveMarkdownFile(
-          currentPath,
-          content,
-          expectedVersion,
-        )) ??
-        pageFromSavedContent(currentDocument.id, content, expectedVersion);
+      const savedDocument = await runExclusively(async () =>
+        currentBackend.saveMarkdownFile(currentPath, content, expectedVersion),
+      );
 
-      applyDocumentPage(savedDocument);
+      applyDocumentPage(
+        savedDocument ??
+          pageFromSavedContent(currentDocument.id, content, expectedVersion),
+      );
       documentDirtyRef.current = false;
       // The review is over: nothing about this document is owed any more.
       draftPersistence.discard();
@@ -2117,7 +2122,7 @@ export function App() {
         ? currentBackend.completeReview(currentPath, options)
         : { delivered: false };
     },
-    [applyDocumentPage, draftPersistence],
+    [applyDocumentPage, draftPersistence, runExclusively],
   );
 
   // The subscription deliberately does not depend on the disk-change state:
