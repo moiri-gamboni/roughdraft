@@ -6,6 +6,7 @@ import {
   CodeXml,
   Copy,
   Eye,
+  History,
   Loader2,
   Maximize2,
   MessageSquarePlus,
@@ -52,6 +53,7 @@ import {
   type DocumentInteractionMode,
   type DocumentSaveController,
   type DocumentSaveState,
+  type DraftRestore,
   type LocalContentOrigin,
   PageCard,
 } from "./PageCard";
@@ -65,6 +67,8 @@ import type {
 import { useReadingWidth } from "./useReadingWidth";
 import { useReviewLayoutShiftAnimation } from "./useReviewLayoutShiftAnimation";
 
+/** Whether the unsent draft belongs to a local file or a remote session. */
+export type DraftRestoreMode = "local" | "remote";
 type ReviewHandoffState =
   | "idle"
   | "notifying"
@@ -136,8 +140,12 @@ const documentInteractionModeOptions = [
   Icon: typeof Eye;
 }[];
 
+/**
+ * The disk-conflict banner. `draft-restore` is deliberately absent: an unsent
+ * draft is not a conflict and gets its own notice with its own two choices.
+ */
 const conflictNoticeCopy: Record<
-  Exclude<DocumentDiskChangeState, "clean">,
+  Exclude<DocumentDiskChangeState, "clean" | "draft-restore">,
   {
     title: string;
     body: string;
@@ -155,6 +163,13 @@ const conflictNoticeCopy: Record<
     title: "Autosave paused",
     body: "Keep editing locally, then reload from disk to discard your draft or overwrite the disk file when you are ready.",
   },
+};
+
+const draftRestoreNoticeBody: Record<DraftRestoreMode, string> = {
+  local:
+    "Roughdraft kept edits that never reached this file. Restore them here, or discard them and keep what is on disk.",
+  remote:
+    "Roughdraft kept edits that never reached the origin file. Restore them here, or discard them and keep what the session holds.",
 };
 
 const fileCopyMenuOptions = [
@@ -244,37 +259,37 @@ async function writeRichTextToClipboard(markdown: string) {
   await writePlainTextToClipboard(plainText);
 }
 
+interface SaveStatusViewModel {
+  label: string;
+  ariaLabel: string;
+  tone: "neutral" | "success" | "warning" | "danger";
+  Icon: typeof Check;
+}
+
+function warningStatus(label: string, Icon = AlertTriangle) {
+  return { label, ariaLabel: label, tone: "warning" as const, Icon };
+}
+
+/**
+ * Keyed by the union, so a new disk-change state cannot ship without deciding
+ * what the status pill says about it.
+ */
+const diskChangeStatus: Record<
+  Exclude<DocumentDiskChangeState, "clean">,
+  SaveStatusViewModel
+> = {
+  conflict: warningStatus("Save conflict"),
+  changed: warningStatus("File changed on disk"),
+  paused: warningStatus("Autosave paused"),
+  "draft-restore": warningStatus("Unsent draft found", History),
+};
+
 function getSaveStatusViewModel(
   saveState: DocumentSaveState,
   diskChangeState: DocumentDiskChangeState,
   retryPending: boolean,
-) {
-  if (diskChangeState === "conflict") {
-    return {
-      label: "Save conflict",
-      ariaLabel: "Save conflict",
-      tone: "warning" as const,
-      Icon: AlertTriangle,
-    };
-  }
-
-  if (diskChangeState === "changed") {
-    return {
-      label: "File changed on disk",
-      ariaLabel: "File changed on disk",
-      tone: "warning" as const,
-      Icon: AlertTriangle,
-    };
-  }
-
-  if (diskChangeState === "paused") {
-    return {
-      label: "Autosave paused",
-      ariaLabel: "Autosave paused",
-      tone: "warning" as const,
-      Icon: AlertTriangle,
-    };
-  }
+): SaveStatusViewModel {
+  if (diskChangeState !== "clean") return diskChangeStatus[diskChangeState];
 
   if (saveState === "saving") {
     return {
@@ -289,13 +304,10 @@ function getSaveStatusViewModel(
     // The edits are durable in the browser either way; only say "failed" once
     // nothing is still working to deliver them.
     if (retryPending) {
-      const retryingLabel = "Changes saved in this browser, retrying";
-      return {
-        label: retryingLabel,
-        ariaLabel: retryingLabel,
-        tone: "warning" as const,
-        Icon: RefreshCcw,
-      };
+      return warningStatus(
+        "Changes saved in this browser, retrying",
+        RefreshCcw,
+      );
     }
 
     return {
@@ -431,6 +443,10 @@ interface DocumentWorkspaceProps {
   /** A failed save is still being retried, so the edits are not lost. */
   documentRetryPending?: boolean;
   documentForceResetKey: string | null;
+  draftRestore?: DraftRestore | null;
+  draftRestoreMode?: DraftRestoreMode;
+  onRestoreDraft?: () => void;
+  onDiscardDraft?: () => void;
   onReloadDocumentFromDisk: () => void | Promise<void>;
   onKeepEditingWithoutAutosave: () => void;
   onOverwriteDocumentOnDisk: () => void | Promise<void>;
@@ -454,6 +470,10 @@ export function DocumentWorkspace({
   documentDiskChangeState,
   documentRetryPending = false,
   documentForceResetKey,
+  draftRestore = null,
+  draftRestoreMode = "local",
+  onRestoreDraft,
+  onDiscardDraft,
   onReloadDocumentFromDisk,
   onKeepEditingWithoutAutosave,
   onOverwriteDocumentOnDisk,
@@ -713,9 +733,12 @@ export function DocumentWorkspace({
   const ActiveDocumentInteractionModeIcon =
     activeDocumentInteractionMode?.Icon ?? PencilLine;
   const conflictNotice =
-    documentDiskChangeState === "clean"
+    documentDiskChangeState === "clean" ||
+    documentDiskChangeState === "draft-restore"
       ? null
       : conflictNoticeCopy[documentDiskChangeState];
+  const showDraftRestoreNotice = documentDiskChangeState === "draft-restore";
+  const hasTopNotice = !!conflictNotice || showDraftRestoreNotice;
   const showReviewHandoffButton =
     !!activeDocumentPath &&
     (reviewWatcherCount > 0 || reviewHandoffState !== "idle");
@@ -779,7 +802,7 @@ export function DocumentWorkspace({
       ref={scrollContainerRef}
       className={cn(
         "min-h-0 flex-1 overflow-y-auto px-8 pb-8 sm:px-12",
-        conflictNotice ? "pt-40 sm:pt-28" : "pt-10",
+        hasTopNotice ? "pt-40 sm:pt-28" : "pt-10",
       )}
     >
       <RemoteSessionBanner backend={backend} />
@@ -798,7 +821,7 @@ export function DocumentWorkspace({
       <div
         className={cn(
           "fixed z-[60] flex max-w-[min(16rem,calc(100vw-1rem))] flex-col items-end gap-1.5",
-          conflictNotice ? "top-[19rem] sm:top-[7rem]" : "top-3",
+          hasTopNotice ? "top-[19rem] sm:top-[7rem]" : "top-3",
         )}
         style={{ right: `calc(0.75rem + ${scrollbarWidth}px)` }}
         data-testid="document-status-stack"
@@ -983,6 +1006,54 @@ export function DocumentWorkspace({
           ) : null}
         </div>
       </div>
+      {showDraftRestoreNotice ? (
+        <div
+          data-testid="draft-restore-notice"
+          role="status"
+          aria-label="Unsent draft found"
+          // Slate, not the conflict banner's amber: nothing has gone wrong and
+          // nothing is at risk, so the two notices must not read alike.
+          className="fixed top-3 left-1/2 z-50 flex w-[min(calc(100vw-1rem),52rem)] -translate-x-1/2 flex-col gap-3 rounded-[8px] border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-3 text-slate-900 dark:text-slate-100 shadow-[0_14px_40px_rgba(15,23,42,0.16)] dark:shadow-[0_14px_40px_rgba(0,0,0,0.4)] sm:flex-row sm:items-center sm:justify-between sm:px-4"
+        >
+          <div className="flex min-w-0 items-start gap-2.5">
+            <History
+              className="mt-0.5 size-4 shrink-0 text-slate-500 dark:text-slate-400"
+              aria-hidden="true"
+            />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold leading-5">
+                Unsent edits found in this browser
+              </div>
+              <div className="mt-0.5 text-xs leading-5 text-slate-600 dark:text-slate-300">
+                {draftRestoreNoticeBody[draftRestoreMode]}
+              </div>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
+            <Button
+              type="button"
+              data-testid="draft-restore-action-discard"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-[7px] px-2 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+              onClick={onDiscardDraft}
+            >
+              Discard draft
+            </Button>
+            <Button
+              type="button"
+              data-testid="draft-restore-action-restore"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-[7px] bg-slate-900 px-2 text-xs text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
+              onClick={onRestoreDraft}
+            >
+              <History className="size-3.5" />
+              Restore my draft
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {conflictNotice ? (
         <div
           data-testid="file-conflict-notice"
@@ -1239,6 +1310,7 @@ export function DocumentWorkspace({
               }}
               saveBlocked={documentDiskChangeState !== "clean"}
               forceResetKey={documentForceResetKey}
+              draftRestore={draftRestore}
             />
           ) : null
         ) : (

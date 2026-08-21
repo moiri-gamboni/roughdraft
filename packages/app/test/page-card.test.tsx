@@ -278,6 +278,7 @@ type PageCardTestOptions = Partial<{
   selected: boolean;
   focusRequestKey: string | null;
   saveBlocked: boolean;
+  draftRestore: { key: string; content: string } | null;
 }>;
 
 type RenderedPageCard = {
@@ -331,6 +332,7 @@ async function renderPageCard(
       saveController = controller;
     },
     saveBlocked: options.saveBlocked ?? false,
+    draftRestore: options.draftRestore ?? null,
   } as const;
 
   const render = async () => {
@@ -2260,5 +2262,77 @@ describe("PageCard local content origin", () => {
     const calls = rendered.onLocalContentChange.mock.calls;
     expect(calls).toContainEqual(["Adopted from disk", "adopt"]);
     expect(calls.every((call) => call[1] !== "edit")).toBe(true);
+  });
+});
+
+describe("PageCard draft restore", () => {
+  it("puts the unsent draft back as work still owed to the file", async () => {
+    const rendered = await renderPageCard({
+      page: { id: "restore-1", title: "Restore 1", content: "On disk" },
+    });
+
+    await rendered.rerender({
+      draftRestore: { key: "restore:1", content: "Unsent draft body" },
+    });
+
+    expect(rendered.getEditor().getText()).toContain("Unsent draft body");
+    expect(rendered.onDirtyStateChange).toHaveBeenLastCalledWith(true);
+    expect(rendered.onLocalContentChange.mock.calls).toContainEqual([
+      "Unsent draft body",
+      "restore",
+    ]);
+    // Delivering it is the whole point of restoring it.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    });
+    expect(rendered.onSave).toHaveBeenCalledWith(
+      "restore-1",
+      "Unsent draft body",
+    );
+  });
+
+  it("does not report the restored draft as already saved", async () => {
+    const rendered = await renderPageCard({
+      page: { id: "restore-2", title: "Restore 2", content: "On disk" },
+    });
+    rendered.onSaveStateChange.mockClear();
+
+    await rendered.rerender({
+      draftRestore: { key: "restore:1", content: "Unsent draft body" },
+    });
+
+    expect(rendered.onSaveStateChange).not.toHaveBeenCalledWith("saved");
+  });
+
+  it("keeps the restored draft when the file content arrives again", async () => {
+    const rendered = await renderPageCard({
+      page: { id: "restore-3", title: "Restore 3", content: "On disk" },
+    });
+    await rendered.rerender({
+      draftRestore: { key: "restore:1", content: "Unsent draft body" },
+    });
+
+    await rendered.rerender({
+      page: { id: "restore-3", title: "Restore 3", content: "On disk again" },
+    });
+
+    expect(rendered.getEditor().getText()).toContain("Unsent draft body");
+  });
+
+  it("restores again when the same draft is offered a second time", async () => {
+    const rendered = await renderPageCard({
+      page: { id: "restore-4", title: "Restore 4", content: "On disk" },
+    });
+    await rendered.rerender({
+      draftRestore: { key: "restore:1", content: "Unsent draft body" },
+    });
+    await insertTextAtEnd(rendered.getEditor(), " and more");
+
+    await rendered.rerender({
+      draftRestore: { key: "restore:2", content: "Unsent draft body" },
+    });
+
+    expect(rendered.getEditor().getText()).not.toContain("and more");
+    expect(rendered.getEditor().getText()).toContain("Unsent draft body");
   });
 });
