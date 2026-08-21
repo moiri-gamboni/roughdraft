@@ -187,7 +187,9 @@
     margin: 0;
     background-color: transparent;
     outline: 3px solid #fde68a;
-    outline-offset: 2px;
+    /* Inside the image edge: adjacent images sit flush, so a ring drawn
+       outside the box overlaps the neighbouring image (and its ring). */
+    outline-offset: -3px;
     border-radius: 2px;
     transition: outline-color 140ms ease;
   }
