@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateRoughdraftMarkdown } from "@roughdraft/rfm";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createCliDependencies,
   createDefaultOpenUrl,
@@ -68,16 +68,6 @@ async function listenOnLoopbackServers(
       );
     },
   };
-}
-
-// Resolves once the microtask queue has drained repeatedly, so racing it
-// against a CLI run distinguishes "already finishing" from "still blocked"
-// without depending on a clock the test has faked.
-async function settled<T>(value: T): Promise<T> {
-  for (let turn = 0; turn < 20; turn += 1) {
-    await Promise.resolve();
-  }
-  return value;
 }
 
 describe("cli", () => {
@@ -2411,13 +2401,10 @@ describe("runCli open in remote mode", () => {
     }
   });
 
-  // The connect deadline is 10s. Waiting it out for real is the only way to
-  // prove the deadline does not reach the response body: Node's
-  // AbortSignal.timeout runs off an internal timer that fake timers cannot
-  // drive, so a faked clock would pass against the buggy code too.
-  it("keeps writing remote saves that arrive after the connect deadline", {
-    timeout: 40_000,
-  }, async () => {
+  // The deadline is shortened rather than faked: Node's AbortSignal.timeout
+  // runs off an internal timer that fake timers cannot drive, so a faked clock
+  // would leave this test green against the bug it guards.
+  it("keeps writing remote saves that arrive after the connect deadline", async () => {
     const remote = await startRemoteHost();
     try {
       const filePath = path.join(projectDir, "draft.md");
@@ -2425,6 +2412,7 @@ describe("runCli open in remote mode", () => {
 
       const errors: string[] = [];
       let openedUrl: string | null = null;
+      let attachAttempts = 0;
 
       const cliPromise = runCli(["open", filePath], {
         env: { ROUGHDRAFT_HOST: remote.url },
@@ -2432,6 +2420,13 @@ describe("runCli open in remote mode", () => {
         log: () => {},
         error: (m) => errors.push(m),
         sleepImpl: async () => {},
+        sseConnectTimeoutMs: 500,
+        fetchImpl: (input, init) => {
+          if (String(input).includes("/events")) {
+            attachAttempts += 1;
+          }
+          return fetch(input, init);
+        },
         openUrl: (url) => {
           openedUrl = url;
           return "disabled";
@@ -2455,7 +2450,7 @@ describe("runCli open in remote mode", () => {
       ).searchParams.get("session");
       expect(sessionId).toBeTruthy();
 
-      await new Promise((resolve) => setTimeout(resolve, 11_000));
+      await new Promise((resolve) => setTimeout(resolve, 900));
 
       const putResponse = await fetch(
         `${remote.url}/api/remote-document/${sessionId}`,
@@ -2477,6 +2472,8 @@ describe("runCli open in remote mode", () => {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
       expect(fs.readFileSync(filePath, "utf-8")).toBe("late\n");
+      // The stream outlived the deadline instead of being reopened behind it.
+      expect(attachAttempts).toBe(1);
       expect(errors).toEqual([]);
 
       await remote.close();
@@ -2492,23 +2489,27 @@ describe("runCli open in remote mode", () => {
 
     const errors: string[] = [];
     let eventAttempts = 0;
-    vi.useFakeTimers();
-    try {
-      const cliPromise = runCli(["open", filePath], {
-        env: { ROUGHDRAFT_HOST: "http://remote.test" },
-        cwd: projectDir,
-        log: () => {},
-        error: (m) => errors.push(m),
-        sleepImpl: async () => {},
-        openUrl: () => "disabled",
-        fetchImpl: async (input, init) => {
-          const url = typeof input === "string" ? input : String(input);
-          if (url.endsWith("/api/remote-document")) {
-            return new Response(
-              JSON.stringify({ id: "session-1", version: "v1" }),
-              { status: 201, headers: { "Content-Type": "application/json" } },
-            );
-          }
+
+    const exitCode = await runCli(["open", filePath], {
+      env: { ROUGHDRAFT_HOST: "http://remote.test" },
+      cwd: projectDir,
+      log: () => {},
+      error: (m) => errors.push(m),
+      sleepImpl: async () => {},
+      sseConnectTimeoutMs: 100,
+      openUrl: () => "disabled",
+      fetchImpl: async (input, init) => {
+        const url = String(input);
+        if (url.endsWith("/api/remote-document")) {
+          return new Response(
+            JSON.stringify({ id: "session", version: "v1" }),
+            {
+              status: 201,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+        if (url.includes("/events")) {
           // Headers never arrive; only the connect deadline can end this.
           eventAttempts += 1;
           return new Promise<Response>((_resolve, reject) => {
@@ -2516,35 +2517,31 @@ describe("runCli open in remote mode", () => {
               reject(init.signal?.reason ?? new Error("aborted"));
             });
           });
-        },
-        resolveUpdateStatus: async () => ({
-          packageName: "roughdraft",
-          currentVersion: "0.1.0",
-          latestVersion: "0.1.0",
-          updateAvailable: false,
-          updateCommand: "",
-        }),
-      });
-
-      // Every reconnect attempt stalls the same way, so the run ends at the
-      // reconnect ceiling with each attempt bounded by the connect deadline.
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        for (let tick = 0; tick < 100 && eventAttempts === attempt; tick += 1) {
-          await vi.advanceTimersByTimeAsync(1);
         }
-        expect(eventAttempts).toBe(attempt + 1);
-        await vi.advanceTimersByTimeAsync(10_500);
-      }
-      const outcome = await Promise.race([cliPromise, settled("connecting")]);
+        return new Response(
+          JSON.stringify({
+            id: "session",
+            originPath: filePath,
+            version: "v1",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+      resolveUpdateStatus: async () => ({
+        packageName: "roughdraft",
+        currentVersion: "0.1.0",
+        latestVersion: "0.1.0",
+        updateAvailable: false,
+        updateCommand: "",
+      }),
+    });
 
-      expect(outcome).toBe(1);
-      expect(errors.join("\n")).toContain(
-        "Timed out opening the remote event stream",
-      );
-      expect(errors.at(-1)).toContain("Remote session disconnected.");
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(exitCode).toBe(1);
+    expect(eventAttempts).toBe(5);
+    expect(errors.join("\n")).toContain(
+      "Timed out opening the remote event stream",
+    );
+    expect(errors.at(-1)).toContain("Remote session disconnected.");
   });
 });
 
@@ -2572,6 +2569,21 @@ describe("runCli open in remote mode reconnects", () => {
       status,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  function registered(): Response {
+    return jsonResponse({ id: "session", version: "v1" }, 201);
+  }
+
+  function serving(originPath: string): Response {
+    return jsonResponse(
+      { id: "session", originPath, content: "before\n", version: "v1" },
+      200,
+    );
+  }
+
+  function notFound(): Response {
+    return jsonResponse({ error: "not found" }, 404);
   }
 
   function eventStream(): {
@@ -2602,18 +2614,67 @@ describe("runCli open in remote mode reconnects", () => {
     };
   }
 
+  interface RegisterCall {
+    sessionId: string;
+    originPath: string;
+    content: string;
+  }
+
+  /** The three remote-document endpoints the CLI talks to, by attempt number. */
+  interface RemoteRoutes {
+    register?: (call: RegisterCall, attempt: number) => Response;
+    session?: (attempt: number) => Response;
+    events?: (attempt: number) => Response;
+  }
+
+  interface RemoteCalls {
+    registers: RegisterCall[];
+    sessionLookups: number;
+    attachedSessions: string[];
+  }
+
   function startCli(
-    fetchImpl: typeof fetch,
+    routes: RemoteRoutes,
     extraArgs: string[] = [],
   ): {
     promise: Promise<number>;
     logs: string[];
     errors: string[];
     sleeps: number[];
+    calls: RemoteCalls;
   } {
     const logs: string[] = [];
     const errors: string[] = [];
     const sleeps: number[] = [];
+    const calls: RemoteCalls = {
+      registers: [],
+      sessionLookups: 0,
+      attachedSessions: [],
+    };
+
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/remote-document")) {
+        const call = JSON.parse(String(init?.body)) as RegisterCall;
+        calls.registers.push(call);
+        return routes.register
+          ? routes.register(call, calls.registers.length)
+          : registered();
+      }
+      const events = /\/api\/remote-document\/([^/]+)\/events/.exec(url);
+      if (events) {
+        calls.attachedSessions.push(decodeURIComponent(events[1]));
+        if (!routes.events) {
+          throw new Error(`Unexpected event stream request: ${url}`);
+        }
+        return routes.events(calls.attachedSessions.length);
+      }
+      calls.sessionLookups += 1;
+      return routes.session
+        ? routes.session(calls.sessionLookups)
+        : serving(filePath);
+    }) as typeof fetch;
+
     const promise = runCli(["open", filePath, ...extraArgs], {
       env: { ROUGHDRAFT_HOST: "http://remote.test" },
       cwd: projectDir,
@@ -2632,7 +2693,7 @@ describe("runCli open in remote mode reconnects", () => {
         updateCommand: "",
       }),
     });
-    return { promise, logs, errors, sleeps };
+    return { promise, logs, errors, sleeps, calls };
   }
 
   async function waitFor(
@@ -2648,43 +2709,18 @@ describe("runCli open in remote mode reconnects", () => {
     }
   }
 
-  interface RegisterCall {
-    sessionId: string;
-    originPath: string;
-    content: string;
-  }
-
-  function readRegisterCall(init: RequestInit | undefined): RegisterCall {
-    return JSON.parse(String(init?.body)) as RegisterCall;
-  }
-
-  function sessionIdFromEventsUrl(url: string): string {
-    const match = /\/api\/remote-document\/([^/]+)\/events/.exec(url);
-    if (!match) throw new Error(`Not an events URL: ${url}`);
-    return decodeURIComponent(match[1]);
-  }
-
   it("reattaches the same session after the save-back stream ends", async () => {
-    const registers: RegisterCall[] = [];
-    const attachedSessions: string[] = [];
     const streams: ReturnType<typeof eventStream>[] = [];
 
-    const cli = startCli(async (input, init) => {
-      const url = String(input);
-      if (url.endsWith("/api/remote-document")) {
-        registers.push(readRegisterCall(init));
-        return jsonResponse({ id: "session", version: "v1" }, 201);
-      }
-      if (url.includes("/events")) {
-        attachedSessions.push(sessionIdFromEventsUrl(url));
+    const cli = startCli({
+      events: () => {
         if (streams.length >= 2) {
           throw new TypeError("fetch failed");
         }
         const stream = eventStream();
         streams.push(stream);
         return stream.response;
-      }
-      throw new Error(`Unexpected request: ${url}`);
+      },
     });
 
     await waitFor(() => streams.length === 1, "the first attach");
@@ -2704,44 +2740,67 @@ describe("runCli open in remote mode reconnects", () => {
     streams[1].end();
 
     expect(await cli.promise).toBe(1);
-    expect(registers).toHaveLength(1);
-    expect(new Set(attachedSessions).size).toBe(1);
-    expect(attachedSessions[0]).toBe(registers[0].sessionId);
+    expect(cli.calls.registers).toHaveLength(1);
+    expect(new Set(cli.calls.attachedSessions).size).toBe(1);
+    expect(cli.calls.attachedSessions[0]).toBe(
+      cli.calls.registers[0].sessionId,
+    );
+    // Both streams here are shorter-lived than the base delay, so the failure
+    // counter keeps climbing; the reset case has its own test below.
+    expect(cli.sleeps.slice(0, 2)).toEqual([1000, 2000]);
+  });
+
+  it("resets the backoff after a stream that stayed up", async () => {
+    const streams: ReturnType<typeof eventStream>[] = [];
+
+    const cli = startCli({
+      events: (attempt) => {
+        if (attempt === 1 || attempt > 2) {
+          throw new TypeError("fetch failed");
+        }
+        const stream = eventStream();
+        streams.push(stream);
+        return stream.response;
+      },
+    });
+
+    await waitFor(() => streams.length === 1, "the attach after one failure");
+    expect(cli.sleeps).toEqual([1000]);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    streams[0].end();
+
+    expect(await cli.promise).toBe(1);
+    // A second 1000 rather than 2000: the healthy stream cleared the count.
     expect(cli.sleeps.slice(0, 2)).toEqual([1000, 1000]);
   });
 
   it("re-registers the same session id with content re-read from disk", async () => {
-    const registers: RegisterCall[] = [];
     const streams: ReturnType<typeof eventStream>[] = [];
-    let attachAttempts = 0;
 
-    const cli = startCli(async (input, init) => {
-      const url = String(input);
-      if (url.endsWith("/api/remote-document")) {
-        registers.push(readRegisterCall(init));
-        return jsonResponse({ id: "session", version: "v1" }, 201);
-      }
-      if (url.includes("/events")) {
-        attachAttempts += 1;
-        if (attachAttempts === 1) {
+    const cli = startCli({
+      session: (attempt) => {
+        if (attempt === 1) {
           // The host forgot the session, and the file moved on meanwhile.
           fs.writeFileSync(filePath, "edited on disk\n");
-          return jsonResponse({ error: "not found" }, 404);
+          return notFound();
         }
+        return serving(filePath);
+      },
+      events: () => {
         if (streams.length >= 1) {
           throw new TypeError("fetch failed");
         }
         const stream = eventStream();
         streams.push(stream);
         return stream.response;
-      }
-      throw new Error(`Unexpected request: ${url}`);
+      },
     });
 
     await waitFor(() => streams.length === 1, "the attach after re-register");
     streams[0].end();
 
     expect(await cli.promise).toBe(1);
+    const { registers } = cli.calls;
     expect(registers).toHaveLength(2);
     expect(registers[1].sessionId).toBe(registers[0].sessionId);
     expect(registers[0].content).toBe("before\n");
@@ -2751,41 +2810,21 @@ describe("runCli open in remote mode reconnects", () => {
 
   it("attaches to a conflicting session that still serves the same file", async () => {
     const streams: ReturnType<typeof eventStream>[] = [];
-    let attachAttempts = 0;
-    let registerAttempts = 0;
-    let sessionLookups = 0;
 
-    const cli = startCli(async (input) => {
-      const url = String(input);
-      if (url.endsWith("/api/remote-document")) {
-        registerAttempts += 1;
-        if (registerAttempts === 1) {
-          return jsonResponse({ id: "session", version: "v1" }, 201);
-        }
-        return jsonResponse({ error: "session already exists" }, 409);
-      }
-      if (url.includes("/events")) {
-        attachAttempts += 1;
-        if (attachAttempts === 1) {
-          return jsonResponse({ error: "not found" }, 404);
-        }
+    const cli = startCli({
+      register: (_call, attempt) =>
+        attempt === 1
+          ? registered()
+          : jsonResponse({ error: "session already exists" }, 409),
+      session: (attempt) => (attempt === 1 ? notFound() : serving(filePath)),
+      events: () => {
         if (streams.length >= 1) {
           throw new TypeError("fetch failed");
         }
         const stream = eventStream();
         streams.push(stream);
         return stream.response;
-      }
-      sessionLookups += 1;
-      return jsonResponse(
-        {
-          id: "session",
-          originPath: filePath,
-          content: "before\n",
-          version: "v1",
-        },
-        200,
-      );
+      },
     });
 
     await waitFor(() => streams.length === 1, "the attach after the conflict");
@@ -2797,125 +2836,123 @@ describe("runCli open in remote mode reconnects", () => {
     streams[0].end();
 
     expect(await cli.promise).toBe(1);
-    expect(sessionLookups).toBe(1);
+    expect(cli.calls.registers).toHaveLength(2);
   });
 
   it("refuses a conflicting session that now serves another file", async () => {
-    let attachAttempts = 0;
-    let registerAttempts = 0;
-
-    const cli = startCli(async (input) => {
-      const url = String(input);
-      if (url.endsWith("/api/remote-document")) {
-        registerAttempts += 1;
-        if (registerAttempts === 1) {
-          return jsonResponse({ id: "session", version: "v1" }, 201);
-        }
-        return jsonResponse({ error: "session already exists" }, 409);
-      }
-      if (url.includes("/events")) {
-        attachAttempts += 1;
-        return jsonResponse({ error: "not found" }, 404);
-      }
-      return jsonResponse(
-        {
-          id: "session",
-          originPath: "/somewhere/else.md",
-          content: "not yours\n",
-          version: "v1",
-        },
-        200,
-      );
+    const cli = startCli({
+      register: (_call, attempt) =>
+        attempt === 1
+          ? registered()
+          : jsonResponse({ error: "session already exists" }, 409),
+      session: (attempt) =>
+        attempt === 1 ? notFound() : serving("/somewhere/else.md"),
+      events: () => {
+        throw new Error("must not attach to a squatted session");
+      },
     });
 
     expect(await cli.promise).toBe(1);
     expect(cli.errors.join("\n")).toContain("/somewhere/else.md");
     expect(cli.errors.join("\n")).toContain("Refusing");
-    // The refusal is terminal: no second attach, no backoff.
-    expect(attachAttempts).toBe(1);
+    // The refusal is terminal: no attach, no backoff.
+    expect(cli.calls.attachedSessions).toEqual([]);
     expect(cli.sleeps).toEqual([]);
+  });
+
+  it("refuses to reattach a session that changed hands during an outage", async () => {
+    const streams: ReturnType<typeof eventStream>[] = [];
+
+    const cli = startCli({
+      // The session id travels in the viewer URL, so it can reappear on the
+      // host owned by someone else while this CLI is disconnected.
+      session: (attempt) =>
+        attempt === 1 ? serving(filePath) : serving("/somewhere/else.md"),
+      events: () => {
+        const stream = eventStream();
+        streams.push(stream);
+        return stream.response;
+      },
+    });
+
+    await waitFor(() => streams.length === 1, "the first attach");
+    streams[0].end();
+
+    expect(await cli.promise).toBe(1);
+    expect(cli.errors.join("\n")).toContain("/somewhere/else.md");
+    expect(cli.errors.join("\n")).toContain("Refusing");
+    expect(streams).toHaveLength(1);
+    expect(fs.readFileSync(filePath, "utf-8")).toBe("before\n");
   });
 
   it("stops without retrying when the host rejects the token", async () => {
-    let attachAttempts = 0;
-
-    const cli = startCli(async (input) => {
-      const url = String(input);
-      if (url.endsWith("/api/remote-document")) {
-        return jsonResponse({ id: "session", version: "v1" }, 201);
-      }
-      attachAttempts += 1;
-      return jsonResponse({ error: "unauthorized" }, 401);
+    const cli = startCli({
+      events: () => jsonResponse({ error: "unauthorized" }, 401),
     });
 
     expect(await cli.promise).toBe(1);
-    expect(attachAttempts).toBe(1);
+    expect(cli.calls.attachedSessions).toHaveLength(1);
     expect(cli.sleeps).toEqual([]);
     expect(cli.errors.join("\n")).toContain("ROUGHDRAFT_TOKEN");
   });
 
-  it("stops when the token is rejected while inspecting a conflict", async () => {
-    let attachAttempts = 0;
-    let registerAttempts = 0;
-
-    const cli = startCli(async (input) => {
-      const url = String(input);
-      if (url.endsWith("/api/remote-document")) {
-        registerAttempts += 1;
-        if (registerAttempts === 1) {
-          return jsonResponse({ id: "session", version: "v1" }, 201);
-        }
-        return jsonResponse({ error: "session already exists" }, 409);
-      }
-      if (url.includes("/events")) {
-        attachAttempts += 1;
-        return jsonResponse({ error: "not found" }, 404);
-      }
-      // The host's token rotated between the register and the lookup.
-      return jsonResponse({ error: "unauthorized" }, 401);
-    });
-
-    expect(await cli.promise).toBe(1);
-    expect(attachAttempts).toBe(1);
-    expect(cli.sleeps).toEqual([]);
-    expect(cli.errors.join("\n")).toContain("ROUGHDRAFT_TOKEN");
-  });
-
-  it("prints only the viewer URL from --print-url without holding the session", async () => {
-    let attachAttempts = 0;
-
-    const cli = startCli(
-      async (input) => {
-        const url = String(input);
-        if (url.endsWith("/api/remote-document")) {
-          return jsonResponse({ id: "session", version: "v1" }, 201);
-        }
-        attachAttempts += 1;
-        throw new Error("--print-url must not open the save-back stream");
+  it("stops when the token is rejected on the session lookup", async () => {
+    const cli = startCli({
+      session: () => jsonResponse({ error: "unauthorized" }, 401),
+      events: () => {
+        throw new Error("must not attach without confirming ownership");
       },
-      ["--print-url"],
-    );
+    });
 
-    expect(await cli.promise).toBe(0);
-    expect(attachAttempts).toBe(0);
-    expect(cli.logs).toHaveLength(1);
-    expect(cli.logs[0]).toContain("?session=");
+    expect(await cli.promise).toBe(1);
+    expect(cli.sleeps).toEqual([]);
+    expect(cli.errors.join("\n")).toContain("ROUGHDRAFT_TOKEN");
+  });
+
+  it("keeps retrying when the session lookup answers with junk", async () => {
+    const cli = startCli({
+      session: () =>
+        new Response("<html>proxy interstitial</html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }),
+      events: () => {
+        throw new Error("must not attach without confirming ownership");
+      },
+    });
+
+    expect(await cli.promise).toBe(1);
+    expect(cli.calls.sessionLookups).toBe(5);
+    expect(cli.errors.at(-1)).toContain("Remote session disconnected.");
   });
 
   it("gives up after five consecutive reconnect failures", async () => {
-    let attachAttempts = 0;
-
-    const cli = startCli(async (input) => {
-      const url = String(input);
-      if (url.endsWith("/api/remote-document")) {
-        return jsonResponse({ id: "session", version: "v1" }, 201);
-      }
-      attachAttempts += 1;
-      throw new TypeError("fetch failed");
+    const cli = startCli({
+      events: () => {
+        throw new TypeError("fetch failed");
+      },
     });
 
     expect(await cli.promise).toBe(1);
-    expect(attachAttempts).toBe(5);
+    expect(cli.calls.attachedSessions).toHaveLength(5);
+    expect(cli.sleeps).toEqual([1000, 2000, 4000, 8000]);
+    expect(cli.errors.at(-1)).toContain("Remote session disconnected.");
+  });
+
+  it("gives up when the host accepts the stream and closes it at once", async () => {
+    const cli = startCli({
+      events: (attempt) => {
+        if (attempt > 12) {
+          throw new Error("reconnect loop is spinning without a ceiling");
+        }
+        const stream = eventStream();
+        stream.end();
+        return stream.response;
+      },
+    });
+
+    expect(await cli.promise).toBe(1);
+    expect(cli.calls.attachedSessions).toHaveLength(5);
     expect(cli.sleeps).toEqual([1000, 2000, 4000, 8000]);
     expect(cli.errors.at(-1)).toContain("Remote session disconnected.");
   });
@@ -2924,14 +2961,12 @@ describe("runCli open in remote mode reconnects", () => {
     const streams: ReturnType<typeof eventStream>[] = [];
 
     const cli = startCli(
-      async (input) => {
-        const url = String(input);
-        if (url.endsWith("/api/remote-document")) {
-          return jsonResponse({ id: "session", version: "v1" }, 201);
-        }
-        const stream = eventStream();
-        streams.push(stream);
-        return stream.response;
+      {
+        events: () => {
+          const stream = eventStream();
+          streams.push(stream);
+          return stream.response;
+        },
       },
       ["--timeout", "0.3"],
     );
@@ -2939,5 +2974,21 @@ describe("runCli open in remote mode reconnects", () => {
     expect(await cli.promise).toBe(1);
     expect(streams).toHaveLength(1);
     expect(cli.errors.join("\n")).toContain("Timed out holding");
+  });
+
+  it("prints only the viewer URL from --print-url without holding the session", async () => {
+    const cli = startCli(
+      {
+        events: () => {
+          throw new Error("--print-url must not open the save-back stream");
+        },
+      },
+      ["--print-url"],
+    );
+
+    expect(await cli.promise).toBe(0);
+    expect(cli.calls.attachedSessions).toEqual([]);
+    expect(cli.logs).toHaveLength(1);
+    expect(cli.logs[0]).toContain("?session=");
   });
 });
