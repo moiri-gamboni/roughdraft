@@ -37,6 +37,26 @@ class FakeEventSource {
       listener(event);
     }
   }
+
+  /**
+   * The browser gave up on the stream, as it does for any non-2xx response
+   * (the events endpoint 404s while the session is not registered).
+   */
+  failAndClose(): void {
+    this.readyState = FakeEventSource.CLOSED;
+    this.onerror?.(new Event("error"));
+  }
+
+  /** A transient error the browser retries on its own. */
+  failTransiently(): void {
+    this.readyState = FakeEventSource.CONNECTING;
+    this.onerror?.(new Event("error"));
+  }
+}
+
+/** The payload the server sends with every viewer `connected` event. */
+function connectedPayload(version = "version-1"): string {
+  return JSON.stringify({ id: "session-1", role: "viewer", version });
 }
 
 function installFakeEventSource(): FakeEventSource[] {
@@ -58,6 +78,7 @@ describe("RemoteBackend", () => {
   afterEach(() => {
     global.fetch = originalFetch;
     global.EventSource = originalEventSource;
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -279,11 +300,28 @@ describe("RemoteBackend", () => {
     expect(eventsUrl.searchParams.get("role")).toBe("viewer");
     expect(eventsUrl.searchParams.get("token")).toBe("secret-token");
 
-    sources[0].emit("connected");
+    sources[0].emit("connected", connectedPayload());
     expect(statuses).toEqual(["disconnected", "connected"]);
 
     stopWatching();
     expect(statuses).toEqual(["disconnected", "connected", "disconnected"]);
+  });
+
+  it("reports a save pushed over the stream as a document change", () => {
+    const sources = installFakeEventSource();
+    const backend = bootstrap();
+    const changes: Array<{ path: string; version?: string }> = [];
+    backend.watchMarkdownFile("ignored.md", (event) => changes.push(event));
+    sources[0].emit("connected", connectedPayload());
+
+    sources[0].emit(
+      "save",
+      JSON.stringify({ id: "session-1", content: "v2", version: "version-2" }),
+    );
+
+    expect(changes).toEqual([
+      { path: "/work/draft.md", exists: true, version: "version-2" },
+    ]);
   });
 
   it("flips the session status when the server pushes a disconnected event", () => {
@@ -293,7 +331,7 @@ describe("RemoteBackend", () => {
     backend.onSessionStatusChange((status) => statuses.push(status));
 
     backend.watchMarkdownFile("ignored.md", () => {});
-    sources[0].emit("connected");
+    sources[0].emit("connected", connectedPayload());
     expect(statuses).toEqual(["disconnected", "connected"]);
 
     // The CLI's stream died; the viewer's own stream is still healthy, so the
@@ -302,5 +340,127 @@ describe("RemoteBackend", () => {
 
     expect(sources[0].readyState).toBe(FakeEventSource.OPEN);
     expect(statuses).toEqual(["disconnected", "connected", "disconnected"]);
+  });
+
+  describe("watchMarkdownFile re-opens a stream the browser gave up on", () => {
+    function startWatching() {
+      const sources = installFakeEventSource();
+      const backend = bootstrap();
+      const statuses: string[] = [];
+      backend.onSessionStatusChange((status) => statuses.push(status));
+      const stopWatching = backend.watchMarkdownFile("ignored.md", () => {});
+      return { sources, statuses, stopWatching };
+    }
+
+    it("opens a fresh stream to the same url after a closed one", () => {
+      vi.useFakeTimers();
+      const { sources, statuses } = startWatching();
+      sources[0].emit("connected", connectedPayload());
+
+      sources[0].failAndClose();
+      expect(statuses).toEqual(["disconnected", "connected", "disconnected"]);
+      expect(sources).toHaveLength(1);
+
+      vi.advanceTimersByTime(1000);
+
+      expect(sources).toHaveLength(2);
+      expect(sources[1].url).toBe(sources[0].url);
+
+      sources[1].emit("connected", connectedPayload());
+      expect(statuses).toEqual([
+        "disconnected",
+        "connected",
+        "disconnected",
+        "connected",
+      ]);
+    });
+
+    it("leaves a transient error to the browser's own reconnect", () => {
+      vi.useFakeTimers();
+      const { sources, statuses } = startWatching();
+      sources[0].emit("connected", connectedPayload());
+
+      sources[0].failTransiently();
+      vi.advanceTimersByTime(60_000);
+
+      expect(sources).toHaveLength(1);
+      expect(statuses).toEqual(["disconnected", "connected"]);
+    });
+
+    it("backs off between attempts and caps the delay at ten seconds", () => {
+      vi.useFakeTimers();
+      const { sources } = startWatching();
+
+      const delays = [1000, 2000, 4000, 8000, 10_000, 10_000];
+      let opened = 1;
+      for (const delay of delays) {
+        sources[opened - 1].failAndClose();
+        vi.advanceTimersByTime(delay - 1);
+        expect(sources).toHaveLength(opened);
+        vi.advanceTimersByTime(1);
+        opened += 1;
+        expect(sources).toHaveLength(opened);
+      }
+    });
+
+    it("restarts the backoff once a stream connects again", () => {
+      vi.useFakeTimers();
+      const { sources } = startWatching();
+
+      sources[0].failAndClose();
+      vi.advanceTimersByTime(1000);
+      sources[1].failAndClose();
+      vi.advanceTimersByTime(2000);
+      expect(sources).toHaveLength(3);
+
+      sources[2].emit("connected", connectedPayload());
+      sources[2].failAndClose();
+      vi.advanceTimersByTime(1000);
+
+      expect(sources).toHaveLength(4);
+    });
+
+    it("reports the document as changed when it reconnects to a newer version", () => {
+      vi.useFakeTimers();
+      const sources = installFakeEventSource();
+      const backend = bootstrap();
+      const changes: Array<{ path: string; version?: string }> = [];
+      backend.watchMarkdownFile("ignored.md", (event) => changes.push(event));
+
+      sources[0].emit("connected", connectedPayload("version-1"));
+      expect(changes).toEqual([]);
+
+      // The session came back with the CLI's freshly re-read file, so the
+      // viewer is now holding stale content and has to reload it.
+      sources[0].failAndClose();
+      vi.advanceTimersByTime(1000);
+      sources[1].emit("connected", connectedPayload("version-7"));
+
+      expect(changes).toEqual([
+        { path: "/work/draft.md", exists: true, version: "version-7" },
+      ]);
+    });
+
+    it("cancels a pending re-open when the watcher is disposed", () => {
+      vi.useFakeTimers();
+      const { sources, stopWatching } = startWatching();
+      sources[0].failAndClose();
+
+      stopWatching();
+      vi.advanceTimersByTime(60_000);
+
+      expect(sources).toHaveLength(1);
+    });
+
+    it("closes the stream a re-open opened when the watcher is disposed", () => {
+      vi.useFakeTimers();
+      const { sources, stopWatching } = startWatching();
+      sources[0].failAndClose();
+      vi.advanceTimersByTime(1000);
+
+      stopWatching();
+
+      expect(sources[1].closed).toBe(true);
+    });
   });
 });
