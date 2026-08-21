@@ -58,6 +58,7 @@ import {
   PageCard,
 } from "./PageCard";
 import { RobotsHighFiveToy } from "./RobotsHighFiveToy";
+import type { DraftMode } from "./save-recovery";
 import type {
   CompleteReviewOptions,
   DocumentDiskChangeState,
@@ -67,8 +68,6 @@ import type {
 import { useReadingWidth } from "./useReadingWidth";
 import { useReviewLayoutShiftAnimation } from "./useReviewLayoutShiftAnimation";
 
-/** Whether the unsent draft belongs to a local file or a remote session. */
-type DraftRestoreMode = "local" | "remote";
 type ReviewHandoffState =
   | "idle"
   | "notifying"
@@ -165,7 +164,7 @@ const conflictNoticeCopy: Record<
   },
 };
 
-const draftRestoreNoticeBody: Record<DraftRestoreMode, string> = {
+const draftRestoreNoticeBody: Record<DraftMode, string> = {
   local:
     "Roughdraft kept edits that never reached this file. Restore them here, or discard them and keep what is on disk.",
   remote:
@@ -444,7 +443,7 @@ interface DocumentWorkspaceProps {
   documentRetryPending?: boolean;
   documentForceResetKey: string | null;
   draftRestore?: DraftRestore | null;
-  draftRestoreMode?: DraftRestoreMode;
+  draftRestoreMode?: DraftMode;
   onRestoreDraft?: () => void;
   onDiscardDraft?: () => void;
   onReloadDocumentFromDisk: () => void | Promise<void>;
