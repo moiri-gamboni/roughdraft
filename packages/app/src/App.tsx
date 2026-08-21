@@ -44,7 +44,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./components/ui/dialog";
-import { DocumentWorkspace } from "./DocumentWorkspace";
+import { DocumentWorkspace, type DraftRestoreOffer } from "./DocumentWorkspace";
 import { BackendUnavailableError, detectBackend } from "./detect-backend";
 import { logDraftEvent } from "./draft-store";
 import {
@@ -55,11 +55,7 @@ import {
 } from "./document-comments";
 import { copyTextToClipboard } from "./lib/clipboard";
 import { cn } from "./lib/utils";
-import type {
-  DocumentSaveState,
-  DraftRestore,
-  LocalContentOrigin,
-} from "./PageCard";
+import type { DocumentSaveState } from "./PageCard";
 import { PreviewBackend } from "./preview-backend";
 import { RoughdraftFormatDemo } from "./RoughdraftFormatDemo";
 import {
@@ -71,6 +67,8 @@ import {
 import {
   type CompleteReviewOptions,
   type DocumentDiskChangeState,
+  type DraftRestore,
+  type LocalContentOrigin,
   MarkdownFileConflictError,
   type Page,
   type StorageBackend,
@@ -1502,20 +1500,31 @@ export function PreviewPage() {
   );
 }
 
-const MAX_BOOT_RETRIES = 5;
+export const MAX_BOOT_RETRIES = 5;
 
 /**
  * The boot could not reach whatever holds this document. Says so, says the
  * unsent work is safe, and keeps trying — the old generic "could not open that
  * markdown file" was a dead end for a condition that usually clears itself.
+ *
+ * The ladder runs out after ~30s, so the copy has to stop promising a retry
+ * that is no longer coming and name the button as the way forward.
  */
 function BackendUnavailableNotice({
   hasUnsentDraft,
+  retriesExhausted,
   onRetry,
 }: {
   hasUnsentDraft: boolean;
+  retriesExhausted: boolean;
   onRetry: () => void;
 }) {
+  const draftClause = hasUnsentDraft
+    ? "Your unsent edits for this file are saved in this browser. "
+    : "";
+  const retryClause = retriesExhausted
+    ? "Roughdraft has stopped retrying. Check that the local server is running, then choose Try again."
+    : "Roughdraft keeps trying in the background. Check that the local server is still running.";
   return (
     <main className="flex h-screen items-center justify-center bg-[#FCFCFC] px-6 dark:bg-background">
       <div
@@ -1533,9 +1542,8 @@ function BackendUnavailableNotice({
               Roughdraft can't reach the server
             </div>
             <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
-              {hasUnsentDraft
-                ? "Your unsent edits for this file are saved in this browser. Roughdraft will send them as soon as the server is back."
-                : "Roughdraft keeps trying in the background. Check that the local server is still running."}
+              {draftClause}
+              {retryClause}
             </p>
           </div>
         </div>
@@ -1730,6 +1738,11 @@ export function App() {
       setLoadError(null);
       setBackendUnavailable(false);
       setDocumentPage(null);
+      // A boot resolves the restore question against the document it loads, so
+      // a retry must not inherit the previous boot's answer: a leftover offer
+      // or accepted restore would replay stale content over the fresh load.
+      setDraftRestore(null);
+      setOfferedDraftContent(null);
 
       try {
         const detectedBackend = await detectBackend();
@@ -1907,9 +1920,7 @@ export function App() {
           attemptedContent: content,
           currentContent: error.current.content,
           draftBaseContent:
-            record?.baseKnown === true
-              ? record.baseContent
-              : (documentPageRef.current?.content ?? null),
+            record?.baseContent ?? documentPageRef.current?.content ?? null,
           editorContent: documentDraftContentRef.current ?? content,
         });
         logDraftEvent("conflict-classified", { resolution });
@@ -2038,6 +2049,17 @@ export function App() {
     draftPersistence.discard();
     setDocumentDiskChangeState("clean");
   }, [draftPersistence]);
+
+  // Deliberately not memoised: the mode comes from `getKey()`, which reads a
+  // ref that `resolveRemoteKey` mutates without changing `draftPersistence`'s
+  // identity, so no dependency list can observe it. Nothing downstream keys off
+  // this object's identity, so recomputing every render is both correct and
+  // cheaper than a memo that would have to lie about what it depends on.
+  const draftRestoreOffer: DraftRestoreOffer = {
+    mode: draftPersistence.getKey()?.mode ?? "local",
+    onRestore: handleRestoreDraft,
+    onDiscard: handleDiscardDraft,
+  };
 
   const handleReloadDocumentFromDisk = useCallback(async () => {
     const currentBackend = backendRef.current;
@@ -2239,6 +2261,7 @@ export function App() {
     return (
       <BackendUnavailableNotice
         hasUnsentDraft={draftPersistence.read() !== null}
+        retriesExhausted={bootAttempt >= MAX_BOOT_RETRIES}
         onRetry={retryBoot}
       />
     );
@@ -2289,9 +2312,7 @@ export function App() {
         documentRetryPending={documentRetryPending}
         documentForceResetKey={documentForceResetKey}
         draftRestore={draftRestore}
-        draftRestoreMode={draftPersistence.getKey()?.mode ?? "local"}
-        onRestoreDraft={handleRestoreDraft}
-        onDiscardDraft={handleDiscardDraft}
+        draftRestoreOffer={draftRestoreOffer}
         onReloadDocumentFromDisk={handleReloadDocumentFromDisk}
         onKeepEditingWithoutAutosave={handleKeepEditingWithoutAutosave}
         onOverwriteDocumentOnDisk={handleOverwriteDocumentOnDisk}

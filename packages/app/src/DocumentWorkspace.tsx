@@ -53,8 +53,6 @@ import {
   type DocumentInteractionMode,
   type DocumentSaveController,
   type DocumentSaveState,
-  type DraftRestore,
-  type LocalContentOrigin,
   PageCard,
 } from "./PageCard";
 import { RobotsHighFiveToy } from "./RobotsHighFiveToy";
@@ -62,6 +60,8 @@ import type { DraftMode } from "./save-recovery";
 import type {
   CompleteReviewOptions,
   DocumentDiskChangeState,
+  DraftRestore,
+  LocalContentOrigin,
   Page,
   StorageBackend,
 } from "./storage";
@@ -163,6 +163,12 @@ const conflictNoticeCopy: Record<
     body: "Keep editing locally, then reload from disk to discard your draft or overwrite the disk file when you are ready.",
   },
 };
+
+export interface DraftRestoreOffer {
+  mode: DraftMode;
+  onRestore: () => void;
+  onDiscard: () => void;
+}
 
 const draftRestoreNoticeBody: Record<DraftMode, string> = {
   local:
@@ -443,9 +449,12 @@ interface DocumentWorkspaceProps {
   documentRetryPending?: boolean;
   documentForceResetKey: string | null;
   draftRestore?: DraftRestore | null;
-  draftRestoreMode?: DraftMode;
-  onRestoreDraft?: () => void;
-  onDiscardDraft?: () => void;
+  /**
+   * The pending offer to restore unsent edits. Its buttons are the only way
+   * out of the `draft-restore` disk state, so the copy and both answers travel
+   * as one value: a caller cannot wire up the banner and forget a handler.
+   */
+  draftRestoreOffer?: DraftRestoreOffer | null;
   onReloadDocumentFromDisk: () => void | Promise<void>;
   onKeepEditingWithoutAutosave: () => void;
   onOverwriteDocumentOnDisk: () => void | Promise<void>;
@@ -470,9 +479,7 @@ export function DocumentWorkspace({
   documentRetryPending = false,
   documentForceResetKey,
   draftRestore = null,
-  draftRestoreMode = "local",
-  onRestoreDraft,
-  onDiscardDraft,
+  draftRestoreOffer = null,
   onReloadDocumentFromDisk,
   onKeepEditingWithoutAutosave,
   onOverwriteDocumentOnDisk,
@@ -736,8 +743,9 @@ export function DocumentWorkspace({
     documentDiskChangeState === "draft-restore"
       ? null
       : conflictNoticeCopy[documentDiskChangeState];
-  const showDraftRestoreNotice = documentDiskChangeState === "draft-restore";
-  const hasTopNotice = !!conflictNotice || showDraftRestoreNotice;
+  const draftRestoreNotice =
+    documentDiskChangeState === "draft-restore" ? draftRestoreOffer : null;
+  const hasTopNotice = !!conflictNotice || !!draftRestoreNotice;
   const showReviewHandoffButton =
     !!activeDocumentPath &&
     (reviewWatcherCount > 0 || reviewHandoffState !== "idle");
@@ -1005,7 +1013,7 @@ export function DocumentWorkspace({
           ) : null}
         </div>
       </div>
-      {showDraftRestoreNotice ? (
+      {draftRestoreNotice ? (
         <div
           data-testid="draft-restore-notice"
           role="status"
@@ -1024,7 +1032,7 @@ export function DocumentWorkspace({
                 Unsent edits found in this browser
               </div>
               <div className="mt-0.5 text-xs leading-5 text-slate-600 dark:text-slate-300">
-                {draftRestoreNoticeBody[draftRestoreMode]}
+                {draftRestoreNoticeBody[draftRestoreNotice.mode]}
               </div>
             </div>
           </div>
@@ -1035,7 +1043,7 @@ export function DocumentWorkspace({
               variant="ghost"
               size="sm"
               className="h-8 rounded-[7px] px-2 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-              onClick={onDiscardDraft}
+              onClick={draftRestoreNotice.onDiscard}
             >
               Discard draft
             </Button>
@@ -1045,7 +1053,7 @@ export function DocumentWorkspace({
               variant="ghost"
               size="sm"
               className="h-8 rounded-[7px] bg-slate-900 px-2 text-xs text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
-              onClick={onRestoreDraft}
+              onClick={draftRestoreNotice.onRestore}
             >
               <History className="size-3.5" />
               Restore my draft
