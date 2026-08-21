@@ -566,8 +566,11 @@ function wrapEmphasis(
   let suffix = "";
   let inner = content;
 
+  // When edge punctuation moves outside the delimiters, any whitespace it
+  // exposes must move with it: `**...field **(` leaves the closer after a
+  // space, which is just as unreadable as the glued punctuation was.
   if (isEmphasisAlphanumeric(previousCharacter)) {
-    const match = inner.match(/^[\p{P}\p{S}]+/u);
+    const match = inner.match(/^[\p{P}\p{S}]+\s*/u);
     if (match) {
       prefix = match[0];
       inner = inner.slice(prefix.length);
@@ -575,7 +578,7 @@ function wrapEmphasis(
   }
 
   if (isEmphasisAlphanumeric(nextCharacter)) {
-    const match = inner.match(/[\p{P}\p{S}]+$/u);
+    const match = inner.match(/\s*[\p{P}\p{S}]+$/u);
     if (match) {
       suffix = match[0];
       inner = inner.slice(0, inner.length - suffix.length);
