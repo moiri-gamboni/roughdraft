@@ -83,8 +83,13 @@ export function draftKeyFromUrl(storage: Storage | null): DraftKey | null {
 }
 
 /**
- * Remember which origin file a session id stands for. Written once: a later
- * session claiming the same id must not silently redirect an existing draft.
+ * Remember which origin file a session id stands for, so a draft written under
+ * that session is still reachable on the next boot before any backend exists.
+ *
+ * The caller passes the origin the server reported for the live session, which
+ * is authoritative: session ids get reused, and a stale mapping would point
+ * this document's draft at a different document's record. Unchanged mappings
+ * are left alone so a normal boot does not write.
  */
 export function writeSessionPointer(
   storage: Storage | null,
@@ -93,7 +98,7 @@ export function writeSessionPointer(
 ): void {
   if (!storage) return;
   const pointerKey = `${SESSION_POINTER_PREFIX}${sessionId}`;
-  if (storage.getItem(pointerKey) !== null) return;
+  if (storage.getItem(pointerKey) === originPath) return;
   guardedSetItem(storage, pointerKey, originPath);
 }
 
