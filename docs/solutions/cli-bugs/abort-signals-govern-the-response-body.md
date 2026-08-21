@@ -41,7 +41,7 @@ Every remote-document session therefore had a ten-second useful life. After that
 ## What Didn't Work
 
 - Reading the code statically: the constant is named `SSE_CONNECT_TIMEOUT_MS` and sits on the connect call, which is exactly what it looks like it does.
-- Faking the clock in a test. Node's `AbortSignal.timeout` runs off an internal timer that Vitest's fake timers do not patch, so a faked clock never fires it and the buggy code passes. The reproduction has to spend the real ten seconds.
+- Faking the clock in a test. Node's `AbortSignal.timeout` runs off an internal timer that Vitest's fake timers do not patch, so a faked clock never fires it and the buggy code passes. Shortening the deadline is what works: the reproduction injects a 500ms deadline through `deps.sseConnectTimeoutMs` and spends about a second, instead of waiting out the real ten.
 
 ## Solution
 
@@ -51,7 +51,7 @@ Separate the deadline from the stream lifetime: arm an `AbortController` with a 
 const abort = new AbortController();
 const connectDeadline = setTimeout(() => {
   abort.abort(new Error("Timed out opening the remote event stream"));
-}, SSE_CONNECT_TIMEOUT_MS);
+}, deps.sseConnectTimeoutMs);
 
 try {
   response = await deps.fetchImpl(eventsUrl.toString(), {
@@ -65,7 +65,7 @@ try {
 
 A stalled connect still aborts at ten seconds; an established stream now lives as long as the session.
 
-The regression test runs a real host, waits out the deadline, and asserts that a save dispatched at t≈11s reaches disk. The give-away in the red run is the PUT status: `expected 503 to be 200`, i.e. the server no longer had a CLI attached.
+The regression test runs a real host with the deadline shortened to 500ms, and asserts that a save dispatched after it reaches disk and that the event stream was opened exactly once.
 
 ## Why This Works
 
@@ -75,7 +75,7 @@ The regression test runs a real host, waits out the deadline, and asserts that a
 
 - Treat `AbortSignal.timeout(...)` on a `fetch` as a deadline for the *whole* exchange, including reading the body. For streaming responses, that is almost never what you want.
 - When a timeout constant is named after one phase, check that the mechanism is actually scoped to that phase.
-- Prefer a real-time reproduction when the mechanism lives in a runtime timer the test framework does not control; a faked clock can silently agree with the bug.
+- When a mechanism lives in a runtime timer the test framework cannot drive, shorten the timer through the existing dependency-injection seam rather than faking the clock; a faked clock can silently agree with the bug, and waiting out the production value makes the suite slow.
 - Watch for failure modes that report success: this one exited 0 and logged a friendly line, so only the file on disk revealed it.
 
 ## Related Issues

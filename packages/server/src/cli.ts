@@ -91,6 +91,8 @@ export interface CliDependencies {
   fetchImpl: typeof fetch;
   findAvailablePortImpl: typeof findAvailablePort;
   sleepImpl: (ms: number) => Promise<void>;
+  /** Deadline for opening a remote save-back stream; shortened by tests. */
+  sseConnectTimeoutMs: number;
   spawnServerProcess: (options: {
     port: number;
     projectDir: string;
@@ -824,6 +826,8 @@ export function createCliDependencies(
     fetchImpl,
     findAvailablePortImpl: overrides.findAvailablePortImpl ?? findAvailablePort,
     sleepImpl: overrides.sleepImpl ?? ((ms) => sleep(ms)),
+    sseConnectTimeoutMs:
+      overrides.sseConnectTimeoutMs ?? SSE_CONNECT_TIMEOUT_MS,
     spawnServerProcess:
       overrides.spawnServerProcess ?? defaultSpawnServerProcess,
     isProcessRunning: overrides.isProcessRunning ?? defaultIsProcessRunning,
@@ -1235,6 +1239,12 @@ type RemoteRegisterOutcome =
   | { kind: "failed"; reason: string }
   | { kind: "refused" };
 
+type RemoteSessionOutcome =
+  | { kind: "ours" }
+  | { kind: "missing" }
+  | { kind: "failed"; reason: string }
+  | { kind: "refused" };
+
 type RemoteAttachOutcome =
   | { kind: "attached"; body: ReadableStream<Uint8Array> }
   | { kind: "failed"; reason: string }
@@ -1279,7 +1289,10 @@ async function runRemoteOpen(
   // stream is being pumped at the time.
   const runDeadline = new AbortController();
 
-  async function claimExistingSession(): Promise<RemoteRegisterOutcome> {
+  // The session id travels in the viewer URL, so a session that exists on the
+  // host is not necessarily still ours: it may have been swept and re-taken by
+  // another CLI. Nothing attaches without passing through here first.
+  async function inspectSession(): Promise<RemoteSessionOutcome> {
     let response: Response;
     try {
       response = await deps.fetchImpl(sessionUrl, {
@@ -1289,10 +1302,13 @@ async function runRemoteOpen(
     } catch (error) {
       return {
         kind: "failed",
-        reason: `Could not inspect the conflicting remote session: ${describeError(error)}`,
+        reason: `Could not inspect the remote session: ${describeError(error)}`,
       };
     }
 
+    if (response.status === 404) {
+      return { kind: "missing" };
+    }
     if (response.status === 401) {
       deps.error(
         `Remote host rejected the session lookup (HTTP 401). ${tokenGuidance}`,
@@ -1300,15 +1316,22 @@ async function runRemoteOpen(
       return { kind: "refused" };
     }
     if (!response.ok) {
-      // A 404 here means the session was swept between the register and this
-      // check; the next loop pass registers it again.
       return {
         kind: "failed",
-        reason: `Could not inspect the conflicting remote session (HTTP ${response.status})`,
+        reason: `Could not inspect the remote session (HTTP ${response.status})`,
       };
     }
 
-    const payload = (await response.json()) as { originPath?: unknown };
+    let payload: { originPath?: unknown };
+    try {
+      payload = (await response.json()) as { originPath?: unknown };
+    } catch (error) {
+      return {
+        kind: "failed",
+        reason: `Could not read the remote session: ${describeError(error)}`,
+      };
+    }
+
     if (payload.originPath !== options.openPath) {
       deps.error(
         `Refusing to attach: remote session ${sessionId} serves ${String(
@@ -1317,7 +1340,7 @@ async function runRemoteOpen(
       );
       return { kind: "refused" };
     }
-    return { kind: "registered", viewerUrl: null };
+    return { kind: "ours" };
   }
 
   async function registerSession(): Promise<RemoteRegisterOutcome> {
@@ -1359,7 +1382,17 @@ async function runRemoteOpen(
       return { kind: "refused" };
     }
     if (response.status === 409) {
-      return claimExistingSession();
+      const existing = await inspectSession();
+      if (existing.kind === "ours") {
+        return { kind: "registered", viewerUrl: null };
+      }
+      if (existing.kind === "missing") {
+        return {
+          kind: "failed",
+          reason: "Remote session vanished while resolving a register conflict",
+        };
+      }
+      return existing;
     }
     if (!response.ok) {
       return {
@@ -1368,7 +1401,15 @@ async function runRemoteOpen(
       };
     }
 
-    const payload = (await response.json()) as { viewerUrl?: unknown };
+    let payload: { viewerUrl?: unknown };
+    try {
+      payload = (await response.json()) as { viewerUrl?: unknown };
+    } catch (error) {
+      return {
+        kind: "failed",
+        reason: `Could not read the register response: ${describeError(error)}`,
+      };
+    }
     return {
       kind: "registered",
       viewerUrl:
@@ -1384,7 +1425,7 @@ async function runRemoteOpen(
     const abort = new AbortController();
     const connectDeadline = setTimeout(() => {
       abort.abort(new Error("Timed out opening the remote event stream"));
-    }, SSE_CONNECT_TIMEOUT_MS);
+    }, deps.sseConnectTimeoutMs);
 
     let response: Response;
     try {
@@ -1401,19 +1442,28 @@ async function runRemoteOpen(
       clearTimeout(connectDeadline);
     }
 
-    if (response.status === 404) {
-      return { kind: "missing" };
-    }
-    if (response.status === 401) {
-      deps.error(
-        `Remote host rejected the session stream (HTTP 401). ${tokenGuidance}`,
-      );
-      return { kind: "refused" };
-    }
-    if (!response.ok || !response.body) {
+    if (!response.ok) {
+      // Nothing reads these bodies; release the socket rather than leaving it
+      // pinned until the response is collected.
+      await response.body?.cancel().catch(() => undefined);
+      if (response.status === 404) {
+        return { kind: "missing" };
+      }
+      if (response.status === 401) {
+        deps.error(
+          `Remote host rejected the session stream (HTTP 401). ${tokenGuidance}`,
+        );
+        return { kind: "refused" };
+      }
       return {
         kind: "failed",
         reason: `Could not open remote event stream (HTTP ${response.status})`,
+      };
+    }
+    if (!response.body) {
+      return {
+        kind: "failed",
+        reason: "Remote event stream arrived without a body",
       };
     }
 
@@ -1421,25 +1471,26 @@ async function runRemoteOpen(
   }
 
   async function attachOrRegister(): Promise<RemoteAttachOutcome> {
+    const existing = await inspectSession();
+    if (existing.kind === "failed" || existing.kind === "refused") {
+      return existing;
+    }
+    if (existing.kind === "missing") {
+      const reregistered = await registerSession();
+      if (reregistered.kind !== "registered") {
+        return reregistered;
+      }
+    }
+
     const attached = await openEventStream();
-    if (attached.kind !== "missing") {
-      return attached;
-    }
-
-    const registered = await registerSession();
-    if (registered.kind !== "registered") {
-      return registered;
-    }
-
-    const reattached = await openEventStream();
-    if (reattached.kind === "missing") {
-      // Register and attach are not atomic; another pass sorts it out.
+    if (attached.kind === "missing") {
+      // Inspect, register and attach are not atomic; another pass sorts it out.
       return {
         kind: "failed",
-        reason: "Remote session vanished right after registering",
+        reason: "Remote session vanished before the event stream opened",
       };
     }
-    return reattached;
+    return attached;
   }
 
   async function pumpEvents(body: ReadableStream<Uint8Array>): Promise<void> {
@@ -1556,8 +1607,14 @@ async function runRemoteOpen(
 
       let reason: string;
       if (outcome.kind === "attached") {
-        consecutiveFailures = 0;
+        const attachedAt = Date.now();
         await pumpEvents(outcome.body);
+        // Only a stream that stayed up counts as recovery. A host that accepts
+        // the connection and drops it at once would otherwise reset the
+        // counter on every pass and never reach the ceiling.
+        if (Date.now() - attachedAt >= REMOTE_RECONNECT_BASE_DELAY_MS) {
+          consecutiveFailures = 0;
+        }
         reason = "Remote session stream ended";
       } else {
         reason = outcome.reason;
@@ -1572,7 +1629,7 @@ async function runRemoteOpen(
 
       consecutiveFailures += 1;
       if (consecutiveFailures >= REMOTE_MAX_CONSECUTIVE_FAILURES) {
-        deps.error("Remote session disconnected.");
+        deps.error(`Remote session disconnected. Last failure: ${reason}.`);
         return 1;
       }
       deps.error(`${reason}; reconnecting...`);
