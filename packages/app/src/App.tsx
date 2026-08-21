@@ -1730,6 +1730,11 @@ export function App() {
       setLoadError(null);
       setBackendUnavailable(false);
       setDocumentPage(null);
+      // A boot resolves the restore question against the document it loads, so
+      // a retry must not inherit the previous boot's answer: a leftover offer
+      // or accepted restore would replay stale content over the fresh load.
+      setDraftRestore(null);
+      setOfferedDraftContent(null);
 
       try {
         const detectedBackend = await detectBackend();
