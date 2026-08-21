@@ -1597,11 +1597,14 @@ export function App() {
     async () => {},
   );
   const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const draftRestoreRef = useRef<DraftRestore | null>(null);
+  // Set synchronously on save, unlike `documentPageRef`, which only catches up
+  // on the next commit — the watcher can report our own write before then.
+  const lastSavedVersionRef = useRef<string | null>(null);
   const bootRetryTimerRef = useRef<number | null>(null);
-  // Both keys must be monotonic: PageCard compares them by identity, so a
-  // repeat of the same reset or restore would otherwise be a silent no-op.
+  // The reset key must be monotonic: PageCard compares it by identity, so a
+  // repeat of the same reset would otherwise be a silent no-op.
   const forceResetCounterRef = useRef(0);
-  const draftRestoreCounterRef = useRef(0);
   const { draft: draftPersistence, retryPending: documentRetryPending } =
     useDraftPersistence({
       save: (content) => saveDraftContentRef.current(content),
@@ -1613,6 +1616,7 @@ export function App() {
   activeDocumentPathRef.current = activeDocumentPath;
   documentSaveStateRef.current = documentSaveState;
   documentDiskChangeStateRef.current = documentDiskChangeState;
+  draftRestoreRef.current = draftRestore;
 
   const applyDocumentPage = useCallback((nextDocument: Page) => {
     setDocumentPage(nextDocument);
@@ -1625,13 +1629,9 @@ export function App() {
    * it sees the restore.
    */
   const restoreDraftContent = useCallback((content: string) => {
-    draftRestoreCounterRef.current += 1;
     setOfferedDraftContent(null);
     setDocumentDiskChangeState("clean");
-    setDraftRestore({
-      key: `draft-restore:${draftRestoreCounterRef.current}`,
-      content,
-    });
+    setDraftRestore({ content });
     logDraftEvent("restored");
   }, []);
 
@@ -1850,6 +1850,14 @@ export function App() {
     requestedPathState.rawPath,
   ]);
 
+  const handleDocumentSaveStateChange = useCallback(
+    (state: DocumentSaveState) => {
+      documentSaveStateRef.current = state;
+      setDocumentSaveState(state);
+    },
+    [],
+  );
+
   /** Serialize every save so the retry cannot interleave with the debounce. */
   const runExclusively = useCallback(<T,>(task: () => Promise<T>) => {
     const run = saveChainRef.current.then(task, task);
@@ -1873,9 +1881,12 @@ export function App() {
       }
 
       const settleSaved = (savedDocument: Page) => {
+        lastSavedVersionRef.current = savedDocument.version ?? null;
         applyDocumentPage(savedDocument);
         documentDirtyRef.current = false;
         draftPersistence.noteSaveSuccess(content);
+        // Whatever was owed has landed, so no restore is in flight any more.
+        setDraftRestore(null);
       };
 
       try {
@@ -1977,14 +1988,6 @@ export function App() {
     documentDirtyRef.current = isDirty;
   }, []);
 
-  const handleDocumentSaveStateChange = useCallback(
-    (state: DocumentSaveState) => {
-      documentSaveStateRef.current = state;
-      setDocumentSaveState(state);
-    },
-    [],
-  );
-
   const handleDocumentLocalContentChange = useCallback(
     (markdown: string, origin: LocalContentOrigin) => {
       documentDraftContentRef.current = markdown;
@@ -2047,6 +2050,7 @@ export function App() {
     // Taking the file's version is a decision to drop the local edits, so the
     // record must go too or the next boot would offer them back.
     draftPersistence.discard();
+    setDraftRestore(null);
     setDocumentDiskChangeState("clean");
     setDocumentForceResetKey(nextForceResetKey(currentPath));
   }, [applyDocumentPage, draftPersistence, nextForceResetKey]);
@@ -2129,7 +2133,11 @@ export function App() {
         if (disposed || event.path !== activeDocumentPath) return;
 
         const currentDocument = documentPageRef.current;
-        if (event.version && currentDocument?.version === event.version) {
+        if (
+          event.version &&
+          (currentDocument?.version === event.version ||
+            lastSavedVersionRef.current === event.version)
+        ) {
           return;
         }
 
@@ -2137,6 +2145,12 @@ export function App() {
         // An unsent draft is waiting on the reviewer; neither reloading over it
         // nor relabelling the banner would help them decide.
         if (diskChangeState === "draft-restore") return;
+
+        // A restore in flight looks exactly like unsaved local work, and
+        // pausing autosave over it would strand the very edits being restored.
+        // The save carries the loaded version, so a genuinely changed file
+        // still comes back as a conflict.
+        if (draftRestoreRef.current) return;
 
         if (!event.exists) {
           setDocumentDiskChangeState("changed");

@@ -62,11 +62,13 @@ export type DocumentInteractionMode = "viewing" | "suggesting" | "editing";
 export type LocalContentOrigin = "edit" | "adopt" | "restore";
 
 /**
- * An unsent draft the app wants put back into the editor. `key` must change on
- * every offer: restoring the same bytes twice is a real request, not a repeat.
+ * An unsent draft the app wants put back into the editor.
+ *
+ * Each offer is a distinct object, and that identity is the signal: restoring
+ * the same bytes twice is a real request, not a repeat, so the value must come
+ * from state rather than be built inline while rendering.
  */
 export interface DraftRestore {
-  key: string;
   content: string;
 }
 
@@ -2218,9 +2220,6 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
   const lastAcceptedMarkdownRef = useRef(page.content);
   const localDirtyRef = useRef(false);
   const forceResetKeyRef = useRef(forceResetKey);
-  // Starts null, not at the current key: a restore that is already pending
-  // when the card mounts is exactly the boot-recovery case.
-  const draftRestoreKeyRef = useRef<string | null>(null);
   const [markdown, setMarkdown] = useState(page.content);
   const [richTextSourceMarkdown, setRichTextSourceMarkdown] = useState(
     page.content,
@@ -2383,14 +2382,20 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
    * unsaved work, so the reconciliation effect below leaves it alone and the
    * card keeps warning about it until the destination confirms.
    */
+  // Only the offer itself is a dependency. Including the callbacks would
+  // re-restore whenever an unrelated prop changed their identity, and the
+  // effect has to stay safe to run twice for one offer anyway: React discards
+  // and replays mount effects, which cancels the save this schedules.
+  const restoreDraftRef = useRef({ acceptMarkdown, scheduleSave });
+  restoreDraftRef.current = { acceptMarkdown, scheduleSave };
+
   useEffect(() => {
     if (!draftRestore) return;
-    if (draftRestoreKeyRef.current === draftRestore.key) return;
-    draftRestoreKeyRef.current = draftRestore.key;
-
-    acceptMarkdown(draftRestore.content, { markSaved: false });
-    scheduleSave(draftRestore.content);
-  }, [acceptMarkdown, draftRestore, scheduleSave]);
+    restoreDraftRef.current.acceptMarkdown(draftRestore.content, {
+      markSaved: false,
+    });
+    restoreDraftRef.current.scheduleSave(draftRestore.content);
+  }, [draftRestore]);
 
   useEffect(() => {
     const forceResetChanged = forceResetKeyRef.current !== forceResetKey;
@@ -2407,10 +2412,16 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
       lastAcceptedMarkdownRef.current = page.content;
       pendingMarkdownRef.current = markdown;
       reportDirtyState(markdown !== page.content);
+      // Only ever upgrade to "saved": if the editor has moved on since, the
+      // save already in flight owns the state and knows better.
+      if (markdown === page.content) onSaveStateChange("saved");
       return;
     }
 
-    if (localDirtyRef.current && markdown !== page.content) {
+    // Compare against the pending content, not this render's `markdown`: a
+    // restore adopted during this same commit has already moved the pending
+    // content on, and reading the stale state would adopt the file over it.
+    if (localDirtyRef.current && pendingMarkdownRef.current !== page.content) {
       return;
     }
 
@@ -2418,11 +2429,21 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
       lastAcceptedMarkdownRef.current = page.content;
       pendingMarkdownRef.current = page.content;
       reportDirtyState(false);
+      // The destination now holds what the editor holds, however it got there
+      // — an autosave, a retry that ran outside this card, or an overwrite.
+      onSaveStateChange("saved");
       return;
     }
 
     acceptMarkdown(page.content);
-  }, [acceptMarkdown, forceResetKey, markdown, page.content, reportDirtyState]);
+  }, [
+    acceptMarkdown,
+    forceResetKey,
+    markdown,
+    onSaveStateChange,
+    page.content,
+    reportDirtyState,
+  ]);
 
   useEffect(() => {
     if (!saveBlocked || !saveTimer.current) return;
