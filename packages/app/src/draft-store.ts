@@ -15,7 +15,14 @@ const RECORD_PREFIXES = [
   `${DRAFT_KEY_PREFIX}file:`,
   `${DRAFT_KEY_PREFIX}origin:`,
 ];
-const DRAFT_SCHEMA = 1;
+/**
+ * Bumped to 2 when `baseKnown` was dropped in favour of a nullable
+ * `baseContent`. A v1 record spelled "base unknown" as `baseContent: ""`, which
+ * under the v2 rules would read as a base known to be empty — and silently
+ * restore over an empty file instead of asking. The version keeps them apart;
+ * a v1 record keeps its content and comes back with an unknown base.
+ */
+export const DRAFT_SCHEMA = 2;
 
 export interface DraftRecord extends DraftSnapshot {
   updatedAt: number;

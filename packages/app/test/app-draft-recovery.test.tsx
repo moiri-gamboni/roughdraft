@@ -3,7 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App, MAX_BOOT_RETRIES } from "../src/App";
 import { BackendUnavailableError, detectBackend } from "../src/detect-backend";
-import { DRAFT_KEY_PREFIX } from "../src/draft-store";
+import { DRAFT_KEY_PREFIX, DRAFT_SCHEMA } from "../src/draft-store";
 import {
   MarkdownFileConflictError,
   type Page,
@@ -115,7 +115,7 @@ function writeDraftRecord({
   localStorage.setItem(
     key,
     JSON.stringify({
-      schema: 1,
+      schema: DRAFT_SCHEMA,
       content,
       baseContent,
       updatedAt: Date.now(),
