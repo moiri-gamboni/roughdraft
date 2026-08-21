@@ -1502,13 +1502,13 @@ export function PreviewPage() {
   );
 }
 
+const MAX_BOOT_RETRIES = 5;
+
 /**
  * The boot could not reach whatever holds this document. Says so, says the
  * unsent work is safe, and keeps trying — the old generic "could not open that
  * markdown file" was a dead end for a condition that usually clears itself.
  */
-const MAX_BOOT_RETRIES = 5;
-
 function BackendUnavailableNotice({
   hasUnsentDraft,
   onRetry,
@@ -1625,8 +1625,8 @@ export function App() {
 
   /**
    * Put the draft back in the editor as unsaved work and let it be delivered.
-   * Both state updates land in one commit so the card is unblocked by the time
-   * it sees the restore.
+   * The state updates land in one commit, so autosave is already unblocked by
+   * the time the card sees the restore and tries to send it.
    */
   const restoreDraftContent = useCallback((content: string) => {
     setOfferedDraftContent(null);
