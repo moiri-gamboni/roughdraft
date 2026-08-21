@@ -1613,10 +1613,59 @@ function isTrailingEmptyParagraph(
   );
 }
 
+/**
+ * Turndown classifies whitespace-only nodes as "blank" and replaces them
+ * before any rule runs, so a review span holding nothing but a space — a
+ * suggested deletion of the space between two words, straight from a
+ * Backspace in suggesting mode — vanished from the saved file. Shield such
+ * spans with a private-use character on each edge before turndown parses the
+ * HTML (so the node is not blank and its whitespace is not "flanking"), and
+ * strip the character from the produced markdown. The shield exists only
+ * inside this serialization pipeline: never in the editor document, never in
+ * the file. The parse side needs no counterpart — `{-- --}` already
+ * round-trips into a marked space.
+ */
+const BLANK_REVIEW_SHIELD = "\uE000";
+
+function shieldBlankReviewSpans(html: string): string {
+  if (typeof DOMParser === "undefined") return html;
+  if (
+    !html.includes("data-critic-change-kind") &&
+    !html.includes("data-comment-ids")
+  ) {
+    return html;
+  }
+
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  let changed = false;
+
+  for (const span of parsed.body.querySelectorAll(
+    "span[data-critic-change-kind], span[data-comment-ids]",
+  )) {
+    const text = span.textContent ?? "";
+    if (text.length === 0 || text.trim().length > 0) continue;
+
+    span.insertBefore(
+      parsed.createTextNode(BLANK_REVIEW_SHIELD),
+      span.firstChild,
+    );
+    span.appendChild(parsed.createTextNode(BLANK_REVIEW_SHIELD));
+    changed = true;
+  }
+
+  return changed ? parsed.body.innerHTML : html;
+}
+
+function turndownShielded(service: TurndownService, html: string): string {
+  return service
+    .turndown(shieldBlankReviewSpans(html))
+    .replaceAll(BLANK_REVIEW_SHIELD, "");
+}
+
 /** The block's markdown with the surrounding blank lines stripped off. */
 function serializeBlock(node: JSONContent, service: TurndownService): string {
   const html = generateHTML({ type: "doc", content: [node] }, extensions);
-  return finalizeMarkdown(service.turndown(html)).trim();
+  return finalizeMarkdown(turndownShielded(service, html)).trim();
 }
 
 function serializeBody(
@@ -1633,7 +1682,7 @@ function serializeBody(
   const hasProvenance = blocks.some(
     (node) => typeof node.attrs?.[SOURCE_TEXT_ATTRIBUTE] === "string",
   );
-  if (!hasProvenance) return finalizeMarkdown(service.turndown(html));
+  if (!hasProvenance) return finalizeMarkdown(turndownShielded(service, html));
 
   let body = "";
   // Splitting a block copies its attributes to the new half, so a freshly typed

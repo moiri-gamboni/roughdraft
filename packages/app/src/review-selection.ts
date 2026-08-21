@@ -3,10 +3,11 @@ import type { EditorState } from "@tiptap/pm/state";
 /**
  * Review marks anchored on pure whitespace do not survive serialization (see
  * createTurndownService's blankReplacement), so the app never creates that
- * state: a whitespace-only comment selection becomes a point comment, and a
- * whitespace-only suggested deletion is refused, like an empty selection.
- * These resolvers hold that policy; PageCard's handlers and the fuzz harness
- * both apply it.
+ * state through comment anchors: a whitespace-only comment selection becomes a
+ * point comment. (Suggested deletions of whitespace are fine: the serializer
+ * shields whitespace-only change spans, and `{-- --}` parses back into a
+ * marked space.) PageCard's handleAddComment and the fuzz harness both apply
+ * this.
  */
 
 /** Placeholder for leaf nodes (images) so they never read as whitespace. */
@@ -26,13 +27,4 @@ export function resolveCommentAnchor(
   if (text.trim().length === 0) return { kind: "point", at: from };
 
   return { kind: "range", from, to };
-}
-
-export function canSuggestDeletion(
-  state: EditorState,
-  from: number,
-  to: number,
-): boolean {
-  if (to <= from) return false;
-  return state.doc.textBetween(from, to, "\n", LEAF_TEXT).trim().length > 0;
 }
