@@ -1,9 +1,31 @@
 import { tables, taskListItems } from "@joplin/turndown-plugin-gfm";
-import { marked } from "marked";
+import { Lexer, marked } from "marked";
 import TurndownService from "turndown";
 import { parse as parseYaml } from "yaml";
 
 export const rawMarkdownBlockAttribute = "data-markdown-raw-block";
+
+/*
+ * marked masks `code` and <tag> spans out of its emphasis-pairing view
+ * (rules.inline.blockSkip) so delimiters never pair across them. Its <...>
+ * alternative matches ANY angle-bracket pair, and CriticMarkup comment blocks
+ * fake it out: the `<` of one `<<}` and the `>` of the NEXT `{>>` read as a
+ * single huge "tag", so between two comments every `**`/`*` came back as
+ * literal text. Require a tag-shaped character after `<` — every real tag,
+ * closing tag, comment, PI and autolink starts with a letter, `/`, `!` or `?`
+ * — so bare angle punctuation cannot mask prose. Patched on the shared rule
+ * sets so every lexer (ours and marked's own) sees it; revisit on marked
+ * upgrades (a regression test in editor-roundtrip.test.ts guards it).
+ */
+const flankingSafeBlockSkip =
+  /\[[^[\]]*?\]\((?:\.|[^()]|\((?:\.|[^()])*\))*\)|`[^`]*?`|<\/?[A-Za-z!?][^<>]*?>/g;
+for (const ruleSet of Object.values(
+  Lexer.rules.inline as Record<string, Record<string, unknown>>,
+)) {
+  if (ruleSet && typeof ruleSet === "object" && "blockSkip" in ruleSet) {
+    ruleSet.blockSkip = flankingSafeBlockSkip;
+  }
+}
 
 /*
  * Source preservation.
