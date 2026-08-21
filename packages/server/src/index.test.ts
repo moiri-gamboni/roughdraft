@@ -3,9 +3,15 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Response } from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "./index";
+import {
+  createApp,
+  REMOTE_SESSION_TTL_MS,
+  type RemoteSession,
+  sweepRemoteSessions,
+} from "./index";
 
 const SSE_READ_TIMEOUT_MS = 2_000;
 
@@ -1166,5 +1172,64 @@ describe("createApp", () => {
 
       expect(await cli.waitFor("event: save")).toContain('"content":"after"');
     });
+  });
+});
+
+describe("sweepRemoteSessions", () => {
+  function fakeViewer(): Response & { ended: boolean } {
+    const viewer = { ended: false, end: () => (viewer.ended = true) };
+    return viewer as unknown as Response & { ended: boolean };
+  }
+
+  function session(overrides: Partial<RemoteSession> = {}): RemoteSession {
+    return {
+      id: "s1",
+      originPath: "/draft.md",
+      content: "body",
+      version: "v1",
+      saveClient: null,
+      viewers: new Set(),
+      disconnectedAt: null,
+      ...overrides,
+    };
+  }
+
+  it("ends the viewer streams of a session it drops", () => {
+    // A viewer left attached to a forgotten session keeps receiving keepalives
+    // forever: its EventSource never errors, so the browser's re-open loop
+    // never runs and the tab goes stale without ever saying so.
+    const viewer = fakeViewer();
+    const sessions = new Map([
+      ["s1", session({ disconnectedAt: 1_000, viewers: new Set([viewer]) })],
+    ]);
+
+    sweepRemoteSessions(sessions, 1_000 + REMOTE_SESSION_TTL_MS + 1);
+
+    expect(sessions.has("s1")).toBe(false);
+    expect(viewer.ended).toBe(true);
+  });
+
+  it("leaves a session still inside its grace period alone", () => {
+    const viewer = fakeViewer();
+    const sessions = new Map([
+      ["s1", session({ disconnectedAt: 1_000, viewers: new Set([viewer]) })],
+    ]);
+
+    sweepRemoteSessions(sessions, 1_000 + REMOTE_SESSION_TTL_MS);
+
+    expect(sessions.has("s1")).toBe(true);
+    expect(viewer.ended).toBe(false);
+  });
+
+  it("leaves a connected session alone however old it is", () => {
+    const viewer = fakeViewer();
+    const sessions = new Map([
+      ["s1", session({ disconnectedAt: null, viewers: new Set([viewer]) })],
+    ]);
+
+    sweepRemoteSessions(sessions, Number.MAX_SAFE_INTEGER);
+
+    expect(sessions.has("s1")).toBe(true);
+    expect(viewer.ended).toBe(false);
   });
 });
