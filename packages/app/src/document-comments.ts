@@ -1,3 +1,4 @@
+import type { JSONContent } from "@tiptap/core";
 import {
   buildCommentThreads,
   type CriticComment,
@@ -411,4 +412,100 @@ export function resolveCommentThreadRailLayouts(
     activeItem?.key ?? null,
     gap,
   );
+}
+
+/**
+ * Comments live in React state beside the ProseMirror document, so undo/redo
+ * moves the anchors without moving the comments: undoing a comment deletion
+ * brought the highlight back with no card behind it, and the next save then
+ * dropped the comment for good. Reconcile after every editor update: a
+ * buried comment whose anchor reappears is restored, and a live comment
+ * whose anchor disappears is buried (covering undo of creation and redo of
+ * deletion).
+ *
+ * `everAnchored` guards the burial direction and is updated in place: only
+ * comments that were anchored at some point this session may be buried, so
+ * replies parsed from endmatter whose inline root is already gone (a state
+ * hand-edited files can carry) are never touched.
+ */
+export function reconcileCommentsWithDoc(
+  doc: JSONContent,
+  live: Map<string, CriticComment>,
+  graveyard: Map<string, CriticComment>,
+  everAnchored: Set<string>,
+): {
+  live: Map<string, CriticComment>;
+  graveyard: Map<string, CriticComment>;
+  changed: boolean;
+} {
+  const anchoredCommentIds = new Set<string>();
+  const anchoredChangeIds = new Set<string>();
+  collectAnchorIds(doc, anchoredCommentIds, anchoredChangeIds);
+
+  const combined = new Map([...graveyard, ...live]);
+  const rootIsAnchored = (commentId: string): boolean => {
+    const visited = new Set<string>();
+    let current = combined.get(commentId);
+    while (current) {
+      if (visited.has(current.id)) return false;
+      visited.add(current.id);
+      if (anchoredCommentIds.has(current.id)) return true;
+      const parentId = current.parentCommentId;
+      if (!parentId) return false;
+      if (!combined.has(parentId)) {
+        // A parent outside the comment maps is a suggestion's change id.
+        return anchoredChangeIds.has(parentId);
+      }
+      current = combined.get(parentId);
+    }
+    return false;
+  };
+
+  const nextLive = new Map(live);
+  const nextGraveyard = new Map(graveyard);
+  let changed = false;
+
+  for (const [id, comment] of graveyard) {
+    if (rootIsAnchored(id)) {
+      nextGraveyard.delete(id);
+      nextLive.set(id, comment);
+      changed = true;
+    }
+  }
+
+  for (const [id, comment] of live) {
+    if (comment.scope === "document") continue;
+    if (!everAnchored.has(id)) continue;
+    if (rootIsAnchored(id)) continue;
+    nextLive.delete(id);
+    nextGraveyard.set(id, comment);
+    changed = true;
+  }
+
+  for (const id of nextLive.keys()) {
+    if (rootIsAnchored(id)) everAnchored.add(id);
+  }
+
+  return { live: nextLive, graveyard: nextGraveyard, changed };
+}
+
+function collectAnchorIds(
+  node: JSONContent,
+  commentIds: Set<string>,
+  changeIds: Set<string>,
+): void {
+  for (const mark of node.marks ?? []) {
+    const attrs = mark.attrs as Record<string, unknown> | undefined;
+    if (mark.type === "commentRef" && Array.isArray(attrs?.commentIds)) {
+      for (const id of attrs.commentIds) {
+        if (typeof id === "string") commentIds.add(id);
+      }
+    }
+    if (mark.type === "criticChange" && typeof attrs?.changeId === "string") {
+      changeIds.add(attrs.changeId);
+    }
+  }
+  for (const child of node.content ?? []) {
+    collectAnchorIds(child, commentIds, changeIds);
+  }
 }

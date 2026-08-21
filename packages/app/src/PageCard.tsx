@@ -24,6 +24,7 @@ import {
   collectAnchoredThreadComments,
   getPreferredCommentId,
   parseCommentIds,
+  reconcileCommentsWithDoc,
 } from "./document-comments";
 import { EditorContextMenu } from "./EditorContextMenu";
 import {
@@ -641,6 +642,10 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
   const criticChangeFrameRef = useRef<number | null>(null);
   const interactionModeRef = useRef<DocumentInteractionMode>(interactionMode);
   const commentsRef = useRef<Map<string, CriticComment>>(new Map());
+  // Deleted comments, kept so undo can bring them back with their anchors
+  // (see reconcileCommentsWithDoc).
+  const deletedCommentsRef = useRef<Map<string, CriticComment>>(new Map());
+  const everAnchoredCommentIdsRef = useRef<Set<string>>(new Set());
   const suppressNextMarkdownUpdateRef = useRef(false);
   const lastFocusRequestKeyRef = useRef<string | null>(null);
   const selectedCommentIdRef = useRef<string | null>(null);
@@ -1258,7 +1263,22 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
           return;
         }
 
-        emitMarkdownChange(currentEditor.getJSON());
+        const docJson = currentEditor.getJSON();
+        // Undo/redo moves comment anchors without touching the comment maps;
+        // restore or bury comments to match the anchors before saving.
+        const reconciled = reconcileCommentsWithDoc(
+          docJson,
+          commentsRef.current,
+          deletedCommentsRef.current,
+          everAnchoredCommentIdsRef.current,
+        );
+        if (reconciled.changed) {
+          commentsRef.current = reconciled.live;
+          deletedCommentsRef.current = reconciled.graveyard;
+          setComments(reconciled.live);
+        }
+
+        emitMarkdownChange(docJson);
         refreshCriticChanges();
       },
     },
@@ -1317,6 +1337,8 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     frontmatterRef.current = parsedContent.frontmatter;
     endmatterRef.current = parsedContent.endmatter;
     commentsRef.current = parsedContent.comments;
+    deletedCommentsRef.current = new Map();
+    everAnchoredCommentIdsRef.current = new Set();
     setComments(parsedContent.comments);
     setSelectedCommentId(null);
     setHoveredCommentId(null);
@@ -1746,6 +1768,8 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
 
       const nextComments = new Map(commentsRef.current);
       for (const id of commentIdsToDelete) {
+        const comment = nextComments.get(id);
+        if (comment) deletedCommentsRef.current.set(id, comment);
         nextComments.delete(id);
       }
 
@@ -1847,6 +1871,8 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
       const deletedIds = new Set(commentIdsToDelete);
       const nextComments = new Map(commentsRef.current);
       for (const id of commentIdsToDelete) {
+        const comment = nextComments.get(id);
+        if (comment) deletedCommentsRef.current.set(id, comment);
         nextComments.delete(id);
       }
       commentsRef.current = nextComments;
