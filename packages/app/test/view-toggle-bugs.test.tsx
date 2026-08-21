@@ -9,10 +9,12 @@ import {
 import {
   DocumentSaveStatusIndicator,
   DocumentWorkspace,
+  type DraftRestoreOffer,
   getReviewHandoffButtonLabel,
   isReviewHandoffDisabled,
   shouldLatchDocumentChangedSinceOpen,
 } from "../src/DocumentWorkspace";
+import type { DraftMode } from "../src/save-recovery";
 import type { DocumentSaveState } from "../src/PageCard";
 import type {
   CompleteReviewOptions,
@@ -226,15 +228,21 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     draftRestoreMode = "local",
     onRestoreDraft = () => {},
     onDiscardDraft = () => {},
+    draftRestoreOffer = {
+      mode: draftRestoreMode,
+      onRestore: onRestoreDraft,
+      onDiscard: onDiscardDraft,
+    },
   }: {
     documentDiskChangeState?: DocumentDiskChangeState;
     documentContent?: string;
     documentCopyPath?: string | null;
     watcherCount?: number;
     onSaveDocument?: (id: string, content: string) => Promise<void>;
-    draftRestoreMode?: "local" | "remote";
+    draftRestoreMode?: DraftMode;
     onRestoreDraft?: () => void;
     onDiscardDraft?: () => void;
+    draftRestoreOffer?: DraftRestoreOffer | null;
   } = {}) {
     (
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -255,9 +263,7 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
           onDocumentLocalContentChange={() => {}}
           documentDiskChangeState={documentDiskChangeState}
           documentForceResetKey={null}
-          draftRestoreMode={draftRestoreMode}
-          onRestoreDraft={onRestoreDraft}
-          onDiscardDraft={onDiscardDraft}
+          draftRestoreOffer={draftRestoreOffer}
           onReloadDocumentFromDisk={() => {}}
           onKeepEditingWithoutAutosave={() => {}}
           onOverwriteDocumentOnDisk={() => {}}
@@ -624,6 +630,17 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
 
     await click(getByTestId(container, "draft-restore-action-discard"));
     expect(onDiscardDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no restore banner to a caller that offers no way to answer it", async () => {
+    // The banner's buttons are the only way out of the draft-restore state, so
+    // a caller with no handlers must not be shown a banner it cannot action.
+    await renderWorkspace({
+      documentDiskChangeState: "draft-restore",
+      draftRestoreOffer: null,
+    });
+
+    expect(queryByTestId(container, "draft-restore-notice")).toBeNull();
   });
 
   it("names the origin file when the unsent draft belongs to a remote session", async () => {
