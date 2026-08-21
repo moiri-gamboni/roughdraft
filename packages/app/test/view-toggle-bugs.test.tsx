@@ -14,7 +14,6 @@ import {
   isReviewHandoffDisabled,
   shouldLatchDocumentChangedSinceOpen,
 } from "../src/DocumentWorkspace";
-import type { DraftMode } from "../src/save-recovery";
 import type { DocumentSaveState } from "../src/PageCard";
 import type {
   CompleteReviewOptions,
@@ -225,13 +224,10 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     documentCopyPath = "test.md",
     watcherCount = 0,
     onSaveDocument = async () => {},
-    draftRestoreMode = "local",
-    onRestoreDraft = () => {},
-    onDiscardDraft = () => {},
     draftRestoreOffer = {
-      mode: draftRestoreMode,
-      onRestore: onRestoreDraft,
-      onDiscard: onDiscardDraft,
+      mode: "local",
+      onRestore: () => {},
+      onDiscard: () => {},
     },
   }: {
     documentDiskChangeState?: DocumentDiskChangeState;
@@ -239,9 +235,6 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     documentCopyPath?: string | null;
     watcherCount?: number;
     onSaveDocument?: (id: string, content: string) => Promise<void>;
-    draftRestoreMode?: DraftMode;
-    onRestoreDraft?: () => void;
-    onDiscardDraft?: () => void;
     draftRestoreOffer?: DraftRestoreOffer | null;
   } = {}) {
     (
@@ -617,8 +610,11 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     const onDiscardDraft = vi.fn();
     await renderWorkspace({
       documentDiskChangeState: "draft-restore",
-      onRestoreDraft,
-      onDiscardDraft,
+      draftRestoreOffer: {
+        mode: "local",
+        onRestore: onRestoreDraft,
+        onDiscard: onDiscardDraft,
+      },
     });
 
     expect(queryByTestId(container, "file-conflict-notice")).toBeNull();
@@ -646,7 +642,11 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
   it("names the origin file when the unsent draft belongs to a remote session", async () => {
     await renderWorkspace({
       documentDiskChangeState: "draft-restore",
-      draftRestoreMode: "remote",
+      draftRestoreOffer: {
+        mode: "remote",
+        onRestore: () => {},
+        onDiscard: () => {},
+      },
     });
 
     expect(
