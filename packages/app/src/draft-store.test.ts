@@ -95,14 +95,29 @@ describe("draftKeyFromUrl", () => {
 });
 
 describe("writeSessionPointer", () => {
-  it("keeps the first origin path a session resolved to", () => {
+  it("follows the session to a different origin file", () => {
+    // A session id can be reused for another document. Keeping the first
+    // mapping would point this document's draft at the other one's record.
     const storage = new MemoryStorage();
     writeSessionPointer(storage, "abc123", "/work/origin.md");
-    writeSessionPointer(storage, "abc123", "/work/squatter.md");
+    writeSessionPointer(storage, "abc123", "/work/other.md");
 
     expect(storage.getItem(`${DRAFT_KEY_PREFIX}session:abc123`)).toBe(
-      "/work/origin.md",
+      "/work/other.md",
     );
+  });
+
+  it("does not rewrite the pointer when the origin is unchanged", () => {
+    const storage = new MemoryStorage();
+    writeSessionPointer(storage, "abc123", "/work/origin.md");
+    let writes = 0;
+    storage.onSetItem = () => {
+      writes += 1;
+    };
+
+    writeSessionPointer(storage, "abc123", "/work/origin.md");
+
+    expect(writes).toBe(0);
   });
 });
 
