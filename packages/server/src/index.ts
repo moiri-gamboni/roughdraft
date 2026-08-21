@@ -983,11 +983,12 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return;
     }
 
-    // Retain the bytes either way: a browser that reloads while the CLI is
-    // gone recovers them from the bootstrap GET. The version is what must wait
-    // for delivery — moving it on a failed save would make the browser's retry
-    // (which carries the same expectedVersion) look like a stale write.
-    session.content = content;
+    // Content and version both wait for delivery, and each for its own reason.
+    // The version: moving it on a failed save would make the browser's retry
+    // (which carries the same expectedVersion) look like a stale write. The
+    // content: echoing undelivered bytes back on the bootstrap GET makes the
+    // browser's localStorage draft — the only durable copy of that unsent
+    // work — look redundant, and the restore policy then discards it.
     const nextVersion = remoteSessionVersion(content);
 
     let deliveredToClient = true;
@@ -1014,6 +1015,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return;
     }
 
+    session.content = content;
     session.version = nextVersion;
 
     res.json({ id: session.id, version: session.version });

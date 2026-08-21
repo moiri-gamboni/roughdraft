@@ -1012,7 +1012,7 @@ describe("createApp", () => {
     );
   });
 
-  it("returns 503 and holds the version back when PUT lands with no active CLI session listener", async () => {
+  it("returns 503 and keeps both content and version back when PUT lands with no active CLI session listener", async () => {
     // The browser's save is meaningless if no CLI is connected to receive it
     // and write to disk. Surfacing 503 (instead of silently 200-ing) prevents
     // the browser from believing a save succeeded that never reached disk.
@@ -1033,10 +1033,12 @@ describe("createApp", () => {
     // failure into a phantom 409.
     expect(update.body.version).toBe(register.body.version);
 
-    // The undelivered bytes are still retained in server memory, so a browser
-    // that reloads mid-outage recovers its content from the bootstrap GET.
+    // The undelivered bytes must not be retained either. Echoing them back on
+    // the bootstrap GET makes the browser's localStorage draft — the only
+    // durable copy of that unsent work — look like it already reached the
+    // destination, and the restore policy then discards it.
     const fetched = await request(app).get("/api/remote-document/s2");
-    expect(fetched.body.content).toBe("v2");
+    expect(fetched.body.content).toBe("v1");
     expect(fetched.body.version).toBe(register.body.version);
   });
 
