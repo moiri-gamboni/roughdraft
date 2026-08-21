@@ -419,14 +419,22 @@ export function resolveCommentThreadRailLayouts(
  * moves the anchors without moving the comments: undoing a comment deletion
  * brought the highlight back with no card behind it, and the next save then
  * dropped the comment for good. Reconcile after every editor update: a
- * buried comment whose anchor reappears is restored, and a live comment
- * whose anchor disappears is buried (covering undo of creation and redo of
- * deletion).
+ * buried comment whose OWN anchor id reappears is restored, and a live
+ * comment whose own anchor id disappears is buried (covering undo of
+ * creation and redo of deletion).
+ *
+ * Restoration is keyed strictly on the comment's own id being anchored —
+ * never on an ancestor's anchor. A reply's deletion removes only its own id
+ * from the shared anchor mark; if the walk climbed to the still-anchored
+ * root, deleting a reply (or cancelling an empty reply draft) would restore
+ * it on the very next update. Buried descendants ride along only when their
+ * root is itself restored in the same pass, which is what carries
+ * endmatter-only replies through an undo of a whole-thread deletion.
  *
  * `everAnchored` guards the burial direction and is updated in place: only
- * comments that were anchored at some point this session may be buried, so
- * replies parsed from endmatter whose inline root is already gone (a state
- * hand-edited files can carry) are never touched.
+ * comments whose own id was anchored at some point this session may be
+ * buried, so replies parsed from endmatter (never anchored inline) and
+ * comments attached to suggestions are never touched.
  */
 export function reconcileCommentsWithDoc(
   doc: JSONContent,
@@ -442,48 +450,47 @@ export function reconcileCommentsWithDoc(
   const anchoredChangeIds = new Set<string>();
   collectAnchorIds(doc, anchoredCommentIds, anchoredChangeIds);
 
-  const combined = new Map([...graveyard, ...live]);
-  const rootIsAnchored = (commentId: string): boolean => {
-    const visited = new Set<string>();
-    let current = combined.get(commentId);
-    while (current) {
-      if (visited.has(current.id)) return false;
-      visited.add(current.id);
-      if (anchoredCommentIds.has(current.id)) return true;
-      const parentId = current.parentCommentId;
-      if (!parentId) return false;
-      if (!combined.has(parentId)) {
-        // A parent outside the comment maps is a suggestion's change id.
-        return anchoredChangeIds.has(parentId);
-      }
-      current = combined.get(parentId);
-    }
-    return false;
-  };
-
   const nextLive = new Map(live);
   const nextGraveyard = new Map(graveyard);
   let changed = false;
 
+  const restoredIds = new Set<string>();
   for (const [id, comment] of graveyard) {
-    if (rootIsAnchored(id)) {
-      nextGraveyard.delete(id);
-      nextLive.set(id, comment);
-      changed = true;
+    if (!anchoredCommentIds.has(id)) continue;
+    nextGraveyard.delete(id);
+    nextLive.set(id, comment);
+    restoredIds.add(id);
+    changed = true;
+  }
+
+  // Buried descendants of a restored root come back with it.
+  if (restoredIds.size > 0) {
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const [id, comment] of nextGraveyard) {
+        const parentId = comment.parentCommentId;
+        if (!parentId || !restoredIds.has(parentId)) continue;
+        nextGraveyard.delete(id);
+        nextLive.set(id, comment);
+        restoredIds.add(id);
+        changed = true;
+        grew = true;
+      }
     }
   }
 
   for (const [id, comment] of live) {
     if (comment.scope === "document") continue;
     if (!everAnchored.has(id)) continue;
-    if (rootIsAnchored(id)) continue;
+    if (anchoredCommentIds.has(id)) continue;
     nextLive.delete(id);
     nextGraveyard.set(id, comment);
     changed = true;
   }
 
   for (const id of nextLive.keys()) {
-    if (rootIsAnchored(id)) everAnchored.add(id);
+    if (anchoredCommentIds.has(id)) everAnchored.add(id);
   }
 
   return { live: nextLive, graveyard: nextGraveyard, changed };

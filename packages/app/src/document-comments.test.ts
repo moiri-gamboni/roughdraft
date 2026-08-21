@@ -126,6 +126,46 @@ describe("reconcileCommentsWithDoc", () => {
     expect([...result.live.keys()].sort()).toEqual(["c1", reply.id].sort());
   });
 
+  it("keeps a deleted reply buried while its root stays anchored", () => {
+    // Deleting a reply removes only its own id from the shared anchor mark.
+    // Restoration must key on the reply's own id: climbing to the
+    // still-anchored root restored every deleted reply on the next update.
+    const reply = createCriticComment(
+      { content: "r", parentCommentId: "c1" },
+      { existingComments: [comment] },
+    );
+    const result = reconcileCommentsWithDoc(
+      anchoredDoc.doc,
+      new Map([["c1", comment]]),
+      new Map([[reply.id, reply]]),
+      new Set(["c1", reply.id]),
+    );
+
+    expect(result.changed).toBe(false);
+    expect([...result.graveyard.keys()]).toEqual([reply.id]);
+  });
+
+  it("keeps a deleted suggestion comment buried while its change stays", () => {
+    // A comment attached to a suggestion has no anchor of its own; its
+    // deletion changes nothing in the document, so nothing may restore it.
+    const suggestionComment = createCriticComment(
+      { content: "n", parentCommentId: "s1" },
+      {},
+    );
+    const changeDoc = criticMarkdownToEditorState(
+      'a {--x--}{#s1} b\n\n---\nsuggestions:\n  s1:\n    by: u\n    at: "2026-01-01T00:00:00.000Z"\n',
+    );
+    const result = reconcileCommentsWithDoc(
+      changeDoc.doc,
+      new Map(),
+      new Map([[suggestionComment.id, suggestionComment]]),
+      new Set(),
+    );
+
+    expect(result.changed).toBe(false);
+    expect([...result.graveyard.keys()]).toEqual([suggestionComment.id]);
+  });
+
   it("buries a live comment whose anchor disappeared (undo of creation)", () => {
     const result = reconcileCommentsWithDoc(
       plainDoc.doc,
