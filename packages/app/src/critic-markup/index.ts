@@ -1035,10 +1035,35 @@ function addCriticCommentRule(
         return content;
       }
 
+      // A comment whose anchor IS a suggestion serializes as a comment on
+      // that change. But an anchor that merely contains one (commenting a
+      // range that overlaps a suggestion) must keep its surrounding text:
+      // taking this path unconditionally serialized only the change and
+      // silently dropped the rest of the commented text.
       const criticChangeElement = (node as HTMLElement).querySelector(
         "span[data-critic-change-kind]",
       );
-      if (criticChangeElement instanceof HTMLElement) {
+      const changeElements = [
+        ...(node as HTMLElement).querySelectorAll<HTMLElement>(
+          "span[data-critic-change-kind]",
+        ),
+      ];
+      const changeText = changeElements
+        .map((element) => element.textContent ?? "")
+        .join("");
+      const changeIds = new Set(
+        changeElements.map((element) =>
+          element.getAttribute("data-critic-change-id"),
+        ),
+      );
+      // Also require a single change (a substitution pair shares its id):
+      // an anchor spanning several suggestions used to serialize only the
+      // first one, dropping the others and any text between them.
+      if (
+        criticChangeElement instanceof HTMLElement &&
+        changeText === (node as HTMLElement).textContent &&
+        changeIds.size === 1
+      ) {
         return serializeCriticChangeElement(
           service,
           criticChangeElement,
