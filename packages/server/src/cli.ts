@@ -33,6 +33,11 @@ const PROCESS_WAIT_DELAY_MS = 150;
 const WATCH_POLL_SECONDS = 240;
 const WATCH_RETRY_DELAY_MS = 2_000;
 const WATCH_MAX_CONSECUTIVE_FAILURES = 5;
+const REGISTER_TIMEOUT_MS = 10_000;
+const SSE_CONNECT_TIMEOUT_MS = 10_000;
+const REMOTE_RECONNECT_BASE_DELAY_MS = 1_000;
+const REMOTE_RECONNECT_MAX_DELAY_MS = 15_000;
+const REMOTE_MAX_CONSECUTIVE_FAILURES = WATCH_MAX_CONSECUTIVE_FAILURES;
 const USAGE_ERROR = 2;
 const KNOWN_COMMANDS = [
   "open",
@@ -1215,6 +1220,30 @@ interface RemoteOpenOptions {
   noOpen: boolean;
   printUrl: boolean;
   json: boolean;
+  timeoutSeconds?: number;
+}
+
+type RemoteRegisterOutcome =
+  | { kind: "registered"; viewerUrl: string | null }
+  | { kind: "failed"; reason: string }
+  | { kind: "refused" };
+
+type RemoteAttachOutcome =
+  | { kind: "attached"; body: ReadableStream<Uint8Array> }
+  | { kind: "failed"; reason: string }
+  | { kind: "refused" };
+
+type RemoteStreamOutcome = RemoteAttachOutcome | { kind: "missing" };
+
+function remoteReconnectDelayMs(consecutiveFailures: number): number {
+  return Math.min(
+    REMOTE_RECONNECT_MAX_DELAY_MS,
+    REMOTE_RECONNECT_BASE_DELAY_MS * 2 ** (consecutiveFailures - 1),
+  );
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function runRemoteOpen(
@@ -1229,70 +1258,259 @@ async function runRemoteOpen(
   const authHeaders: Record<string, string> =
     remoteToken.length > 0 ? { Authorization: `Bearer ${remoteToken}` } : {};
 
-  let content: string;
-  try {
-    content = await fs.promises.readFile(options.openPath, "utf-8");
-  } catch (error) {
-    deps.error(
-      error instanceof Error
-        ? error.message
-        : `Could not read ${options.openPath}`,
-    );
-    return 1;
-  }
-
+  // The session id is minted once and reused for every re-registration, so the
+  // browser tab's ?session= URL stays valid across host restarts.
   const sessionId = crypto.randomUUID();
+  const sessionUrl = `${baseUrl}/api/remote-document/${encodeURIComponent(sessionId)}`;
+  const eventsUrl = new URL(`${sessionUrl}/events`);
+  eventsUrl.searchParams.set("role", "cli");
 
-  const REGISTER_TIMEOUT_MS = 10_000;
-  let registerResponse: Response;
-  try {
-    registerResponse = await deps.fetchImpl(`${baseUrl}/api/remote-document`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders },
-      body: JSON.stringify({
-        sessionId,
-        originPath: options.openPath,
-        content,
-      }),
-      signal: AbortSignal.timeout(REGISTER_TIMEOUT_MS),
-    });
-  } catch (error) {
-    deps.error(
-      `Could not register remote session at ${baseUrl}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    return 1;
-  }
+  const tokenGuidance =
+    "Set ROUGHDRAFT_TOKEN to the token configured on the host before retrying.";
 
-  if (!registerResponse.ok) {
-    if (registerResponse.status === 401) {
-      deps.error(
-        `Remote host rejected the session register (HTTP 401). Set ROUGHDRAFT_TOKEN to the token configured on the host before retrying.`,
-      );
-    } else {
-      deps.error(
-        `Remote host rejected the session register (HTTP ${registerResponse.status}).`,
-      );
+  // Fires once the --timeout deadline passes, stopping whichever save-back
+  // stream is being pumped at the time.
+  const runDeadline = new AbortController();
+  let timedOut = false;
+
+  async function claimExistingSession(): Promise<RemoteRegisterOutcome> {
+    let response: Response;
+    try {
+      response = await deps.fetchImpl(sessionUrl, {
+        headers: { Accept: "application/json", ...authHeaders },
+        signal: AbortSignal.timeout(REGISTER_TIMEOUT_MS),
+      });
+    } catch (error) {
+      return {
+        kind: "failed",
+        reason: `Could not inspect the conflicting remote session: ${describeError(error)}`,
+      };
     }
-    return 1;
+
+    if (response.status === 401) {
+      deps.error(
+        `Remote host rejected the session lookup (HTTP 401). ${tokenGuidance}`,
+      );
+      return { kind: "refused" };
+    }
+    if (!response.ok) {
+      // A 404 here means the session was swept between the register and this
+      // check; the next loop pass registers it again.
+      return {
+        kind: "failed",
+        reason: `Could not inspect the conflicting remote session (HTTP ${response.status})`,
+      };
+    }
+
+    const payload = (await response.json()) as { originPath?: unknown };
+    if (payload.originPath !== options.openPath) {
+      deps.error(
+        `Refusing to attach: remote session ${sessionId} serves ${String(
+          payload.originPath,
+        )}, not ${options.openPath}.`,
+      );
+      return { kind: "refused" };
+    }
+    return { kind: "registered", viewerUrl: null };
   }
 
-  const registerPayload = (await registerResponse.json()) as {
-    id?: string;
-    version?: string;
-    viewerUrl?: string;
-  };
+  async function registerSession(): Promise<RemoteRegisterOutcome> {
+    let content: string;
+    try {
+      content = await fs.promises.readFile(options.openPath, "utf-8");
+    } catch (error) {
+      deps.error(
+        error instanceof Error
+          ? error.message
+          : `Could not read ${options.openPath}`,
+      );
+      return { kind: "refused" };
+    }
+
+    let response: Response;
+    try {
+      response = await deps.fetchImpl(`${baseUrl}/api/remote-document`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({
+          sessionId,
+          originPath: options.openPath,
+          content,
+        }),
+        signal: AbortSignal.timeout(REGISTER_TIMEOUT_MS),
+      });
+    } catch (error) {
+      return {
+        kind: "failed",
+        reason: `Could not register remote session at ${baseUrl}: ${describeError(error)}`,
+      };
+    }
+
+    if (response.status === 401) {
+      deps.error(
+        `Remote host rejected the session register (HTTP 401). ${tokenGuidance}`,
+      );
+      return { kind: "refused" };
+    }
+    if (response.status === 409) {
+      return claimExistingSession();
+    }
+    if (!response.ok) {
+      return {
+        kind: "failed",
+        reason: `Remote host rejected the session register (HTTP ${response.status})`,
+      };
+    }
+
+    const payload = (await response.json()) as { viewerUrl?: unknown };
+    return {
+      kind: "registered",
+      viewerUrl:
+        typeof payload.viewerUrl === "string" ? payload.viewerUrl : null,
+    };
+  }
+
+  async function openEventStream(): Promise<RemoteStreamOutcome> {
+    // The deadline covers the connect only. An AbortSignal handed to fetch also
+    // governs the response body, so a timeout signal would tear the save-back
+    // stream down once it elapsed; clearing the timer on headers keeps the
+    // stream open for the life of the session.
+    const abort = new AbortController();
+    const connectDeadline = setTimeout(() => {
+      abort.abort(new Error("Timed out opening the remote event stream"));
+    }, SSE_CONNECT_TIMEOUT_MS);
+
+    let response: Response;
+    try {
+      response = await deps.fetchImpl(eventsUrl.toString(), {
+        headers: { Accept: "text/event-stream", ...authHeaders },
+        signal: abort.signal,
+      });
+    } catch (error) {
+      return {
+        kind: "failed",
+        reason: `Lost connection to remote host: ${describeError(error)}`,
+      };
+    } finally {
+      clearTimeout(connectDeadline);
+    }
+
+    if (response.status === 404) {
+      return { kind: "missing" };
+    }
+    if (response.status === 401) {
+      deps.error(
+        `Remote host rejected the session stream (HTTP 401). ${tokenGuidance}`,
+      );
+      return { kind: "refused" };
+    }
+    if (!response.ok || !response.body) {
+      return {
+        kind: "failed",
+        reason: `Could not open remote event stream (HTTP ${response.status})`,
+      };
+    }
+
+    return { kind: "attached", body: response.body };
+  }
+
+  async function attachOrRegister(): Promise<RemoteAttachOutcome> {
+    const attached = await openEventStream();
+    if (attached.kind !== "missing") {
+      return attached;
+    }
+
+    const registered = await registerSession();
+    if (registered.kind !== "registered") {
+      return registered;
+    }
+
+    const reattached = await openEventStream();
+    if (reattached.kind === "missing") {
+      // Register and attach are not atomic; another pass sorts it out.
+      return {
+        kind: "failed",
+        reason: "Remote session vanished right after registering",
+      };
+    }
+    return reattached;
+  }
+
+  async function pumpEvents(body: ReadableStream<Uint8Array>): Promise<void> {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const stopped = new Promise<"stopped">((resolve) => {
+      if (runDeadline.signal.aborted) {
+        resolve("stopped");
+        return;
+      }
+      runDeadline.signal.addEventListener("abort", () => resolve("stopped"), {
+        once: true,
+      });
+    });
+
+    try {
+      while (true) {
+        let chunk: ReadableStreamReadResult<Uint8Array> | "stopped";
+        try {
+          chunk = await Promise.race([reader.read(), stopped]);
+        } catch {
+          break;
+        }
+        if (chunk === "stopped") break;
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        const parsed = parseSseEvents(buffer);
+        buffer = parsed.remainder;
+        for (const event of parsed.events) {
+          if (event.event !== "save") continue;
+          let payload: { content?: unknown } = {};
+          try {
+            payload = JSON.parse(event.data) as { content?: unknown };
+          } catch {
+            continue;
+          }
+          if (typeof payload.content !== "string") continue;
+          try {
+            await atomicWriteFile(options.openPath, payload.content);
+            if (!options.json) {
+              deps.log(`Saved ${options.openPath} from remote.`);
+            }
+          } catch (error) {
+            deps.error(
+              `Failed to write ${options.openPath}: ${describeError(error)}`,
+            );
+          }
+        }
+      }
+    } finally {
+      try {
+        await reader.cancel();
+      } catch {
+        // The stream may already be in an errored state; ignore.
+      }
+    }
+  }
+
+  const registered = await registerSession();
+  if (registered.kind === "refused") {
+    return 1;
+  }
+  if (registered.kind === "failed") {
+    deps.error(`${registered.reason}.`);
+    return 1;
+  }
 
   // The browser viewer must include the same token so its fetches and
   // EventSource connection authenticate. The server's viewerUrl response field
   // is unaware of the token (it doesn't see secrets in plaintext over the wire
   // unless we add them); the CLI knows the token and can append it.
-  const baseViewer =
-    typeof registerPayload.viewerUrl === "string"
-      ? registerPayload.viewerUrl
-      : `${baseUrl}/?session=${encodeURIComponent(sessionId)}`;
-  const viewerUrl = appendTokenToViewerUrl(baseViewer, remoteToken);
+  const viewerUrl = appendTokenToViewerUrl(
+    registered.viewerUrl ??
+      `${baseUrl}/?session=${encodeURIComponent(sessionId)}`,
+    remoteToken,
+  );
 
   if (options.printUrl) {
     deps.log(viewerUrl);
@@ -1317,99 +1535,51 @@ async function runRemoteOpen(
     deps.log(`Holding session open for ${options.openPath}. Ctrl-C to exit.`);
   }
 
-  const SSE_CONNECT_TIMEOUT_MS = 10_000;
-  const eventsUrl = new URL(
-    `/api/remote-document/${encodeURIComponent(sessionId)}/events`,
-    baseUrl,
-  );
-  eventsUrl.searchParams.set("role", "cli");
-
-  // The deadline covers the connect only. An AbortSignal handed to fetch also
-  // governs the response body, so a timeout signal would tear the save-back
-  // stream down once it elapsed; clearing the timer on headers keeps the
-  // stream open for the life of the session.
-  const connectAbort = new AbortController();
-  const connectDeadline = setTimeout(() => {
-    connectAbort.abort(new Error("Timed out opening the remote event stream"));
-  }, SSE_CONNECT_TIMEOUT_MS);
-
-  let eventsResponse: Response;
-  try {
-    eventsResponse = await deps.fetchImpl(eventsUrl.toString(), {
-      headers: { Accept: "text/event-stream", ...authHeaders },
-      signal: connectAbort.signal,
-    });
-  } catch (error) {
-    deps.error(
-      `Lost connection to remote host: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    return 1;
-  } finally {
-    clearTimeout(connectDeadline);
-  }
-
-  if (!eventsResponse.ok || !eventsResponse.body) {
-    deps.error(
-      `Could not open remote event stream (HTTP ${eventsResponse.status}).`,
-    );
-    return 1;
-  }
-
-  const reader = eventsResponse.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+  const deadlineTimer =
+    options.timeoutSeconds === undefined
+      ? null
+      : setTimeout(() => {
+          timedOut = true;
+          runDeadline.abort();
+        }, options.timeoutSeconds * 1000);
 
   try {
+    let consecutiveFailures = 0;
     while (true) {
-      let chunk: ReadableStreamReadResult<Uint8Array>;
-      try {
-        chunk = await reader.read();
-      } catch {
-        break;
+      const outcome = await attachOrRegister();
+      if (outcome.kind === "refused") {
+        return 1;
       }
-      if (chunk.done) break;
-      buffer += decoder.decode(chunk.value, { stream: true });
-      const parsed = parseSseEvents(buffer);
-      buffer = parsed.remainder;
-      for (const event of parsed.events) {
-        if (event.event === "save") {
-          let payload: { content?: unknown } = {};
-          try {
-            payload = JSON.parse(event.data) as { content?: unknown };
-          } catch {
-            continue;
-          }
-          if (typeof payload.content === "string") {
-            try {
-              await atomicWriteFile(options.openPath, payload.content);
-              if (!options.json) {
-                deps.log(`Saved ${options.openPath} from remote.`);
-              }
-            } catch (error) {
-              deps.error(
-                `Failed to write ${options.openPath}: ${
-                  error instanceof Error ? error.message : String(error)
-                }`,
-              );
-            }
-          }
-        }
+
+      let reason: string;
+      if (outcome.kind === "attached") {
+        consecutiveFailures = 0;
+        await pumpEvents(outcome.body);
+        reason = "Remote session stream ended";
+      } else {
+        reason = outcome.reason;
       }
+
+      if (timedOut) {
+        deps.error(
+          `Timed out holding the remote session for ${options.openPath}.`,
+        );
+        return 1;
+      }
+
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= REMOTE_MAX_CONSECUTIVE_FAILURES) {
+        deps.error("Remote session disconnected.");
+        return 1;
+      }
+      deps.error(`${reason}; reconnecting...`);
+      await deps.sleepImpl(remoteReconnectDelayMs(consecutiveFailures));
     }
   } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // The stream may already be in an errored state; ignore.
+    if (deadlineTimer !== null) {
+      clearTimeout(deadlineTimer);
     }
   }
-
-  if (!options.json) {
-    deps.log("Remote session disconnected.");
-  }
-  return 0;
 }
 
 async function sendOpenRequestToExistingWindow(
@@ -2787,6 +2957,7 @@ export async function runCli(
           noOpen: options.noOpen,
           printUrl: options.printUrl,
           json,
+          timeoutSeconds: options.timeoutSeconds,
         });
       }
 
