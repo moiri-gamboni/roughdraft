@@ -743,9 +743,9 @@ export function DocumentWorkspace({
     documentDiskChangeState === "draft-restore"
       ? null
       : conflictNoticeCopy[documentDiskChangeState];
-  const showDraftRestoreNotice =
-    documentDiskChangeState === "draft-restore" && !!draftRestoreOffer;
-  const hasTopNotice = !!conflictNotice || showDraftRestoreNotice;
+  const draftRestoreNotice =
+    documentDiskChangeState === "draft-restore" ? draftRestoreOffer : null;
+  const hasTopNotice = !!conflictNotice || !!draftRestoreNotice;
   const showReviewHandoffButton =
     !!activeDocumentPath &&
     (reviewWatcherCount > 0 || reviewHandoffState !== "idle");
@@ -1013,7 +1013,7 @@ export function DocumentWorkspace({
           ) : null}
         </div>
       </div>
-      {showDraftRestoreNotice && draftRestoreOffer ? (
+      {draftRestoreNotice ? (
         <div
           data-testid="draft-restore-notice"
           role="status"
@@ -1032,7 +1032,7 @@ export function DocumentWorkspace({
                 Unsent edits found in this browser
               </div>
               <div className="mt-0.5 text-xs leading-5 text-slate-600 dark:text-slate-300">
-                {draftRestoreNoticeBody[draftRestoreOffer.mode]}
+                {draftRestoreNoticeBody[draftRestoreNotice.mode]}
               </div>
             </div>
           </div>
@@ -1043,7 +1043,7 @@ export function DocumentWorkspace({
               variant="ghost"
               size="sm"
               className="h-8 rounded-[7px] px-2 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-              onClick={draftRestoreOffer.onDiscard}
+              onClick={draftRestoreNotice.onDiscard}
             >
               Discard draft
             </Button>
@@ -1053,7 +1053,7 @@ export function DocumentWorkspace({
               variant="ghost"
               size="sm"
               className="h-8 rounded-[7px] bg-slate-900 px-2 text-xs text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
-              onClick={draftRestoreOffer.onRestore}
+              onClick={draftRestoreNotice.onRestore}
             >
               <History className="size-3.5" />
               Restore my draft
