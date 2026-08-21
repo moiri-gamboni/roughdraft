@@ -1030,7 +1030,10 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return;
     }
 
-    const role = req.query.role === "viewer" ? "viewer" : "cli";
+    // Only the literal role=cli attaches as the CLI: that role receives saves
+    // and displaces the incumbent, so an absent or mistyped role must degrade
+    // to the unprivileged viewer rather than take the document over.
+    const role = req.query.role === "cli" ? "cli" : "viewer";
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");

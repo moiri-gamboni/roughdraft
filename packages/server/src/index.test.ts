@@ -1102,6 +1102,38 @@ describe("createApp", () => {
     });
   });
 
+  it("attaches streams without role=cli as viewers, leaving the CLI in place", async () => {
+    const { app } = createApp({ homeDir, staticDirPath: projectDir });
+    await request(app).post("/api/remote-document").send({
+      sessionId: "s5",
+      originPath: "/a.md",
+      content: "v1",
+    });
+
+    await withListeningApp(app, async ({ openStream }) => {
+      const cli = await openStream("/api/remote-document/s5/events?role=cli");
+      await cli.waitFor("event: connected");
+
+      // Only the literal role=cli is privileged; anything else is a viewer, so
+      // a mistyped or absent role cannot displace the CLI that owns the disk.
+      for (const query of ["", "?role=bogus"]) {
+        const stream = await openStream(
+          `/api/remote-document/s5/events${query}`,
+        );
+        expect(await stream.waitFor("event: connected")).toContain(
+          '"role":"viewer"',
+        );
+      }
+
+      const update = await request(app).put("/api/remote-document/s5").send({
+        content: "v2",
+      });
+
+      expect(update.status).toBe(200);
+      expect(await cli.waitFor("event: save")).toContain('"content":"v2"');
+    });
+  });
+
   it("returns 404 when opening SSE for an unknown session", async () => {
     const { app } = createApp({ homeDir, staticDirPath: projectDir });
     const response = await request(app).get("/api/remote-document/nope/events");
@@ -1120,7 +1152,9 @@ describe("createApp", () => {
     expect(register.status).toBe(201);
 
     await withListeningApp(app, async ({ openStream }) => {
-      const cli = await openStream(`/api/remote-document/${sessionId}/events`);
+      const cli = await openStream(
+        `/api/remote-document/${sessionId}/events?role=cli`,
+      );
       await cli.waitFor("event: connected");
 
       const update = await request(app)
