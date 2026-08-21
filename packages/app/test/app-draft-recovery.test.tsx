@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App, MAX_BOOT_RETRIES } from "../src/App";
 import { BackendUnavailableError, detectBackend } from "../src/detect-backend";
 import { DRAFT_KEY_PREFIX, DRAFT_SCHEMA } from "../src/draft-store";
+import { nextRetryDelayMs } from "../src/save-recovery";
 import {
   MarkdownFileConflictError,
   type Page,
@@ -376,13 +377,16 @@ describe("recovering unsent edits on boot", () => {
       );
 
       await renderApp();
-      for (let attempt = 0; attempt < MAX_BOOT_RETRIES; attempt += 1) {
+      expect(
+        queryByTestId("backend-unavailable-notice")?.textContent,
+      ).toContain("keeps trying");
+
+      // Walk the real backoff rather than clicking Try again: the claim under
+      // test is about the automatic ladder running out, and driving the shared
+      // counter by hand would prove only that the counter can reach the ceiling.
+      for (let attempt = 1; attempt <= MAX_BOOT_RETRIES; attempt += 1) {
         await act(async () => {
-          queryByTestId("backend-unavailable-retry")?.dispatchEvent(
-            new MouseEvent("click", { bubbles: true }),
-          );
-          await Promise.resolve();
-          await Promise.resolve();
+          await vi.advanceTimersByTimeAsync(nextRetryDelayMs(attempt));
         });
       }
 
