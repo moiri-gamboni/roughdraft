@@ -16,6 +16,9 @@ interface RemoteDocumentPayload {
 
 export type RemoteSessionStatus = "connected" | "disconnected";
 
+const VIEWER_REOPEN_BASE_DELAY_MS = 1000;
+const VIEWER_REOPEN_MAX_DELAY_MS = 10_000;
+
 export class RemoteBackend implements StorageBackend {
   info: BackendInfo;
   canManageProjects = false;
@@ -178,48 +181,78 @@ export class RemoteBackend implements StorageBackend {
     if (this.token.length > 0) {
       eventsUrl.searchParams.set("token", this.token);
     }
-    const source = new EventSource(eventsUrl.toString());
+    let current: EventSource | null = null;
+    let reopenTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    let disposed = false;
 
-    source.addEventListener("connected", () => {
-      this.setSessionStatus("connected");
-    });
-
-    source.addEventListener("save", (event) => {
-      try {
-        const payload = JSON.parse((event as MessageEvent<string>).data) as {
-          content?: string;
-          version?: string;
-        };
-        if (
-          typeof payload.content === "string" &&
-          typeof payload.version === "string"
-        ) {
-          this.bootstrap = {
-            ...this.bootstrap,
-            content: payload.content,
-            version: payload.version,
-          };
-          onChange({
-            path: this.bootstrap.originPath,
-            exists: true,
-            version: payload.version,
-          });
-        }
-      } catch (error) {
-        console.error("Failed to read remote save event:", error);
-      }
-    });
-
-    source.onerror = () => {
-      // EventSource auto-reconnects on transient errors; only flag the session
-      // as disconnected once the browser has given up and closed the stream.
-      if (source.readyState === EventSource.CLOSED) {
-        this.setSessionStatus("disconnected");
-      }
+    const notifyChanged = (version: string) => {
+      onChange({ path: this.bootstrap.originPath, exists: true, version });
     };
 
+    const scheduleReopen = () => {
+      if (disposed || reopenTimer !== null) return;
+      const delay = Math.min(
+        VIEWER_REOPEN_BASE_DELAY_MS * 2 ** attempt,
+        VIEWER_REOPEN_MAX_DELAY_MS,
+      );
+      attempt += 1;
+      reopenTimer = setTimeout(() => {
+        reopenTimer = null;
+        connect();
+      }, delay);
+    };
+
+    const connect = () => {
+      const source = new EventSource(eventsUrl.toString());
+      current = source;
+
+      source.addEventListener("connected", (event) => {
+        attempt = 0;
+        this.setSessionStatus("connected");
+
+        // A session that came back while the viewer was away carries the CLI's
+        // re-read file under a new version, so the viewer is holding stale
+        // content until it reloads.
+        const { version } = readSessionEvent(event);
+        if (version !== undefined && version !== this.bootstrap.version) {
+          notifyChanged(version);
+        }
+      });
+
+      // The server pushes this when the CLI's stream drops. The viewer's own
+      // stream stays healthy, so it is the only signal the session is gone.
+      source.addEventListener("disconnected", () => {
+        this.setSessionStatus("disconnected");
+      });
+
+      source.addEventListener("save", (event) => {
+        const { content, version } = readSessionEvent(event);
+        if (content === undefined || version === undefined) return;
+        this.bootstrap = { ...this.bootstrap, content, version };
+        notifyChanged(version);
+      });
+
+      source.onerror = () => {
+        // EventSource retries transient errors itself, but never re-opens a
+        // stream it closed — and the events endpoint 404s while the session is
+        // unregistered (server restarted, CLI not back yet), so re-opening a
+        // closed stream is the only way the viewer ever reattaches.
+        if (source.readyState !== EventSource.CLOSED) return;
+        this.setSessionStatus("disconnected");
+        scheduleReopen();
+      };
+    };
+
+    connect();
+
     return () => {
-      source.close();
+      disposed = true;
+      if (reopenTimer !== null) {
+        clearTimeout(reopenTimer);
+        reopenTimer = null;
+      }
+      current?.close();
       this.setSessionStatus("disconnected");
     };
   }
@@ -236,6 +269,28 @@ export class RemoteBackend implements StorageBackend {
 
   async openProject(_path: string): Promise<void> {
     // Remote sessions are bound to a single document; openProject is a no-op.
+  }
+}
+
+/** Reads the fields a remote session event carries, tolerating malformed data. */
+function readSessionEvent(event: Event): {
+  content?: string;
+  version?: string;
+} {
+  try {
+    const payload = JSON.parse((event as MessageEvent<string>).data) as {
+      content?: unknown;
+      version?: unknown;
+    };
+    return {
+      content:
+        typeof payload.content === "string" ? payload.content : undefined,
+      version:
+        typeof payload.version === "string" ? payload.version : undefined,
+    };
+  } catch (error) {
+    console.error("Failed to read remote session event:", error);
+    return {};
   }
 }
 
