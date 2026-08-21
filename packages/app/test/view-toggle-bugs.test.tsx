@@ -17,6 +17,7 @@ import type { DocumentSaveState } from "../src/PageCard";
 import type {
   CompleteReviewOptions,
   CompleteReviewResult,
+  DocumentDiskChangeState,
   Page,
   StorageBackend,
 } from "../src/storage";
@@ -272,15 +273,18 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
   async function renderSaveStatus({
     saveState = "saved",
     documentDiskChangeState = "clean",
+    retryPending = false,
   }: {
     saveState?: DocumentSaveState;
-    documentDiskChangeState?: "clean" | "changed" | "conflict" | "paused";
+    documentDiskChangeState?: DocumentDiskChangeState;
+    retryPending?: boolean;
   } = {}) {
     await act(async () => {
       root.render(
         <DocumentSaveStatusIndicator
           saveState={saveState}
           diskChangeState={documentDiskChangeState}
+          retryPending={retryPending}
         />,
       );
       await Promise.resolve();
@@ -352,6 +356,16 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     if (iconClass) {
       expect(icon.classList.contains(iconClass)).toBe(true);
     }
+  });
+
+  it("reassures rather than alarms while a failed save is being retried", async () => {
+    await renderSaveStatus({ saveState: "error", retryPending: true });
+
+    const status = getByTestId(container, "document-save-status");
+    expect(status.getAttribute("aria-label")).toBe(
+      "Changes saved in this browser, retrying",
+    );
+    expect(status.className).not.toContain("text-red");
   });
 
   it.each([
