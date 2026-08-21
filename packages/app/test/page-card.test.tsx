@@ -278,7 +278,7 @@ type PageCardTestOptions = Partial<{
   selected: boolean;
   focusRequestKey: string | null;
   saveBlocked: boolean;
-  draftRestore: { key: string; content: string } | null;
+  draftRestore: { content: string } | null;
 }>;
 
 type RenderedPageCard = {
@@ -2272,7 +2272,7 @@ describe("PageCard draft restore", () => {
     });
 
     await rendered.rerender({
-      draftRestore: { key: "restore:1", content: "Unsent draft body" },
+      draftRestore: { content: "Unsent draft body" },
     });
 
     expect(rendered.getEditor().getText()).toContain("Unsent draft body");
@@ -2291,6 +2291,20 @@ describe("PageCard draft restore", () => {
     );
   });
 
+  it("keeps a draft that was already pending when the card mounted", async () => {
+    // The boot-recovery shape: the card is created with the restore in hand,
+    // so its very first reconciliation pass runs against the restored content.
+    const rendered = await renderPageCard({
+      page: { id: "restore-boot", title: "Restore boot", content: "On disk" },
+      draftRestore: { content: "Unsent draft body" },
+    });
+
+    await flushReact();
+    await flushReact();
+
+    expect(rendered.getEditor().getText()).toContain("Unsent draft body");
+  });
+
   it("does not report the restored draft as already saved", async () => {
     const rendered = await renderPageCard({
       page: { id: "restore-2", title: "Restore 2", content: "On disk" },
@@ -2298,7 +2312,7 @@ describe("PageCard draft restore", () => {
     rendered.onSaveStateChange.mockClear();
 
     await rendered.rerender({
-      draftRestore: { key: "restore:1", content: "Unsent draft body" },
+      draftRestore: { content: "Unsent draft body" },
     });
 
     expect(rendered.onSaveStateChange).not.toHaveBeenCalledWith("saved");
@@ -2309,7 +2323,7 @@ describe("PageCard draft restore", () => {
       page: { id: "restore-3", title: "Restore 3", content: "On disk" },
     });
     await rendered.rerender({
-      draftRestore: { key: "restore:1", content: "Unsent draft body" },
+      draftRestore: { content: "Unsent draft body" },
     });
 
     await rendered.rerender({
@@ -2324,12 +2338,12 @@ describe("PageCard draft restore", () => {
       page: { id: "restore-4", title: "Restore 4", content: "On disk" },
     });
     await rendered.rerender({
-      draftRestore: { key: "restore:1", content: "Unsent draft body" },
+      draftRestore: { content: "Unsent draft body" },
     });
     await insertTextAtEnd(rendered.getEditor(), " and more");
 
     await rendered.rerender({
-      draftRestore: { key: "restore:2", content: "Unsent draft body" },
+      draftRestore: { content: "Unsent draft body" },
     });
 
     expect(rendered.getEditor().getText()).not.toContain("and more");

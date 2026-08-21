@@ -103,7 +103,9 @@ export function useDraftPersistence({
     }
 
     function scheduleRetry() {
-      cancelRetry();
+      // One attempt in flight at a time. A failed save arms the retry from the
+      // save path, and a failed *retry* would otherwise arm it a second time.
+      if (retryTimerRef.current !== null) return;
       retryAttemptRef.current += 1;
       setRetryPending(true);
 
