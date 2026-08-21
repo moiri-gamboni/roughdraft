@@ -8,6 +8,10 @@ import {
   editorStateToCriticMarkdown,
 } from "./critic-markup";
 import { createEditorExtensions } from "./editor-extensions";
+import {
+  resolveCommentAnchor,
+  resolveSuggestedDeletion,
+} from "./review-selection";
 
 /**
  * Seeded fuzz over the edit -> save -> reparse cycle. Each case applies a
@@ -99,17 +103,6 @@ function randomRange(context: FuzzContext, maxLength: number) {
   return to > from ? { from, to } : null;
 }
 
-// Known limitation (see createTurndownService's blankReplacement): a review
-// mark anchored on pure whitespace does not survive save/reparse, so the ops
-// below skip whitespace-only ranges rather than assert on a documented gap.
-function isWhitespaceOnlyRange(
-  context: FuzzContext,
-  range: { from: number; to: number },
-): boolean {
-  const text = context.editor.state.doc.textBetween(range.from, range.to, "\n");
-  return text.trim().length === 0;
-}
-
 const OPS: Record<string, FuzzOp> = {
   delete(context) {
     const range = randomRange(context, 8);
@@ -125,13 +118,28 @@ const OPS: Record<string, FuzzOp> = {
     return `type(${at},${JSON.stringify(word)})`;
   },
   comment(context) {
+    // Mirrors PageCard's handleAddComment: a whitespace-only selection
+    // becomes a point comment (a mark on pure whitespace cannot survive
+    // serialization).
     const range = randomRange(context, 12);
-    if (!range || isWhitespaceOnlyRange(context, range)) return null;
+    if (!range) return null;
+    context.editor.commands.setTextSelection(range);
+    const anchor = resolveCommentAnchor(context.editor.state);
     const comment = createCriticComment(
       { content: "note" },
       { existingComments: context.comments.values() },
     );
-    context.editor.commands.setTextSelection(range);
+    if (anchor.kind === "point") {
+      context.editor.commands.setTextSelection(anchor.at);
+      if (
+        !context.editor.commands.insertPointComment({
+          commentIds: [comment.id],
+        })
+      )
+        return null;
+      context.comments.set(comment.id, comment);
+      return `pointComment(${anchor.at})=${comment.id}`;
+    }
     if (!context.editor.commands.setCommentRef({ commentIds: [comment.id] }))
       return null;
     context.comments.set(comment.id, comment);
@@ -146,21 +154,52 @@ const OPS: Record<string, FuzzOp> = {
     return `deleteComment(${id})`;
   },
   suggestDelete(context) {
+    // Mirrors PageCard's handleSuggestDeletion: a whitespace-only selection
+    // becomes a substitution absorbing the neighbouring characters.
     const range = randomRange(context, 8);
-    if (!range || isWhitespaceOnlyRange(context, range)) return null;
-    const change = createCriticChange("deletion", undefined, {
-      existingChanges: [
-        ...collectMarkIds(
-          context.editor.getJSON(),
-          "criticChange",
-          "changeId",
-          new Set<string>(),
-        ),
-      ].map((changeId) => ({ changeId })),
+    if (!range) return null;
+    const resolution = resolveSuggestedDeletion(
+      context.editor.state,
+      range.from,
+      range.to,
+    );
+    if (!resolution) return null;
+    const existingChanges = [
+      ...collectMarkIds(
+        context.editor.getJSON(),
+        "criticChange",
+        "changeId",
+        new Set<string>(),
+      ),
+    ].map((changeId) => ({ changeId }));
+    if (resolution.kind === "deletion") {
+      const change = createCriticChange("deletion", undefined, {
+        existingChanges,
+      });
+      context.editor.commands.setTextSelection(range);
+      if (!context.editor.commands.setCriticChange(change)) return null;
+      return `suggestDelete(${range.from},${range.to})=${change.changeId}`;
+    }
+    const change = createCriticChange("substitution-old", undefined, {
+      existingChanges,
     });
-    context.editor.commands.setTextSelection(range);
-    if (!context.editor.commands.setCriticChange(change)) return null;
-    return `suggestDelete(${range.from},${range.to})=${change.changeId}`;
+    const applied = context.editor
+      .chain()
+      .setTextSelection({ from: resolution.from, to: resolution.to })
+      .setCriticChange(change)
+      .insertContentAt(resolution.to, {
+        type: "text",
+        text: resolution.replacement,
+        marks: [
+          {
+            type: "criticChange",
+            attrs: { ...change, kind: "substitution-new" },
+          },
+        ],
+      })
+      .run();
+    if (!applied) return null;
+    return `substituteWhitespace(${resolution.from},${resolution.to})=${change.changeId}`;
   },
   resolveSuggestion(context) {
     const ids = [

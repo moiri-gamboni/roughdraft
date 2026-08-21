@@ -36,6 +36,10 @@ import { copyTextToClipboard } from "./lib/clipboard";
 import { cn } from "./lib/utils";
 import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
 import { toHtml } from "./markdown";
+import {
+  resolveCommentAnchor,
+  resolveSuggestedDeletion,
+} from "./review-selection";
 import type { Page, StorageBackend } from "./storage";
 import { useCommentAnchorLayout } from "./useCommentAnchorLayout";
 import { useReviewLayoutShiftAnimation } from "./useReviewLayoutShiftAnimation";
@@ -1507,8 +1511,14 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     if (!currentEditor) return;
 
     // An empty selection anchors a point comment at the caret instead of
-    // wrapping a text range.
-    const pointComment = currentEditor.state.selection.empty;
+    // wrapping a text range. A whitespace-only selection collapses to one
+    // too: a mark anchored on pure whitespace does not survive
+    // serialization (see resolveCommentAnchor).
+    const anchor = resolveCommentAnchor(currentEditor.state);
+    if (anchor.kind === "point" && !currentEditor.state.selection.empty) {
+      currentEditor.commands.setTextSelection(anchor.at);
+    }
+    const pointComment = anchor.kind === "point";
     const existingIds = pointComment
       ? []
       : getSelectionCommentIds(currentEditor);
@@ -1554,11 +1564,49 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     const currentEditor = editorRef.current;
     if (!currentEditor || currentEditor.state.selection.empty) return;
 
-    const change = createCriticChange("deletion", undefined, {
+    // A deletion mark on pure whitespace does not survive serialization, so
+    // deleting a whitespace-only selection becomes a substitution that
+    // absorbs the neighbouring characters (see resolveSuggestedDeletion).
+    const { from, to } = currentEditor.state.selection;
+    const resolution = resolveSuggestedDeletion(currentEditor.state, from, to);
+    if (!resolution) return;
+
+    if (resolution.kind === "deletion") {
+      const change = createCriticChange("deletion", undefined, {
+        existingChanges: getDocumentCriticChanges(currentEditor),
+      });
+
+      currentEditor.chain().focus().setCriticChange(change).run();
+      emitMarkdownChange(currentEditor.getJSON());
+      refreshCriticChanges();
+      return;
+    }
+
+    const change = createCriticChange("substitution-old", undefined, {
       existingChanges: getDocumentCriticChanges(currentEditor),
     });
+    const replacementChange: CriticChangeAttrs = {
+      ...change,
+      kind: "substitution-new",
+    };
 
-    currentEditor.chain().focus().setCriticChange(change).run();
+    currentEditor
+      .chain()
+      .focus()
+      .setTextSelection({ from: resolution.from, to: resolution.to })
+      .setCriticChange(change)
+      .insertContentAt(resolution.to, {
+        type: "text",
+        text: resolution.replacement,
+        marks: [
+          {
+            type: "criticChange",
+            attrs: replacementChange,
+          },
+        ],
+      })
+      .run();
+    setSelectedChangeId(change.changeId);
     emitMarkdownChange(currentEditor.getJSON());
     refreshCriticChanges();
   }, [emitMarkdownChange, refreshCriticChanges]);
