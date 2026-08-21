@@ -85,7 +85,7 @@ interface OpenRequestPayload {
   url?: string;
 }
 
-interface RemoteSession {
+export interface RemoteSession {
   id: string;
   originPath: string;
   content: string;
@@ -106,7 +106,7 @@ interface RemoteDocumentSavePayload {
   expectedVersion?: string;
 }
 
-const REMOTE_SESSION_TTL_MS = 5 * 60 * 1000;
+export const REMOTE_SESSION_TTL_MS = 5 * 60 * 1000;
 const REMOTE_SESSION_SWEEP_INTERVAL_MS = 60 * 1000;
 const REMOTE_SESSION_KEEPALIVE_MS = 15 * 1000;
 const MAX_OVERALL_COMMENT_LENGTH = 4_000;
@@ -138,6 +138,32 @@ function writeRemoteSessionEvent(
   data: unknown,
 ): void {
   response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+/**
+ * Drop sessions whose CLI has been gone longer than the grace period.
+ *
+ * Ending each viewer stream is part of dropping the session, not a courtesy:
+ * a viewer left attached to a session the server has forgotten keeps taking
+ * keepalives, so its EventSource never errors, the browser's re-open loop
+ * never runs, and the tab goes stale without ever saying so.
+ */
+export function sweepRemoteSessions(
+  sessions: Map<string, RemoteSession>,
+  now: number,
+): void {
+  for (const [id, session] of sessions) {
+    if (
+      session.disconnectedAt === null ||
+      now - session.disconnectedAt <= REMOTE_SESSION_TTL_MS
+    ) {
+      continue;
+    }
+    for (const viewer of session.viewers) {
+      viewer.end();
+    }
+    sessions.delete(id);
+  }
 }
 
 function listMdFiles(projectDir: string): string[] {
@@ -439,15 +465,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
   }
 
   const remoteSessionSweeper = setInterval(() => {
-    const now = Date.now();
-    for (const [id, session] of remoteSessions) {
-      if (
-        session.disconnectedAt !== null &&
-        now - session.disconnectedAt > REMOTE_SESSION_TTL_MS
-      ) {
-        remoteSessions.delete(id);
-      }
-    }
+    sweepRemoteSessions(remoteSessions, Date.now());
   }, REMOTE_SESSION_SWEEP_INTERVAL_MS);
   remoteSessionSweeper.unref?.();
 
@@ -983,15 +1001,20 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return;
     }
 
-    session.content = content;
-    session.version = remoteSessionVersion(content);
+    // Content and version both wait for delivery, and each for its own reason.
+    // The version: moving it on a failed save would make the browser's retry
+    // (which carries the same expectedVersion) look like a stale write. The
+    // content: echoing undelivered bytes back on the bootstrap GET makes the
+    // browser's localStorage draft — the only durable copy of that unsent
+    // work — look redundant, and the restore policy then discards it.
+    const nextVersion = remoteSessionVersion(content);
 
     let deliveredToClient = true;
     if (session.saveClient) {
       try {
         writeRemoteSessionEvent(session.saveClient, "save", {
-          content: session.content,
-          version: session.version,
+          content,
+          version: nextVersion,
         });
       } catch {
         deliveredToClient = false;
@@ -1010,6 +1033,9 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return;
     }
 
+    session.content = content;
+    session.version = nextVersion;
+
     res.json({ id: session.id, version: session.version });
   });
 
@@ -1024,7 +1050,10 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return;
     }
 
-    const role = req.query.role === "viewer" ? "viewer" : "cli";
+    // Only the literal role=cli attaches as the CLI: that role receives saves
+    // and displaces the incumbent, so an absent or mistyped role must degrade
+    // to the unprivileged viewer rather than take the document over.
+    const role = req.query.role === "cli" ? "cli" : "viewer";
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");

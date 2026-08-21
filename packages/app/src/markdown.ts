@@ -1,9 +1,31 @@
 import { tables, taskListItems } from "@joplin/turndown-plugin-gfm";
-import { marked } from "marked";
+import { Lexer, marked } from "marked";
 import TurndownService from "turndown";
 import { parse as parseYaml } from "yaml";
 
 export const rawMarkdownBlockAttribute = "data-markdown-raw-block";
+
+/*
+ * marked masks `code` and <tag> spans out of its emphasis-pairing view
+ * (rules.inline.blockSkip) so delimiters never pair across them. Its <...>
+ * alternative matches ANY angle-bracket pair, and CriticMarkup comment blocks
+ * fake it out: the `<` of one `<<}` and the `>` of the NEXT `{>>` read as a
+ * single huge "tag", so between two comments every `**`/`*` came back as
+ * literal text. Require a tag-shaped character after `<` — every real tag,
+ * closing tag, comment, PI and autolink starts with a letter, `/`, `!` or `?`
+ * — so bare angle punctuation cannot mask prose. Patched on the shared rule
+ * sets so every lexer (ours and marked's own) sees it; revisit on marked
+ * upgrades (a regression test in editor-roundtrip.test.ts guards it).
+ */
+const flankingSafeBlockSkip =
+  /\[[^[\]]*?\]\((?:\.|[^()]|\((?:\.|[^()])*\))*\)|`[^`]*?`|<\/?[A-Za-z!?][^<>]*?>/g;
+for (const ruleSet of Object.values(
+  Lexer.rules.inline as Record<string, Record<string, unknown>>,
+)) {
+  if (ruleSet && typeof ruleSet === "object" && "blockSkip" in ruleSet) {
+    ruleSet.blockSkip = flankingSafeBlockSkip;
+  }
+}
 
 /*
  * Source preservation.
@@ -259,9 +281,13 @@ function isReviewEndmatterMap(value: unknown): boolean {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function hasDocumentLevelComment(value: unknown): boolean {
+function hasBodiedComment(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 
+  // body + by + at is the review-comment signature. `re:` entries count too:
+  // a reply whose inline root was deleted is orphaned but still review data,
+  // and rejecting the endmatter over it dumps the whole YAML block into the
+  // document as text.
   return Object.values(value as Record<string, unknown>).some(
     (entry) =>
       Boolean(entry) &&
@@ -269,8 +295,7 @@ function hasDocumentLevelComment(value: unknown): boolean {
       !Array.isArray(entry) &&
       typeof (entry as Record<string, unknown>).body === "string" &&
       typeof (entry as Record<string, unknown>).by === "string" &&
-      typeof (entry as Record<string, unknown>).at === "string" &&
-      typeof (entry as Record<string, unknown>).re !== "string",
+      typeof (entry as Record<string, unknown>).at === "string",
   );
 }
 
@@ -365,7 +390,7 @@ export function splitYamlDocumentMetadata(
   if (!precedingBody.includes("{#")) {
     const yamlText = candidate.replace(/^---[ \t]*(?:\r\n|\n)/, "");
     const parsed = parseYaml(yamlText) as Record<string, unknown> | null;
-    if (!hasDocumentLevelComment(parsed?.comments)) {
+    if (!hasBodiedComment(parsed?.comments)) {
       return { frontmatter, body, endmatter: null };
     }
   }
@@ -495,11 +520,86 @@ export function createMarkedRenderer(options?: MarkdownOptions) {
   return renderer;
 }
 
+const emphasisPunctuation = /[\p{P}\p{S}]/u;
+
+function isEmphasisPunctuation(character: string): boolean {
+  return emphasisPunctuation.test(character);
+}
+
+function isEmphasisAlphanumeric(character: string): boolean {
+  return (
+    character !== "" &&
+    !/\s/.test(character) &&
+    !isEmphasisPunctuation(character)
+  );
+}
+
+/**
+ * Wrap inline content in `*`/`**` so CommonMark actually reads the delimiters
+ * as emphasis. A closing run that follows punctuation must not be glued to a
+ * letter (`**tiers:**the` is literal), and the mirror holds for an opening
+ * run (`the**:tiers**`). Editing can produce exactly that, e.g. deleting the
+ * space after `**Both tiers:**`. The edge punctuation moves outside the
+ * delimiters: `**Both tiers**:the` renders as intended.
+ *
+ * Em uses `*` rather than turndown's `_` because `_` can never be intraword,
+ * so `s_em_` after a deleted space is literal however it is arranged.
+ */
+function wrapEmphasis(
+  content: string,
+  delimiter: string,
+  node: HTMLElement,
+): string {
+  const flanking = (
+    node as HTMLElement & {
+      flankingWhitespace?: { leading: string; trailing: string };
+    }
+  ).flankingWhitespace;
+  const previousCharacter = flanking?.leading
+    ? " "
+    : (node.previousSibling?.textContent?.slice(-1) ?? "");
+  const nextCharacter = flanking?.trailing
+    ? " "
+    : (node.nextSibling?.textContent?.charAt(0) ?? "");
+
+  let prefix = "";
+  let suffix = "";
+  let inner = content;
+
+  // When edge punctuation moves outside the delimiters, any whitespace it
+  // exposes must move with it: `**...field **(` leaves the closer after a
+  // space, which is just as unreadable as the glued punctuation was.
+  if (isEmphasisAlphanumeric(previousCharacter)) {
+    const match = inner.match(/^[\p{P}\p{S}]+\s*/u);
+    if (match) {
+      prefix = match[0];
+      inner = inner.slice(prefix.length);
+    }
+  }
+
+  if (isEmphasisAlphanumeric(nextCharacter)) {
+    const match = inner.match(/\s*[\p{P}\p{S}]+$/u);
+    if (match) {
+      suffix = match[0];
+      inner = inner.slice(0, inner.length - suffix.length);
+    }
+  }
+
+  if (!inner.trim()) return content;
+
+  return `${prefix}${delimiter}${inner}${delimiter}${suffix}`;
+}
+
 export function createTurndownService(): TurndownService {
   const service = new TurndownService({
     headingStyle: "atx",
     codeBlockStyle: "fenced",
     bulletListMarker: "-",
+    // Turndown replaces whitespace-only ("blank") nodes here before any
+    // rule can see them. Review spans holding only whitespace (a suggested
+    // deletion of a lone space) are kept out of this path by the CriticMarkup
+    // serializer, which shields them with a private-use character before
+    // turndown parses the HTML (see shieldBlankReviewSpans).
     blankReplacement(_content, node) {
       if (node.hasAttribute(rawMarkdownBlockAttribute)) {
         return `\n\n${decodeRawMarkdownBlock(
@@ -611,8 +711,12 @@ export function createTurndownService(): TurndownService {
     },
   });
 
-  // We own the markdown parser and want stable round-trips without doubled escapes.
-  service.escape = (value: string) => value;
+  // Turndown's default escape doubles backslashes and guards line-start
+  // syntax, rewriting text the parser never treated as markup. But inline
+  // delimiters do need escaping: typed text like `woa*brds` inside emphasis
+  // otherwise saves as `*em woa*brds*` and comes back as different markup.
+  // A backslash before ASCII punctuation never changes the rendered text.
+  service.escape = (value: string) => value.replace(/[*_`~[\]]/g, "\\$&");
 
   service.addRule("markdownAwareLinks", {
     filter: "a",
@@ -668,6 +772,16 @@ export function createTurndownService(): TurndownService {
         ? ` "${title.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
         : "";
       return `![${alt}](${normalizedSrc}${titleMarkdown})`;
+    },
+  });
+
+  service.addRule("flankingSafeEmphasis", {
+    filter: ["em", "i", "strong", "b"],
+    replacement(content, node) {
+      if (!content.trim()) return "";
+      const delimiter =
+        node.nodeName === "STRONG" || node.nodeName === "B" ? "**" : "*";
+      return wrapEmphasis(content, delimiter, node as HTMLElement);
     },
   });
 

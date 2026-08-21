@@ -21,6 +21,39 @@ export class MarkdownFileConflictError extends Error {
   }
 }
 
+/**
+ * How the open document relates to what the destination holds. Lives here
+ * rather than in `App` so `DocumentWorkspace` can name it without importing
+ * back up into its own parent.
+ *
+ * Every state but `"clean"` pauses autosave, warns before unload and blocks
+ * the review handoff, so adding one is a decision about all three.
+ */
+export type DocumentDiskChangeState =
+  | "clean"
+  | "changed"
+  | "conflict"
+  | "paused"
+  | "draft-restore";
+
+/**
+ * Where a local content change came from. `"edit"` is the user changing the
+ * document; `"adopt"` is the card taking content it was handed, whether from
+ * disk or from a restored draft. Nothing downstream needs those two apart.
+ */
+export type LocalContentOrigin = "edit" | "adopt";
+
+/**
+ * An unsent draft the app wants put back into the editor.
+ *
+ * Each offer is a distinct object, and that identity is the signal: restoring
+ * the same bytes twice is a real request, not a repeat, so the value must come
+ * from state rather than be built inline while rendering.
+ */
+export interface DraftRestore {
+  content: string;
+}
+
 export interface StoredAsset {
   markdownPath: string;
   previewUrl: string;

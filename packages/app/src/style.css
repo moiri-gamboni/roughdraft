@@ -144,7 +144,11 @@
   }
 
   .tiptap .comment-decoration {
-    @apply px-0.5 text-inherit;
+    @apply text-inherit;
+    /* Let the highlight breathe past the glyphs without taking layout space:
+       real padding shifts the neighbouring characters, visible mid-word. */
+    padding: 0 0.125rem;
+    margin: 0 -0.125rem;
     background-color: #fff5c7;
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
@@ -179,10 +183,13 @@
   /* A background highlight is invisible behind an image, so a commented
      image shows its state as an outline instead. */
   .tiptap img.comment-decoration {
-    @apply px-0;
+    padding: 0;
+    margin: 0;
     background-color: transparent;
     outline: 3px solid #fde68a;
-    outline-offset: 2px;
+    /* Inside the image edge: adjacent images sit flush, so a ring drawn
+       outside the box overlaps the neighbouring image (and its ring). */
+    outline-offset: -3px;
     border-radius: 2px;
     transition: outline-color 140ms ease;
   }

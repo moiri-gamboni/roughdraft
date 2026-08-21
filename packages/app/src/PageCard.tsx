@@ -24,6 +24,7 @@ import {
   collectAnchoredThreadComments,
   getPreferredCommentId,
   parseCommentIds,
+  reconcileCommentsWithDoc,
 } from "./document-comments";
 import { EditorContextMenu } from "./EditorContextMenu";
 import {
@@ -36,7 +37,13 @@ import { copyTextToClipboard } from "./lib/clipboard";
 import { cn } from "./lib/utils";
 import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
 import { toHtml } from "./markdown";
-import type { Page, StorageBackend } from "./storage";
+import { resolveCommentAnchor } from "./review-selection";
+import type {
+  DraftRestore,
+  LocalContentOrigin,
+  Page,
+  StorageBackend,
+} from "./storage";
 import { useCommentAnchorLayout } from "./useCommentAnchorLayout";
 import { useReviewLayoutShiftAnimation } from "./useReviewLayoutShiftAnimation";
 
@@ -68,10 +75,11 @@ interface PageCardProps {
   onEditorReady?: (editor: Editor | null) => void;
   onCommentRailPresenceChange?: (hasCommentRailSpace: boolean) => void;
   onDirtyStateChange?: (isDirty: boolean) => void;
-  onLocalContentChange?: (markdown: string) => void;
+  onLocalContentChange?: (markdown: string, origin: LocalContentOrigin) => void;
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
+  draftRestore?: DraftRestore | null;
 }
 
 interface PageCardEditorSurfaceProps {
@@ -88,10 +96,11 @@ interface PageCardEditorSurfaceProps {
   onEditorReady?: (editor: Editor | null) => void;
   onCommentRailPresenceChange?: (hasCommentRailSpace: boolean) => void;
   onDirtyStateChange?: (isDirty: boolean) => void;
-  onLocalContentChange?: (markdown: string) => void;
+  onLocalContentChange?: (markdown: string, origin: LocalContentOrigin) => void;
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
+  draftRestore?: DraftRestore | null;
 }
 
 interface RichTextEditorSurfaceProps {
@@ -640,6 +649,10 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
   const criticChangeFrameRef = useRef<number | null>(null);
   const interactionModeRef = useRef<DocumentInteractionMode>(interactionMode);
   const commentsRef = useRef<Map<string, CriticComment>>(new Map());
+  // Deleted comments, kept so undo can bring them back with their anchors
+  // (see reconcileCommentsWithDoc).
+  const deletedCommentsRef = useRef<Map<string, CriticComment>>(new Map());
+  const everAnchoredCommentIdsRef = useRef<Set<string>>(new Set());
   const suppressNextMarkdownUpdateRef = useRef(false);
   const lastFocusRequestKeyRef = useRef<string | null>(null);
   const selectedCommentIdRef = useRef<string | null>(null);
@@ -1257,7 +1270,22 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
           return;
         }
 
-        emitMarkdownChange(currentEditor.getJSON());
+        const docJson = currentEditor.getJSON();
+        // Undo/redo moves comment anchors without touching the comment maps;
+        // restore or bury comments to match the anchors before saving.
+        const reconciled = reconcileCommentsWithDoc(
+          docJson,
+          commentsRef.current,
+          deletedCommentsRef.current,
+          everAnchoredCommentIdsRef.current,
+        );
+        if (reconciled.changed) {
+          commentsRef.current = reconciled.live;
+          deletedCommentsRef.current = reconciled.graveyard;
+          setComments(reconciled.live);
+        }
+
+        emitMarkdownChange(docJson);
         refreshCriticChanges();
       },
     },
@@ -1316,6 +1344,8 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     frontmatterRef.current = parsedContent.frontmatter;
     endmatterRef.current = parsedContent.endmatter;
     commentsRef.current = parsedContent.comments;
+    deletedCommentsRef.current = new Map();
+    everAnchoredCommentIdsRef.current = new Set();
     setComments(parsedContent.comments);
     setSelectedCommentId(null);
     setHoveredCommentId(null);
@@ -1507,22 +1537,30 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     if (!currentEditor) return;
 
     // An empty selection anchors a point comment at the caret instead of
-    // wrapping a text range.
-    const pointComment = currentEditor.state.selection.empty;
-    const existingIds = pointComment
-      ? []
-      : getSelectionCommentIds(currentEditor);
+    // wrapping a text range. A whitespace-only selection collapses to one
+    // too: a mark anchored on pure whitespace does not survive
+    // serialization (see resolveCommentAnchor).
+    const anchor = resolveCommentAnchor(currentEditor.state);
+    if (anchor.kind === "point" && !currentEditor.state.selection.empty) {
+      currentEditor.commands.setTextSelection(anchor.at);
+    }
+    const pointComment = anchor.kind === "point";
     const comment = createCriticComment(undefined, {
       existingComments: commentsRef.current.values(),
     });
-    const commentIds = [...existingIds, comment.id];
+    const commentIds = [comment.id];
+    const { from: anchorFrom, to: anchorTo } = currentEditor.state.selection;
 
     // Refuse before touching state when the anchor cannot apply (e.g. an
     // image nested where the schema disallows the mark), so no phantom
     // comment appears in the rail only to vanish on save.
     const canAnchor = pointComment
       ? currentEditor.can().insertPointComment({ commentIds })
-      : currentEditor.can().setCommentRef({ commentIds });
+      : currentEditor.state.selection instanceof NodeSelection
+        ? currentEditor.can().setCommentRef({ commentIds })
+        : currentEditor
+            .can()
+            .addCommentIdToRange(comment.id, anchorFrom, anchorTo);
     if (!canAnchor) return;
 
     const nextComments = new Map(commentsRef.current);
@@ -1537,7 +1575,9 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     const chain = currentEditor.chain().focus();
     (pointComment
       ? chain.insertPointComment({ commentIds })
-      : chain.setCommentRef({ commentIds })
+      : currentEditor.state.selection instanceof NodeSelection
+        ? chain.setCommentRef({ commentIds })
+        : chain.addCommentIdToRange(comment.id, anchorFrom, anchorTo)
     ).run();
     if (suppressNextMarkdownUpdateRef.current) {
       suppressNextMarkdownUpdateRef.current = false;
@@ -1739,6 +1779,8 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
 
       const nextComments = new Map(commentsRef.current);
       for (const id of commentIdsToDelete) {
+        const comment = nextComments.get(id);
+        if (comment) deletedCommentsRef.current.set(id, comment);
         nextComments.delete(id);
       }
 
@@ -1840,6 +1882,8 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
       const deletedIds = new Set(commentIdsToDelete);
       const nextComments = new Map(commentsRef.current);
       for (const id of commentIdsToDelete) {
+        const comment = nextComments.get(id);
+        if (comment) deletedCommentsRef.current.set(id, comment);
         nextComments.delete(id);
       }
       commentsRef.current = nextComments;
@@ -2178,6 +2222,7 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
   onSaveControllerChange,
   saveBlocked = false,
   forceResetKey = null,
+  draftRestore = null,
 }: PageCardEditorSurfaceProps) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightSaveRef = useRef<Promise<ManualSaveResult> | null>(null);
@@ -2202,16 +2247,27 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     [onDirtyStateChange],
   );
 
+  /**
+   * Adopt content the card was handed rather than content the user typed.
+   *
+   * With `markSaved: false` the content is treated as an unsaved local draft:
+   * the last-accepted marker stays on what the destination actually holds, so
+   * the card stays dirty and the reconciliation effect will not quietly
+   * replace the restored text with the copy on disk.
+   */
   const acceptMarkdown = useCallback(
-    (nextMarkdown: string) => {
+    (
+      nextMarkdown: string,
+      { markSaved = true }: { markSaved?: boolean } = {},
+    ) => {
       pendingMarkdownRef.current = nextMarkdown;
-      lastAcceptedMarkdownRef.current = nextMarkdown;
+      if (markSaved) lastAcceptedMarkdownRef.current = nextMarkdown;
       setMarkdown(nextMarkdown);
       setRichTextSourceMarkdown(nextMarkdown);
       setRichTextSourceVersion((current) => current + 1);
-      onLocalContentChange?.(nextMarkdown);
-      reportDirtyState(false);
-      onSaveStateChange("saved");
+      onLocalContentChange?.(nextMarkdown, "adopt");
+      reportDirtyState(!markSaved);
+      onSaveStateChange(markSaved ? "saved" : "unsaved");
     },
     [onLocalContentChange, onSaveStateChange, reportDirtyState],
   );
@@ -2326,12 +2382,32 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     (nextMarkdown: string) => {
       pendingMarkdownRef.current = nextMarkdown;
       setMarkdown(nextMarkdown);
-      onLocalContentChange?.(nextMarkdown);
+      onLocalContentChange?.(nextMarkdown, "edit");
       reportDirtyState(nextMarkdown !== lastAcceptedMarkdownRef.current);
       scheduleSave(nextMarkdown);
     },
     [onLocalContentChange, reportDirtyState, scheduleSave],
   );
+
+  /**
+   * Put an unsent draft back in the editor and send it. It is adopted as
+   * unsaved work, so the reconciliation effect below leaves it alone and the
+   * card keeps warning about it until the destination confirms.
+   */
+  // Only the offer itself is a dependency. Including the callbacks would
+  // re-restore whenever an unrelated prop changed their identity, and the
+  // effect has to stay safe to run twice for one offer anyway: React discards
+  // and replays mount effects, which cancels the save this schedules.
+  const restoreDraftRef = useRef({ acceptMarkdown, scheduleSave });
+  restoreDraftRef.current = { acceptMarkdown, scheduleSave };
+
+  useEffect(() => {
+    if (!draftRestore) return;
+    restoreDraftRef.current.acceptMarkdown(draftRestore.content, {
+      markSaved: false,
+    });
+    restoreDraftRef.current.scheduleSave(draftRestore.content);
+  }, [draftRestore]);
 
   useEffect(() => {
     const forceResetChanged = forceResetKeyRef.current !== forceResetKey;
@@ -2348,10 +2424,16 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
       lastAcceptedMarkdownRef.current = page.content;
       pendingMarkdownRef.current = markdown;
       reportDirtyState(markdown !== page.content);
+      // Only ever upgrade to "saved": if the editor has moved on since, the
+      // save already in flight owns the state and knows better.
+      if (markdown === page.content) onSaveStateChange("saved");
       return;
     }
 
-    if (localDirtyRef.current && markdown !== page.content) {
+    // Compare against the pending content, not this render's `markdown`: a
+    // restore adopted during this same commit has already moved the pending
+    // content on, and reading the stale state would adopt the file over it.
+    if (localDirtyRef.current && pendingMarkdownRef.current !== page.content) {
       return;
     }
 
@@ -2359,11 +2441,21 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
       lastAcceptedMarkdownRef.current = page.content;
       pendingMarkdownRef.current = page.content;
       reportDirtyState(false);
+      // The destination now holds what the editor holds, however it got there
+      // — an autosave, a retry that ran outside this card, or an overwrite.
+      onSaveStateChange("saved");
       return;
     }
 
     acceptMarkdown(page.content);
-  }, [acceptMarkdown, forceResetKey, markdown, page.content, reportDirtyState]);
+  }, [
+    acceptMarkdown,
+    forceResetKey,
+    markdown,
+    onSaveStateChange,
+    page.content,
+    reportDirtyState,
+  ]);
 
   useEffect(() => {
     if (!saveBlocked || !saveTimer.current) return;
@@ -2461,6 +2553,7 @@ export function PageCard({
   onSaveControllerChange,
   saveBlocked,
   forceResetKey,
+  draftRestore,
 }: PageCardProps) {
   const [saveState, setSaveState] = useState<DocumentSaveState>("saved");
 
@@ -2488,6 +2581,7 @@ export function PageCard({
         onSaveControllerChange={onSaveControllerChange}
         saveBlocked={saveBlocked}
         forceResetKey={forceResetKey}
+        draftRestore={draftRestore}
       />
     </div>
   );

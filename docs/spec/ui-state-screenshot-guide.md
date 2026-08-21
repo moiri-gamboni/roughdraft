@@ -120,7 +120,11 @@ suggestions:
 | Document | Save status: saved | Any clean document after autosave | `document-save-status` | Checkmark should sit fixed in the top-left corner and fade out over 2 seconds; accessible label remains `Saved`. |
 | Document | Save status: unsaved | Type in a local document before save completes | `document-save-status` | Spinner-only pending state; accessible label is `Unsaved changes`. Transient; often easier with save throttling or network mocking. |
 | Document | Save status: saving | Type and capture during autosave | `document-save-status` | Spinner-only pending state; accessible label is `Saving`. Transient; easiest with mocked delayed save. |
-| Document | Save status: failed | Force save error | `document-save-status` | Icon-only error state; accessible label is `Save failed`. Use backend/API mocking or a component harness. |
+| Document | Save status: failed | Force save error and let the retry ceiling pass, or block the save with the retry cancelled | `document-save-status` | Icon-only error state; accessible label is `Save failed`. Use backend/API mocking or a component harness. |
+| Document | Save status: retrying | Abort the save PUT (`page.route(...).abort()`), then type | `document-save-status` | Icon-only warning state, refresh icon; accessible label is `Changes saved in this browser, retrying`. Warning tone, not the danger tone of `Save failed`. |
+| Document | Unsent draft found | Abort the save PUT, type, then reload the page | `draft-restore-notice`, `draft-restore-action-restore`, `draft-restore-action-discard` | Banner title: `Unsent edits found in this browser`. Slate palette rather than the conflict banner's amber; never rendered together with `file-conflict-notice`. Remote sessions render it even when the base matches. |
+| Document | Server unreachable, still retrying | Open a local file with the server stopped | `backend-unavailable-notice`, `backend-unavailable-retry` | Title: `Roughdraft can't reach the server`. Body reads `Roughdraft keeps trying in the background.` and names the unsent draft only when one exists; capture both variants. |
+| Document | Server unreachable, retries stopped | As above, then choose Try again until the boot ladder is exhausted (5 attempts) | `backend-unavailable-notice`, `backend-unavailable-retry` | Body reads `Roughdraft has stopped retrying.` and points at Try again, which stays the only live recovery. Same two draft variants as the retrying state. |
 | Document | Disk changed | Open local file, modify file externally while browser content is clean | `file-conflict-notice`, `file-conflict-action-reload`, `file-conflict-action-overwrite` | Banner title: `File changed on disk`. |
 | Document | Save conflict | Edit in browser, then modify file externally before autosave resolves | `file-conflict-notice`, `file-conflict-action-keep-editing` | Banner title: `Save conflict`; autosave pauses. |
 | Document | Autosave paused | Keep editing after conflict | `file-conflict-notice`, `file-conflict-action-overwrite` | Banner title: `Autosave paused`; no keep-editing action. |
@@ -178,6 +182,8 @@ These are real product states, but they are awkward to capture deterministically
 - Save status: saving, failed, and sometimes unsaved
   
 - Disk conflict and autosave paused
+  
+- Save status: retrying, unsent-draft banner, and server unreachable
   
 - Review handoff undelivered/error
   

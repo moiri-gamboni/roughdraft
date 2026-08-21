@@ -1,3 +1,4 @@
+import type { JSONContent } from "@tiptap/core";
 import {
   buildCommentThreads,
   type CriticComment,
@@ -411,4 +412,107 @@ export function resolveCommentThreadRailLayouts(
     activeItem?.key ?? null,
     gap,
   );
+}
+
+/**
+ * Comments live in React state beside the ProseMirror document, so undo/redo
+ * moves the anchors without moving the comments: undoing a comment deletion
+ * brought the highlight back with no card behind it, and the next save then
+ * dropped the comment for good. Reconcile after every editor update: a
+ * buried comment whose OWN anchor id reappears is restored, and a live
+ * comment whose own anchor id disappears is buried (covering undo of
+ * creation and redo of deletion).
+ *
+ * Restoration is keyed strictly on the comment's own id being anchored —
+ * never on an ancestor's anchor. A reply's deletion removes only its own id
+ * from the shared anchor mark; if the walk climbed to the still-anchored
+ * root, deleting a reply (or cancelling an empty reply draft) would restore
+ * it on the very next update. Buried descendants ride along only when their
+ * root is itself restored in the same pass, which is what carries
+ * endmatter-only replies through an undo of a whole-thread deletion.
+ *
+ * `everAnchored` guards the burial direction and is updated in place: only
+ * comments whose own id was anchored at some point this session may be
+ * buried, so replies parsed from endmatter (never anchored inline) and
+ * comments attached to suggestions are never touched.
+ */
+export function reconcileCommentsWithDoc(
+  doc: JSONContent,
+  live: Map<string, CriticComment>,
+  graveyard: Map<string, CriticComment>,
+  everAnchored: Set<string>,
+): {
+  live: Map<string, CriticComment>;
+  graveyard: Map<string, CriticComment>;
+  changed: boolean;
+} {
+  const anchoredCommentIds = new Set<string>();
+  const anchoredChangeIds = new Set<string>();
+  collectAnchorIds(doc, anchoredCommentIds, anchoredChangeIds);
+
+  const nextLive = new Map(live);
+  const nextGraveyard = new Map(graveyard);
+  let changed = false;
+
+  const restoredIds = new Set<string>();
+  for (const [id, comment] of graveyard) {
+    if (!anchoredCommentIds.has(id)) continue;
+    nextGraveyard.delete(id);
+    nextLive.set(id, comment);
+    restoredIds.add(id);
+    changed = true;
+  }
+
+  // Buried descendants of a restored root come back with it.
+  if (restoredIds.size > 0) {
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const [id, comment] of nextGraveyard) {
+        const parentId = comment.parentCommentId;
+        if (!parentId || !restoredIds.has(parentId)) continue;
+        nextGraveyard.delete(id);
+        nextLive.set(id, comment);
+        restoredIds.add(id);
+        changed = true;
+        grew = true;
+      }
+    }
+  }
+
+  for (const [id, comment] of live) {
+    if (comment.scope === "document") continue;
+    if (!everAnchored.has(id)) continue;
+    if (anchoredCommentIds.has(id)) continue;
+    nextLive.delete(id);
+    nextGraveyard.set(id, comment);
+    changed = true;
+  }
+
+  for (const id of nextLive.keys()) {
+    if (anchoredCommentIds.has(id)) everAnchored.add(id);
+  }
+
+  return { live: nextLive, graveyard: nextGraveyard, changed };
+}
+
+function collectAnchorIds(
+  node: JSONContent,
+  commentIds: Set<string>,
+  changeIds: Set<string>,
+): void {
+  for (const mark of node.marks ?? []) {
+    const attrs = mark.attrs as Record<string, unknown> | undefined;
+    if (mark.type === "commentRef" && Array.isArray(attrs?.commentIds)) {
+      for (const id of attrs.commentIds) {
+        if (typeof id === "string") commentIds.add(id);
+      }
+    }
+    if (mark.type === "criticChange" && typeof attrs?.changeId === "string") {
+      changeIds.add(attrs.changeId);
+    }
+  }
+  for (const child of node.content ?? []) {
+    collectAnchorIds(child, commentIds, changeIds);
+  }
 }

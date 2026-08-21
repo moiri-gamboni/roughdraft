@@ -49,9 +49,9 @@ export function RemoteSessionBanner({ backend }: RemoteSessionBannerProps) {
           Remote session disconnected
         </div>
         <div className="mt-0.5 text-xs leading-5 text-amber-900 dark:text-amber-200">
-          The CLI on the source machine is no longer connected. Reopen
-          <span className="font-mono"> roughdraft open </span>
-          from that machine to keep editing.
+          The CLI on the source machine is no longer connected. Roughdraft is
+          retrying automatically; check that machine if the session does not
+          come back.
         </div>
       </div>
     </div>
