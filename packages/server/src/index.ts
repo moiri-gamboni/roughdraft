@@ -85,7 +85,7 @@ interface OpenRequestPayload {
   url?: string;
 }
 
-interface RemoteSession {
+export interface RemoteSession {
   id: string;
   originPath: string;
   content: string;
@@ -106,7 +106,7 @@ interface RemoteDocumentSavePayload {
   expectedVersion?: string;
 }
 
-const REMOTE_SESSION_TTL_MS = 5 * 60 * 1000;
+export const REMOTE_SESSION_TTL_MS = 5 * 60 * 1000;
 const REMOTE_SESSION_SWEEP_INTERVAL_MS = 60 * 1000;
 const REMOTE_SESSION_KEEPALIVE_MS = 15 * 1000;
 const MAX_OVERALL_COMMENT_LENGTH = 4_000;
@@ -138,6 +138,32 @@ function writeRemoteSessionEvent(
   data: unknown,
 ): void {
   response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+/**
+ * Drop sessions whose CLI has been gone longer than the grace period.
+ *
+ * Ending each viewer stream is part of dropping the session, not a courtesy:
+ * a viewer left attached to a session the server has forgotten keeps taking
+ * keepalives, so its EventSource never errors, the browser's re-open loop
+ * never runs, and the tab goes stale without ever saying so.
+ */
+export function sweepRemoteSessions(
+  sessions: Map<string, RemoteSession>,
+  now: number,
+): void {
+  for (const [id, session] of sessions) {
+    if (
+      session.disconnectedAt === null ||
+      now - session.disconnectedAt <= REMOTE_SESSION_TTL_MS
+    ) {
+      continue;
+    }
+    for (const viewer of session.viewers) {
+      viewer.end();
+    }
+    sessions.delete(id);
+  }
 }
 
 function listMdFiles(projectDir: string): string[] {
@@ -439,15 +465,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
   }
 
   const remoteSessionSweeper = setInterval(() => {
-    const now = Date.now();
-    for (const [id, session] of remoteSessions) {
-      if (
-        session.disconnectedAt !== null &&
-        now - session.disconnectedAt > REMOTE_SESSION_TTL_MS
-      ) {
-        remoteSessions.delete(id);
-      }
-    }
+    sweepRemoteSessions(remoteSessions, Date.now());
   }, REMOTE_SESSION_SWEEP_INTERVAL_MS);
   remoteSessionSweeper.unref?.();
 
