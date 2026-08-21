@@ -2050,14 +2050,16 @@ export function App() {
     setDocumentDiskChangeState("clean");
   }, [draftPersistence]);
 
-  const draftRestoreOffer = useMemo<DraftRestoreOffer>(
-    () => ({
-      mode: draftPersistence.getKey()?.mode ?? "local",
-      onRestore: handleRestoreDraft,
-      onDiscard: handleDiscardDraft,
-    }),
-    [draftPersistence, handleRestoreDraft, handleDiscardDraft],
-  );
+  // Deliberately not memoised: the mode comes from `getKey()`, which reads a
+  // ref that `resolveRemoteKey` mutates without changing `draftPersistence`'s
+  // identity, so no dependency list can observe it. Nothing downstream keys off
+  // this object's identity, so recomputing every render is both correct and
+  // cheaper than a memo that would have to lie about what it depends on.
+  const draftRestoreOffer: DraftRestoreOffer = {
+    mode: draftPersistence.getKey()?.mode ?? "local",
+    onRestore: handleRestoreDraft,
+    onDiscard: handleDiscardDraft,
+  };
 
   const handleReloadDocumentFromDisk = useCallback(async () => {
     const currentBackend = backendRef.current;
