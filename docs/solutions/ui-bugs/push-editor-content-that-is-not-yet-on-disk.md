@@ -39,7 +39,7 @@ Four separate mechanisms in the editor assume the arriving content is authoritat
 
 ## Solution
 
-**Adopt the content as unsaved, and say which kind of adopt it is.** `acceptMarkdown` gained a `markSaved` option; with `markSaved: false` it leaves the last-accepted marker on what the destination actually holds, so the card stays dirty. `onLocalContentChange` gained an origin (`"edit" | "adopt" | "restore"`) so persistence records genuine edits only.
+**Adopt the content as unsaved, and say that it was adopted rather than typed.** `acceptMarkdown` gained a `markSaved` option; with `markSaved: false` it leaves the last-accepted marker on what the destination actually holds, so the card stays dirty. `onLocalContentChange` gained an origin (`"edit" | "adopt"`) so persistence records genuine edits only.
 
 **Compare against live pending content, not the render's snapshot.** The reconciliation effect's "local work in progress" guard read the render-scoped `markdown`, which within the restoring commit is still the pre-restore value:
 
