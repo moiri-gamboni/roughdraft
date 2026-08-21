@@ -117,8 +117,7 @@ function writeDraftRecord({
     JSON.stringify({
       schema: 1,
       content,
-      baseContent: baseContent ?? "",
-      baseKnown: baseContent !== null,
+      baseContent,
       updatedAt: Date.now(),
     }),
   );

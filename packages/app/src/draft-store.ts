@@ -121,18 +121,17 @@ export function readDraft(
   const record = parsed as Partial<DraftRecord> & { schema?: unknown };
   if (typeof record.content !== "string") return null;
 
-  // An unknown schema keeps its content but loses its base, which routes the
-  // decision through the explicit "ask" branch instead of destroying the draft.
-  const schemaMatches = record.schema === DRAFT_SCHEMA;
-  const baseKnown =
-    schemaMatches &&
-    record.baseKnown === true &&
-    typeof record.baseContent === "string";
+  // An unknown schema — or a record whose base is missing or malformed — keeps
+  // its content but loses its base, which routes the decision through the
+  // explicit "ask" branch instead of destroying the draft.
+  const baseContent =
+    record.schema === DRAFT_SCHEMA && typeof record.baseContent === "string"
+      ? record.baseContent
+      : null;
 
   return {
     content: record.content,
-    baseContent: baseKnown ? (record.baseContent as string) : "",
-    baseKnown,
+    baseContent,
     updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : 0,
   };
 }
@@ -150,12 +149,7 @@ export function writeDraft(
   return guardedSetItem(
     storage,
     key,
-    serialize({
-      content,
-      baseContent: baseContent ?? "",
-      baseKnown: baseContent !== null,
-      updatedAt: Date.now(),
-    }),
+    serialize({ content, baseContent, updatedAt: Date.now() }),
   );
 }
 
@@ -175,12 +169,7 @@ export function updateBase(
   guardedSetItem(
     storage,
     key,
-    serialize({
-      content: existing.content,
-      baseContent: baseContent ?? "",
-      baseKnown: baseContent !== null,
-      updatedAt: Date.now(),
-    }),
+    serialize({ content: existing.content, baseContent, updatedAt: Date.now() }),
   );
 }
 

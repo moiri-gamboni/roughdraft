@@ -15,8 +15,8 @@ export function nextRetryDelayMs(attempt: number): number {
 
 export interface DraftSnapshot {
   content: string;
-  baseContent: string;
-  baseKnown: boolean;
+  /** The text this draft was edited from, or null when that is unknown. */
+  baseContent: string | null;
 }
 
 export type DraftMode = "local" | "remote";
@@ -40,7 +40,7 @@ export function resolveRestore({
 }): RestoreDecision {
   if (!draft) return "nothing";
   if (draft.content === diskContent) return "nothing";
-  if (!draft.baseKnown) return "ask";
+  if (draft.baseContent === null) return "ask";
 
   // Remote "disk content" is the server's RAM, not the origin file, so a
   // matching base is not enough evidence to restore without asking.

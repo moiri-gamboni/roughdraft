@@ -121,7 +121,6 @@ describe("draft cell", () => {
     expect(readDraft(localStorage, fileKey)).toMatchObject({
       content: "edited",
       baseContent: "disk",
-      baseKnown: true,
     });
   });
 
@@ -132,7 +131,7 @@ describe("draft cell", () => {
     draft.recordLocalContent("edited", null);
 
     expect(readDraft(localStorage, fileKey)).toMatchObject({
-      baseKnown: false,
+      baseContent: null,
     });
   });
 
@@ -157,7 +156,6 @@ describe("draft cell", () => {
     expect(draft.read()).toMatchObject({
       content: "second",
       baseContent: "first",
-      baseKnown: true,
     });
   });
 

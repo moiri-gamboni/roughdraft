@@ -1922,9 +1922,9 @@ export function App() {
           attemptedContent: content,
           currentContent: error.current.content,
           draftBaseContent:
-            record?.baseKnown === true
-              ? record.baseContent
-              : (documentPageRef.current?.content ?? null),
+            record?.baseContent ??
+            documentPageRef.current?.content ??
+            null,
           editorContent: documentDraftContentRef.current ?? content,
         });
         logDraftEvent("conflict-classified", { resolution });
