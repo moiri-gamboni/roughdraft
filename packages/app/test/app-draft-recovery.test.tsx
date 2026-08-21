@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "../src/App";
+import { App, MAX_BOOT_RETRIES } from "../src/App";
 import { BackendUnavailableError, detectBackend } from "../src/detect-backend";
 import { DRAFT_KEY_PREFIX } from "../src/draft-store";
 import {
@@ -352,6 +352,48 @@ describe("recovering unsent edits on boot", () => {
     expect(container.textContent).not.toContain(
       "Could not open that markdown file",
     );
+  });
+
+  it("says it is still trying while the boot ladder has attempts left", async () => {
+    detectBackendMock.mockRejectedValue(
+      new BackendUnavailableError("Roughdraft could not reach the server."),
+    );
+
+    await renderApp();
+
+    expect(queryByTestId("backend-unavailable-notice")?.textContent).toContain(
+      "keeps trying",
+    );
+  });
+
+  it("says retries have stopped once the boot ladder is exhausted", async () => {
+    // The ladder gives up after MAX_BOOT_RETRIES, and the only live recovery
+    // left is the button. Claiming it "keeps trying" would leave the reviewer
+    // waiting on a retry that is never coming.
+    vi.useFakeTimers();
+    try {
+      detectBackendMock.mockRejectedValue(
+        new BackendUnavailableError("Roughdraft could not reach the server."),
+      );
+
+      await renderApp();
+      for (let attempt = 0; attempt < MAX_BOOT_RETRIES; attempt += 1) {
+        await act(async () => {
+          queryByTestId("backend-unavailable-retry")?.dispatchEvent(
+            new MouseEvent("click", { bubbles: true }),
+          );
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+      }
+
+      const notice = queryByTestId("backend-unavailable-notice");
+      expect(notice?.textContent).toContain("stopped retrying");
+      expect(notice?.textContent).not.toContain("keeps trying");
+      expect(queryByTestId("backend-unavailable-retry")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("still reports a document it genuinely cannot open", async () => {
