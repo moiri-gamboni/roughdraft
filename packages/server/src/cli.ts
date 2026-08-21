@@ -1275,10 +1275,9 @@ async function runRemoteOpen(
   const tokenGuidance =
     "Set ROUGHDRAFT_TOKEN to the token configured on the host before retrying.";
 
-  // Fires once the --timeout deadline passes, stopping whichever save-back
+  // Aborted once the --timeout deadline passes, stopping whichever save-back
   // stream is being pumped at the time.
   const runDeadline = new AbortController();
-  let timedOut = false;
 
   async function claimExistingSession(): Promise<RemoteRegisterOutcome> {
     let response: Response;
@@ -1545,10 +1544,7 @@ async function runRemoteOpen(
   const deadlineTimer =
     options.timeoutSeconds === undefined
       ? null
-      : setTimeout(() => {
-          timedOut = true;
-          runDeadline.abort();
-        }, options.timeoutSeconds * 1000);
+      : setTimeout(() => runDeadline.abort(), options.timeoutSeconds * 1000);
 
   try {
     let consecutiveFailures = 0;
@@ -1567,7 +1563,7 @@ async function runRemoteOpen(
         reason = outcome.reason;
       }
 
-      if (timedOut) {
+      if (runDeadline.signal.aborted) {
         deps.error(
           `Timed out holding the remote session for ${options.openPath}.`,
         );
