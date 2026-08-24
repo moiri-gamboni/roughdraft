@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  captureSnapshot,
   listSnapshots,
   readSnapshot,
   type SnapshotSummary,
@@ -147,6 +148,60 @@ describe("mcp", () => {
     const written = fs.readFileSync(documentPath, "utf8");
     expect(written).toContain("Source added.");
     expect(readSnapshot(documentPath, snapshots()[0].id)).toBe(written);
+  });
+
+  it("refuses to treat a snapshot as a document", async () => {
+    // An agent handed a snapshot path would otherwise reply into it and start
+    // a history of the history, which the HTTP routes refuse.
+    const original =
+      '# Draft\n\n{>>Needs proof<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}\n';
+    fs.writeFileSync(documentPath, original);
+    await callTool(
+      "roughdraft_reply_to_comment",
+      { documentPath, parentId: "c1", message: "Source added." },
+      { ROUGHDRAFT_STATE_FILE: stateFile },
+    );
+    const snapshotId = snapshots()[0].id;
+    const snapshotPath = path.join(
+      projectDir,
+      ".roughdraft-history",
+      "v1",
+      "draft",
+      `${snapshotId}.md`,
+    );
+
+    await expect(
+      callTool(
+        "roughdraft_get_review_index",
+        { documentPath: snapshotPath },
+        { ROUGHDRAFT_STATE_FILE: stateFile },
+      ),
+    ).rejects.toThrow(/history/i);
+
+    expect(fs.existsSync(snapshotPath)).toBe(true);
+  });
+
+  it("treats the bytes it read as accounted for, not as someone else's", async () => {
+    // A tool derives its write from the read immediately above it, so it
+    // incorporates those bytes rather than destroying them and owes no
+    // `replaced` capture. The newest snapshot here is deliberately older than
+    // the disk — the state a coalesced autosave leaves behind — because that is
+    // the only arrangement in which the decision is observable: with a matching
+    // snapshot the content dedup would drop the capture anyway.
+    const original =
+      '# Draft\n\n{>>Needs proof<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}\n';
+    fs.writeFileSync(documentPath, original);
+    captureSnapshot(documentPath, "# An older state\n", "save");
+
+    await callTool(
+      "roughdraft_reply_to_comment",
+      { documentPath, parentId: "c1", message: "Source added." },
+      { ROUGHDRAFT_STATE_FILE: stateFile },
+    );
+
+    expect(
+      snapshots().filter((snapshot) => snapshot.trigger === "replaced"),
+    ).toHaveLength(0);
   });
 
   it("keeps the resolutions it writes in the document history", async () => {
