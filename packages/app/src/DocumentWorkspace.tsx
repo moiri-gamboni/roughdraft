@@ -7,6 +7,7 @@ import {
   Copy,
   Eye,
   History,
+  Inbox,
   Loader2,
   Maximize2,
   MessageSquarePlus,
@@ -14,6 +15,7 @@ import {
   PencilLine,
   RefreshCcw,
   Upload,
+  X,
 } from "lucide-react";
 import {
   useCallback,
@@ -47,6 +49,11 @@ import {
   criticMarkdownHasReviewRail,
   criticMarkdownToRenderedHtml,
 } from "./critic-markup";
+import {
+  DocumentHistoryDialog,
+  type RestoreAvailability,
+  type SnapshotRestore,
+} from "./DocumentHistoryDialog";
 import { copyTextToClipboard } from "./lib/clipboard";
 import { cn } from "./lib/utils";
 import {
@@ -162,6 +169,22 @@ const conflictNoticeCopy: Record<
     title: "Autosave paused",
     body: "Keep editing locally, then reload from disk to discard your draft or overwrite the disk file when you are ready.",
   },
+};
+
+/**
+ * Restoring is a forward save, so what the destination will accept decides
+ * whether it can go ahead. Keyed by the union, so a new disk-change state
+ * cannot ship without deciding what restoring means in it.
+ */
+const restoreAvailabilityByDiskState: Record<
+  DocumentDiskChangeState,
+  RestoreAvailability
+> = {
+  clean: "ready",
+  "draft-restore": "blocked-by-draft-offer",
+  changed: "needs-overwrite",
+  conflict: "needs-overwrite",
+  paused: "needs-overwrite",
 };
 
 export interface DraftRestoreOffer {
@@ -286,7 +309,9 @@ const diskChangeStatus: Record<
   conflict: warningStatus("Save conflict"),
   changed: warningStatus("File changed on disk"),
   paused: warningStatus("Autosave paused"),
-  "draft-restore": warningStatus("Unsent draft found", History),
+  // Not `History`: that icon now opens the document's revision history, and two
+  // different meanings on one glyph is the confusion this feature would create.
+  "draft-restore": warningStatus("Unsent draft found", Inbox),
 };
 
 function getSaveStatusViewModel(
@@ -455,6 +480,17 @@ interface DocumentWorkspaceProps {
    * as one value: a caller cannot wire up the banner and forget a handler.
    */
   draftRestoreOffer?: DraftRestoreOffer | null;
+  /**
+   * Present while an external write has already been reloaded into the editor.
+   * Transient and dismissible rather than a disk-change state: nothing is
+   * blocked, the reviewer is only being told their text moved under them.
+   */
+  externalChangeNotice?: { onDismiss: () => void } | null;
+  /**
+   * Absent where there is nothing to restore into — the preview page runs on an
+   * in-memory backend with no file behind it — which also hides the control.
+   */
+  onRestoreSnapshot?: (restore: SnapshotRestore) => void | Promise<void>;
   onReloadDocumentFromDisk: () => void | Promise<void>;
   onKeepEditingWithoutAutosave: () => void;
   onOverwriteDocumentOnDisk: () => void | Promise<void>;
@@ -480,6 +516,8 @@ export function DocumentWorkspace({
   documentForceResetKey,
   contentRestore = null,
   draftRestoreOffer = null,
+  externalChangeNotice = null,
+  onRestoreSnapshot = undefined,
   onReloadDocumentFromDisk,
   onKeepEditingWithoutAutosave,
   onOverwriteDocumentOnDisk,
@@ -498,6 +536,7 @@ export function DocumentWorkspace({
     getRandomReviewCompleteTitle(),
   );
   const [fileCopyMenuOpen, setFileCopyMenuOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const { isWide, toggleWide } = useReadingWidth();
   const [copiedFileAction, setCopiedFileAction] =
     useState<FileCopyAction | null>(null);
@@ -745,7 +784,19 @@ export function DocumentWorkspace({
       : conflictNoticeCopy[documentDiskChangeState];
   const draftRestoreNotice =
     documentDiskChangeState === "draft-restore" ? draftRestoreOffer : null;
-  const hasTopNotice = !!conflictNotice || !!draftRestoreNotice;
+  const canBrowseHistory =
+    !!backend?.listSnapshots && !!activeDocumentPath && !!onRestoreSnapshot;
+  // One banner at a time, and this is the least urgent of the three: the file
+  // has already been reloaded, so nothing is blocked or at risk.
+  const showExternalChangeNotice =
+    !!externalChangeNotice &&
+    canBrowseHistory &&
+    !conflictNotice &&
+    !draftRestoreNotice;
+  const hasTopNotice =
+    !!conflictNotice || !!draftRestoreNotice || showExternalChangeNotice;
+  const restoreAvailability =
+    restoreAvailabilityByDiskState[documentDiskChangeState];
   const showReviewHandoffButton =
     !!activeDocumentPath &&
     (reviewWatcherCount > 0 || reviewHandoffState !== "idle");
@@ -1013,6 +1064,54 @@ export function DocumentWorkspace({
           ) : null}
         </div>
       </div>
+      {showExternalChangeNotice ? (
+        <div
+          data-testid="external-change-notice"
+          role="status"
+          aria-label="File changed on disk"
+          className="fixed top-3 left-1/2 z-50 flex w-[min(calc(100vw-1rem),52rem)] -translate-x-1/2 flex-col gap-3 rounded-[8px] border border-stone-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-3 text-stone-900 dark:text-slate-100 shadow-[0_14px_40px_rgba(15,23,42,0.16)] dark:shadow-[0_14px_40px_rgba(0,0,0,0.4)] sm:flex-row sm:items-center sm:justify-between sm:px-4"
+        >
+          <div className="flex min-w-0 items-start gap-2.5">
+            <RefreshCcw
+              className="mt-0.5 size-4 shrink-0 text-stone-500 dark:text-slate-400"
+              aria-hidden="true"
+            />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold leading-5">
+                File changed on disk
+              </div>
+              <div className="mt-0.5 text-xs leading-5 text-stone-600 dark:text-slate-300">
+                Roughdraft loaded the newer version. The text you were reading
+                is still in this document's history.
+              </div>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
+            <Button
+              type="button"
+              data-testid="external-change-notice-view-history"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-[7px] px-2 text-xs text-stone-700 hover:bg-stone-100 dark:text-slate-200 dark:hover:bg-slate-800"
+              onClick={() => setHistoryOpen(true)}
+            >
+              <History className="size-3.5" />
+              View history
+            </Button>
+            <Button
+              type="button"
+              data-testid="external-change-notice-dismiss"
+              aria-label="Dismiss"
+              variant="ghost"
+              size="sm"
+              className="size-8 rounded-[7px] px-0 text-stone-500 hover:bg-stone-100 dark:text-slate-400 dark:hover:bg-slate-800"
+              onClick={externalChangeNotice?.onDismiss}
+            >
+              <X className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {draftRestoreNotice ? (
         <div
           data-testid="draft-restore-notice"
@@ -1023,7 +1122,7 @@ export function DocumentWorkspace({
           className="fixed top-3 left-1/2 z-50 flex w-[min(calc(100vw-1rem),52rem)] -translate-x-1/2 flex-col gap-3 rounded-[8px] border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-3 text-slate-900 dark:text-slate-100 shadow-[0_14px_40px_rgba(15,23,42,0.16)] dark:shadow-[0_14px_40px_rgba(0,0,0,0.4)] sm:flex-row sm:items-center sm:justify-between sm:px-4"
         >
           <div className="flex min-w-0 items-start gap-2.5">
-            <History
+            <Inbox
               className="mt-0.5 size-4 shrink-0 text-slate-500 dark:text-slate-400"
               aria-hidden="true"
             />
@@ -1055,7 +1154,7 @@ export function DocumentWorkspace({
               className="h-8 rounded-[7px] bg-slate-900 px-2 text-xs text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
               onClick={draftRestoreNotice.onRestore}
             >
-              <History className="size-3.5" />
+              <Inbox className="size-3.5" />
               Restore my draft
             </Button>
           </div>
@@ -1203,6 +1302,27 @@ export function DocumentWorkspace({
                     {isWide ? "Normal width" : "Full width"}
                   </TooltipContent>
                 </Tooltip>
+                {canBrowseHistory ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        // Same 1.5rem box as the width toggle beside it: the
+                        // sticky header participates in a FLIP animation, so a
+                        // control that changed the row's height would disturb it.
+                        <button
+                          type="button"
+                          data-testid="document-history-trigger"
+                          aria-label="Document history"
+                          className="inline-flex size-[1.5rem] shrink-0 items-center justify-center rounded-full text-stone-400 outline-none transition hover:text-stone-500 focus-visible:ring-2 focus-visible:ring-stone-300/70 dark:text-slate-400 dark:hover:text-slate-300 dark:focus-visible:ring-slate-600/70"
+                          onClick={() => setHistoryOpen(true)}
+                        />
+                      }
+                    >
+                      <History className="size-[0.8rem]" aria-hidden="true" />
+                    </TooltipTrigger>
+                    <TooltipContent>Document history</TooltipContent>
+                  </Tooltip>
+                ) : null}
                 <Popover
                   open={fileCopyMenuOpen}
                   onOpenChange={setFileCopyMenuOpen}
@@ -1331,6 +1451,20 @@ export function DocumentWorkspace({
           </div>
         )}
       </div>
+      {backend &&
+      canBrowseHistory &&
+      activeDocumentPath &&
+      onRestoreSnapshot ? (
+        <DocumentHistoryDialog
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+          backend={backend}
+          documentPath={activeDocumentPath}
+          documentFilenameLabel={documentFilenameLabel}
+          restoreAvailability={restoreAvailability}
+          onRestore={onRestoreSnapshot}
+        />
+      ) : null}
     </div>
   );
 }

@@ -57,6 +57,30 @@ export interface ContentRestore {
   source: "draft" | "snapshot";
 }
 
+/**
+ * What caused a snapshot to be taken. `replaced` is the bytes a write was
+ * about to destroy, which is the entry a clobber recovery reaches for.
+ */
+export type SnapshotTrigger = "save" | "review" | "replaced" | "hook";
+
+export interface SnapshotSummary {
+  id: string;
+  /** ISO 8601, as the wire carries it. */
+  createdAt: string;
+  trigger: SnapshotTrigger;
+  bytes: number;
+}
+
+/**
+ * The snapshots of one document, newest first. `unreadable` counts sidecar
+ * files whose name is not a canonical id: content that exists and cannot be
+ * listed, which is worth saying out loud rather than quietly dropping.
+ */
+export interface DocumentHistory {
+  snapshots: SnapshotSummary[];
+  unreadable: number;
+}
+
 export interface StoredAsset {
   markdownPath: string;
   previewUrl: string;
@@ -98,6 +122,10 @@ export interface StorageBackend {
     relativePath: string,
     onChange: (event: MarkdownFileChangeEvent) => void,
   ): () => void;
+  /** Absent on a backend with no snapshot store; the UI gates the whole
+   * history affordance on it rather than offering a control that cannot work. */
+  listSnapshots?(relativePath: string): Promise<DocumentHistory>;
+  getSnapshot?(relativePath: string, id: string): Promise<string>;
   completeReview?(
     relativePath: string,
     options?: CompleteReviewOptions,
