@@ -9,7 +9,7 @@ import {
   PageCard,
   shouldDismissCommentThread,
 } from "../src/PageCard";
-import type { Page, StorageBackend } from "../src/storage";
+import type { ContentRestore, Page, StorageBackend } from "../src/storage";
 
 function createDomRect({
   left = 0,
@@ -278,7 +278,7 @@ type PageCardTestOptions = Partial<{
   selected: boolean;
   focusRequestKey: string | null;
   saveBlocked: boolean;
-  draftRestore: { content: string } | null;
+  contentRestore: ContentRestore | null;
 }>;
 
 type RenderedPageCard = {
@@ -332,7 +332,7 @@ async function renderPageCard(
       saveController = controller;
     },
     saveBlocked: options.saveBlocked ?? false,
-    draftRestore: options.draftRestore ?? null,
+    contentRestore: options.contentRestore ?? null,
   } as const;
 
   const render = async () => {
@@ -2275,7 +2275,7 @@ describe("PageCard editor integration", () => {
       });
 
       await rendered.rerender({
-        draftRestore: { content: "Unsent draft body" },
+        contentRestore: { content: "Unsent draft body", source: "draft" },
       });
 
       expect(rendered.getEditor().getText()).toContain("Unsent draft body");
@@ -2302,7 +2302,7 @@ describe("PageCard editor integration", () => {
       // so its very first reconciliation pass runs against the restored content.
       const rendered = await renderPageCard({
         page: { id: "restore-boot", title: "Restore boot", content: "On disk" },
-        draftRestore: { content: "Unsent draft body" },
+        contentRestore: { content: "Unsent draft body", source: "draft" },
       });
 
       await flushReact();
@@ -2318,7 +2318,7 @@ describe("PageCard editor integration", () => {
       rendered.onSaveStateChange.mockClear();
 
       await rendered.rerender({
-        draftRestore: { content: "Unsent draft body" },
+        contentRestore: { content: "Unsent draft body", source: "draft" },
       });
 
       expect(rendered.onSaveStateChange).not.toHaveBeenCalledWith("saved");
@@ -2329,7 +2329,7 @@ describe("PageCard editor integration", () => {
         page: { id: "restore-3", title: "Restore 3", content: "On disk" },
       });
       await rendered.rerender({
-        draftRestore: { content: "Unsent draft body" },
+        contentRestore: { content: "Unsent draft body", source: "draft" },
       });
 
       await rendered.rerender({
@@ -2344,12 +2344,12 @@ describe("PageCard editor integration", () => {
         page: { id: "restore-4", title: "Restore 4", content: "On disk" },
       });
       await rendered.rerender({
-        draftRestore: { content: "Unsent draft body" },
+        contentRestore: { content: "Unsent draft body", source: "draft" },
       });
       await insertTextAtEnd(rendered.getEditor(), " and more");
 
       await rendered.rerender({
-        draftRestore: { content: "Unsent draft body" },
+        contentRestore: { content: "Unsent draft body", source: "draft" },
       });
 
       expect(rendered.getEditor().getText()).not.toContain("and more");

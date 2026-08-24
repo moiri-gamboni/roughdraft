@@ -110,7 +110,7 @@ export function resolveDiskChange({
   savedVersions,
   dirty,
   diskChangeState,
-  draftRestorePending,
+  contentRestorePending,
 }: {
   event: { exists: boolean; version: string | null };
   documentVersion: string | null;
@@ -118,7 +118,7 @@ export function resolveDiskChange({
   savedVersions: readonly string[];
   dirty: boolean;
   diskChangeState: DocumentDiskChangeState;
-  draftRestorePending: boolean;
+  contentRestorePending: boolean;
 }): DiskChangeDecision {
   if (
     event.version &&
@@ -135,7 +135,7 @@ export function resolveDiskChange({
   // autosave over it would strand the very edits being restored. The save
   // carries the loaded version, so a genuinely changed file still comes back as
   // a conflict.
-  if (draftRestorePending) return "ignore";
+  if (contentRestorePending) return "ignore";
 
   if (!event.exists) return "flag-changed";
   if (diskChangeState === "paused") return "ignore";

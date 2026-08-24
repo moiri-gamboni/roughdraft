@@ -14,5 +14,6 @@ sandbox
 .agents/
 .mcp.json
 .roughdraft-state
+.roughdraft-history/
 /roughdraft.json
 .compound-engineering/*.local.yaml

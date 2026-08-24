@@ -34,3 +34,9 @@ The mitigation is a shared bearer token, `ROUGHDRAFT_TOKEN`:
 - The viewerUrl printed by the CLI includes `?token=...` so the browser tab can authenticate. The frontend forwards the token as a header on fetches and as `?token=` on the EventSource.
 
 Loopback-only deployments stay back-compatible: no token required, no behavior change. The token is the contract that lets non-loopback deployments be safe; the secure-by-default startup guard is the contract that lets us ship the feature without expecting users to read documentation before exposing the endpoints.
+
+## Clarification (2026-08-24): Review History In Remote Document Mode
+
+Review history (see [ADR 0001](./0001-single-local-markdown-file.md) and [`docs/spec/history-sidecar.md`](../spec/history-sidecar.md)) is kept on the machine that owns the file, so for a remote document it is written and read entirely by the origin CLI, beside the origin file; the hosted server holds the session's bytes in memory as before and keeps no sidecar of its own.
+
+That placement caps a disk-amplification exposure rather than removing it. Writes now leave snapshots behind, so a caller who can reach a write route can drive a document's sidecar to its cap and leave up to 50 retained copies of that document on disk, where before the same requests left one file. `ROUGHDRAFT_TOKEN` gates `/api/remote-document/*` but not the local-file routes, which remain unauthenticated. The real fix is authentication on those routes; that gap is pre-existing and out of the history feature's scope, and the count cap is what bounds the damage in the meantime. Revisit if the local-file routes gain auth, or if a disk-pressure incident traces here.

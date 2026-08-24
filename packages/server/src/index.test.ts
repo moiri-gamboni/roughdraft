@@ -7,6 +7,11 @@ import type { Response } from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  listSnapshots,
+  readSnapshot,
+  type SnapshotSummary,
+} from "./checkpoint-store";
+import {
   createApp,
   fileVersionIfPresent,
   REMOTE_SESSION_TTL_MS,
@@ -155,7 +160,36 @@ describe("createApp", () => {
     expect(response.body.version).toEqual(expect.any(String));
   });
 
-  it("lists, updates, and deletes page-backed markdown files", async () => {
+  it("saves a document whose bytes are not valid UTF-8", async () => {
+    // A note saved as Latin-1 decodes with U+FFFD. Hashing the raw bytes for
+    // the comparison and the decoded string for the reply makes every
+    // version-quoting save 409 against the version it was just handed.
+    const filePath = path.join(projectDir, "latin.md");
+    fs.writeFileSync(
+      filePath,
+      Buffer.from(
+        "23 20 43 61 66 e9 0a"
+          .split(" ")
+          .map((byte) => Number.parseInt(byte, 16)),
+      ),
+    );
+    const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+    const read = await request(app)
+      .get("/api/markdown-file")
+      .query({ projectPath: projectDir, path: "latin.md" });
+    expect(read.status).toBe(200);
+
+    const write = await request(app)
+      .put("/api/markdown-file")
+      .query({ projectPath: projectDir, path: "latin.md" })
+      .send({ content: "# Edited\n", expectedVersion: read.body.version });
+
+    expect(write.status).toBe(200);
+    expect(fs.readFileSync(filePath, "utf-8")).toBe("# Edited\n");
+  });
+
+  it("lists, reads, and deletes page-backed markdown files", async () => {
     fs.writeFileSync(path.join(projectDir, "alpha.md"), "# Alpha\n");
 
     const { app } = createApp({
@@ -180,20 +214,6 @@ describe("createApp", () => {
       title: "Alpha",
       content: "# Alpha\n",
     });
-
-    const updateResponse = await request(app)
-      .put("/api/pages/alpha")
-      .query({ projectPath: projectDir })
-      .send({ content: "# Beta\n" });
-    expect(updateResponse.status).toBe(200);
-    expect(updateResponse.body).toEqual({
-      id: "alpha",
-      title: "Beta",
-      content: "# Beta\n",
-    });
-    expect(fs.readFileSync(path.join(projectDir, "alpha.md"), "utf-8")).toBe(
-      "# Beta\n",
-    );
 
     const deleteResponse = await request(app).delete("/api/pages/alpha").query({
       projectPath: projectDir,
@@ -319,6 +339,429 @@ describe("createApp", () => {
       },
     });
     expect(fs.readFileSync(filePath, "utf-8")).toBe("# External\n");
+  });
+
+  describe("document history", () => {
+    /** The snapshots of `draft.md`, newest first. */
+    function snapshotsOfDraft(): SnapshotSummary[] {
+      const listing = listSnapshots(path.join(projectDir, "draft.md"));
+      if (listing.status !== "ok") {
+        throw new Error(`Expected a readable history, got ${listing.status}`);
+      }
+      return listing.snapshots;
+    }
+
+    function snapshotContent(id: string): string | null {
+      return readSnapshot(path.join(projectDir, "draft.md"), id);
+    }
+
+    /** Saves `content`, quoting the version on disk so no `replaced` capture fires. */
+    async function save(
+      app: ReturnType<typeof createApp>["app"],
+      content: string,
+    ) {
+      const read = await request(app)
+        .get("/api/markdown-file")
+        .query({ projectPath: projectDir, path: "draft.md" });
+      return request(app)
+        .put("/api/markdown-file")
+        .query({ projectPath: projectDir, path: "draft.md" })
+        .send({ content, expectedVersion: read.body.version });
+    }
+
+    it("snapshots the state a save puts on disk", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      expect((await save(app, "# Saved\n")).status).toBe(200);
+
+      const newest = snapshotsOfDraft()[0];
+      expect(newest.trigger).toBe("save");
+      expect(snapshotContent(newest.id)).toBe("# Saved\n");
+    });
+
+    it("keeps the bytes a document held before it was ever saved", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      await save(app, "# Saved\n");
+
+      // Nothing records the original state until the first save replaces it,
+      // so that save has to preserve it or it is gone for good.
+      const contents = snapshotsOfDraft().map((snapshot) =>
+        snapshotContent(snapshot.id),
+      );
+      expect(contents).toContain("# Original\n");
+    });
+
+    it("does not snapshot a save that changes nothing", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      await save(app, "# Saved\n");
+      const afterFirstSave = snapshotsOfDraft().map((snapshot) => snapshot.id);
+
+      await save(app, "# Saved\n");
+
+      expect(snapshotsOfDraft().map((snapshot) => snapshot.id)).toEqual(
+        afterFirstSave,
+      );
+    });
+
+    it("keeps the replaced bytes of a blind save, but not of a version-quoting one", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      // A save quoting a version accounted for what it overwrote, so the only
+      // unclaimed bytes are the ones the document held before Roughdraft saw
+      // it. Capturing on every save instead would spend the fifty slots in
+      // about twenty-five keystroke pauses and evict the clobber they exist to
+      // hold.
+      expect((await save(app, "# One\n")).status).toBe(200);
+      expect((await save(app, "# Two\n")).status).toBe(200);
+      expect((await save(app, "# Three\n")).status).toBe(200);
+
+      const afterQuoted = snapshotsOfDraft().filter(
+        (snapshot) => snapshot.trigger === "replaced",
+      );
+      expect(afterQuoted).toHaveLength(1);
+      expect(snapshotContent(afterQuoted[0].id)).toBe("# Original\n");
+
+      const blind = await request(app)
+        .put("/api/markdown-file")
+        .query({ projectPath: projectDir, path: "draft.md" })
+        .send({ content: "# Overwritten\n" });
+      expect(blind.status).toBe(200);
+
+      const afterBlind = snapshotsOfDraft().filter(
+        (snapshot) => snapshot.trigger === "replaced",
+      );
+      expect(afterBlind).toHaveLength(2);
+      expect(snapshotContent(afterBlind[0].id)).toBe("# Three\n");
+    });
+
+    it("leaves the reviewed state as the newest snapshot", async () => {
+      const reviewed =
+        "# Draft\n\nNeeds {==support==}{>>Add a source<<}{#c1}.\n";
+      fs.writeFileSync(path.join(projectDir, "draft.md"), reviewed);
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .post("/api/review-events")
+        .send({ projectPath: projectDir, path: "draft.md" });
+      expect(response.status).toBe(201);
+
+      const newest = snapshotsOfDraft()[0];
+      expect(newest.trigger).toBe("review");
+      expect(snapshotContent(newest.id)).toBe(reviewed);
+    });
+
+    it("snapshots the comment a review event appends to the document", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Draft\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      await request(app).post("/api/review-events").send({
+        projectPath: projectDir,
+        path: "draft.md",
+        overallComment: "Please address the risk section.",
+      });
+
+      const onDisk = fs.readFileSync(
+        path.join(projectDir, "draft.md"),
+        "utf-8",
+      );
+      const newest = snapshotsOfDraft()[0];
+      expect(newest.trigger).toBe("review");
+      expect(snapshotContent(newest.id)).toBe(onDisk);
+      expect(onDisk).toContain("Please address the risk section.");
+    });
+
+    it("lists snapshots for a document that has since been deleted", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+      await save(app, "# Saved\n");
+      fs.rmSync(path.join(projectDir, "draft.md"));
+
+      const response = await request(app)
+        .get("/api/markdown-file/history")
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(200);
+      // The document is gone; the history the route serves is the only way
+      // back to what it said.
+      expect(response.body.snapshots[0]).toMatchObject({
+        trigger: "save",
+        bytes: Buffer.byteLength("# Saved\n"),
+      });
+    });
+
+    it("serves an empty history for a document that has never been saved", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .get("/api/markdown-file/history")
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        path: "draft.md",
+        snapshots: [],
+        unreadable: 0,
+      });
+    });
+
+    it("serves the content of one snapshot", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+      await save(app, "# Saved\n");
+
+      const list = await request(app)
+        .get("/api/markdown-file/history")
+        .query({ projectPath: projectDir, path: "draft.md" });
+      const { id, createdAt, trigger, bytes } = list.body.snapshots[0];
+      expect(createdAt).toBe(new Date(createdAt).toISOString());
+      expect(trigger).toBe("save");
+      expect(bytes).toBe(Buffer.byteLength("# Saved\n"));
+
+      const response = await request(app)
+        .get(`/api/markdown-file/history/${id}`)
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ id, content: "# Saved\n" });
+    });
+
+    it("does not leak filesystem detail when the history cannot be read", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      // A file where the snapshot directory belongs: reading it fails with
+      // ENOTDIR, no permission games needed.
+      fs.mkdirSync(path.join(projectDir, ".roughdraft-history", "v1"), {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        path.join(projectDir, ".roughdraft-history", "v1", "draft"),
+        "",
+      );
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .get("/api/markdown-file/history")
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(500);
+      // These routes are unauthenticated, so the body must not carry paths.
+      expect(response.body).toEqual({ error: "History unavailable" });
+      expect(JSON.stringify(response.body)).not.toContain(projectDir);
+    });
+
+    it.skipIf(process.getuid?.() === 0)(
+      "does not leak filesystem detail when a snapshot cannot be read",
+      async () => {
+        // An unreadable snapshot file, rather than a planted non-directory
+        // level: the latter is now answered as "not there" before the open,
+        // so this drives the errno that genuinely still reaches the route.
+        fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+        const { app } = createApp({ homeDir, staticDirPath: projectDir });
+        await save(app, "# Saved\n");
+        const id = snapshotsOfDraft()[0].id;
+        const snapshotFile = path.join(
+          projectDir,
+          ".roughdraft-history",
+          "v1",
+          "draft",
+          `${id}.md`,
+        );
+        fs.chmodSync(snapshotFile, 0o000);
+
+        try {
+          const response = await request(app)
+            .get(`/api/markdown-file/history/${id}`)
+            .query({ projectPath: projectDir, path: "draft.md" });
+
+          expect(response.status).toBe(500);
+          expect(response.body).toEqual({ error: "Snapshot unavailable" });
+          // Left to Express, this answers with a stack trace naming real paths.
+          expect(response.text).not.toContain(projectDir);
+        } finally {
+          fs.chmodSync(snapshotFile, 0o600);
+        }
+      },
+    );
+
+    it("answers a snapshot read through a planted non-directory level as absent", async () => {
+      // The same three-level refusal the listing applies, arriving at the
+      // reader's own vocabulary: `readSnapshot` says "not there".
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      fs.mkdirSync(path.join(projectDir, ".roughdraft-history", "v1"), {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        path.join(projectDir, ".roughdraft-history", "v1", "draft"),
+        "",
+      );
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .get("/api/markdown-file/history/2026-08-24T14-28-49-132Z--p1234--save")
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(404);
+      expect(response.text).not.toContain(projectDir);
+    });
+
+    it("rejects a snapshot id that is shaped like a traversal", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      fs.writeFileSync(path.join(projectDir, "secret.md"), "# Secret\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .get(
+          `/api/markdown-file/history/${encodeURIComponent("../../../secret")}`,
+        )
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({ error: "Snapshot not found" });
+      // A refusal that served the file under a 404 would pass on status alone.
+      expect(response.text).not.toContain("# Secret");
+    });
+
+    it("refuses to serve a snapshot through a symlinked sidecar root", async () => {
+      // The list route refuses this; the read route never lists first, so
+      // without its own check a planted root serves chosen content as the
+      // document's history.
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "rd-planted-"));
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      try {
+        const leaf = path.join(elsewhere, "v1", "draft");
+        fs.mkdirSync(leaf, { recursive: true });
+        const planted = "2026-08-24T10-11-12-345Z--p1--save";
+        fs.writeFileSync(path.join(leaf, `${planted}.md`), "# Attacker\n");
+        fs.symlinkSync(elsewhere, path.join(projectDir, ".roughdraft-history"));
+
+        const response = await request(app)
+          .get(`/api/markdown-file/history/${planted}`)
+          .query({ projectPath: projectDir, path: "draft.md" });
+
+        expect(response.status).toBe(404);
+        expect(response.text).not.toContain("# Attacker");
+      } finally {
+        fs.rmSync(elsewhere, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses a snapshot reached as a page id through an encoded slash", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+      await save(app, "# Saved\n");
+
+      const snapshotId = snapshotsOfDraft()[0].id;
+      // Express matches `:id` against the encoded path and decodes afterwards,
+      // so `%2F` smuggles a whole sidecar path past a route that never
+      // resolves a document path.
+      const pageId = encodeURIComponent(
+        `.roughdraft-history/v1/draft/${snapshotId}`,
+      );
+
+      const read = await request(app)
+        .get(`/api/pages/${pageId}`)
+        .query({ projectPath: projectDir });
+      expect(read.status).toBe(404);
+      expect(read.text).not.toContain("# Saved");
+
+      const removed = await request(app)
+        .delete(`/api/pages/${pageId}`)
+        .query({ projectPath: projectDir });
+      expect(removed.status).toBe(404);
+
+      expect(snapshotContent(snapshotId)).toBe("# Saved\n");
+    });
+
+    it("refuses to treat a snapshot as a document", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+      await save(app, "# Saved\n");
+
+      const snapshotPath = path.join(
+        ".roughdraft-history",
+        "v1",
+        "draft",
+        `${snapshotsOfDraft()[0].id}.md`,
+      );
+      expect(fs.existsSync(path.join(projectDir, snapshotPath))).toBe(true);
+
+      const read = await request(app)
+        .get("/api/markdown-file")
+        .query({ projectPath: projectDir, path: snapshotPath });
+      expect(read.status).toBe(404);
+
+      const write = await request(app)
+        .put("/api/markdown-file")
+        .query({ projectPath: projectDir, path: snapshotPath })
+        .send({ content: "# Rewritten\n" });
+      expect(write.status).toBe(404);
+
+      const review = await request(app)
+        .post("/api/review-events")
+        .send({ projectPath: projectDir, path: snapshotPath });
+      expect(review.status).toBe(404);
+
+      // The refusal is a refusal, not a write that happened to 404.
+      expect(
+        fs.readFileSync(path.join(projectDir, snapshotPath), "utf-8"),
+      ).toBe("# Saved\n");
+    });
+
+    it("refuses a history segment whose case has been changed", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      // The file really exists, so a 404 can only come from the guard and not
+      // from the existence check.
+      const shouted = path.join(
+        projectDir,
+        ".Roughdraft-History",
+        "v1",
+        "draft",
+      );
+      fs.mkdirSync(shouted, { recursive: true });
+      fs.writeFileSync(path.join(shouted, "x.md"), "# Snapshot\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      // On a case-insensitive filesystem this path reaches the real sidecar,
+      // so matching the segment case-sensitively would hand back snapshot
+      // bytes to anyone who shifts the case.
+      const response = await request(app)
+        .get("/api/markdown-file")
+        .query({
+          projectPath: projectDir,
+          path: path.join(".Roughdraft-History", "v1", "draft", "x.md"),
+        });
+
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({ error: "Markdown file not found" });
+    });
+
+    it("refuses to build a history of a history", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+      await save(app, "# Saved\n");
+
+      const response = await request(app)
+        .get("/api/markdown-file/history")
+        .query({
+          projectPath: projectDir,
+          path: path.join(
+            ".roughdraft-history",
+            "v1",
+            "draft",
+            `${snapshotsOfDraft()[0].id}.md`,
+          ),
+        });
+
+      expect(response.status).toBe(404);
+    });
   });
 
   it("rejects markdown-file reads outside the project directory", async () => {
@@ -576,20 +1019,12 @@ describe("createApp", () => {
       const readResponse = await request(app).get(traversalPath).query({
         projectPath: projectDir,
       });
-      const updateResponse = await request(app)
-        .put(traversalPath)
-        .query({
-          projectPath: projectDir,
-        })
-        .send({ content: "# Updated\n" });
       const deleteResponse = await request(app).delete(traversalPath).query({
         projectPath: projectDir,
       });
 
       expect(readResponse.status).toBe(404);
       expect(readResponse.body).toEqual({ error: "Page not found" });
-      expect(updateResponse.status).toBe(404);
-      expect(updateResponse.body).toEqual({ error: "Page not found" });
       expect(deleteResponse.status).toBe(404);
       expect(deleteResponse.body).toEqual({ error: "Page not found" });
       expect(fs.readFileSync(outsideFilePath, "utf-8")).toBe("# Secret\n");
@@ -743,6 +1178,98 @@ describe("createApp", () => {
       paths: ["notes/", "notes/nested/", "notes/alpha.md", "zeta.md"],
     });
   });
+
+  it("keeps the history sidecar out of the project tree", async () => {
+    fs.writeFileSync(path.join(projectDir, "draft.md"), "# Draft\n");
+    const { app } = createApp({ homeDir, staticDirPath: projectDir });
+    await request(app)
+      .put("/api/markdown-file")
+      .query({ projectPath: projectDir, path: "draft.md" })
+      .send({ content: "# Saved\n" });
+
+    const response = await request(app).get("/api/file-tree").query({
+      projectPath: projectDir,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ paths: ["draft.md"] });
+  });
+
+  describe("error handling", () => {
+    it("keeps a malformed body a client error rather than a server one", async () => {
+      // `express.json` marks its own failures with a 4xx `status`. Flattening
+      // those to 500 tells the reviewer the server broke when in fact their
+      // request did — and the same path carries the over-limit 413 that a
+      // large base64 asset upload produces.
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Draft\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .put("/api/markdown-file")
+        .query({ projectPath: projectDir, path: "draft.md" })
+        .set("Content-Type", "application/json")
+        .send('{"content": ');
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ error: "Bad request" });
+      expect(response.text).not.toContain(projectDir);
+    });
+
+    it("answers a generic 400 for an id that cannot be decoded", async () => {
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .get("/api/markdown-file/history/%zz")
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ error: "Bad request" });
+      expect(response.text).not.toContain("node_modules");
+    });
+
+    it("answers a generic 500 without naming the path it could not write", async () => {
+      // Express's default handler answers a stack trace naming the absolute
+      // document path, the temp filename and the server's own source files, on
+      // an unauthenticated route.
+      fs.mkdirSync(path.join(projectDir, "note.md"));
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .put("/api/markdown-file")
+        .query({ projectPath: projectDir, path: "note.md" })
+        .send({ content: "# Edited\n" });
+
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({ error: "Internal server error" });
+      expect(response.text).not.toContain(projectDir);
+    });
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "still saves a writable document inside a read-only directory",
+    async () => {
+      // A plain write succeeded here before the store took over document
+      // writes; needing to create a temporary alongside would refuse it.
+      const locked = path.join(projectDir, "locked");
+      fs.mkdirSync(locked);
+      const filePath = path.join(locked, "note.md");
+      fs.writeFileSync(filePath, "# Note\n");
+      fs.chmodSync(locked, 0o555);
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      try {
+        const response = await request(app)
+          .put("/api/markdown-file")
+          .query({ projectPath: projectDir, path: "locked/note.md" })
+          .send({ content: "# Edited\n" });
+
+        expect(response.status).toBe(200);
+        expect(fs.readFileSync(filePath, "utf-8")).toBe("# Edited\n");
+      } finally {
+        fs.chmodSync(locked, 0o700);
+      }
+    },
+  );
 
   it("opens and creates project directories", async () => {
     const createdDir = path.join(projectDir, "created", "workspace");

@@ -2,6 +2,7 @@ import {
   type BackendInfo,
   type CompleteReviewOptions,
   type CompleteReviewResult,
+  type DocumentHistory,
   type MarkdownFileChangeEvent,
   MarkdownFileConflictError,
   type Page,
@@ -109,6 +110,34 @@ export class ApiBackend implements StorageBackend {
     return () => {
       source.close();
     };
+  }
+
+  async listSnapshots(relativePath: string): Promise<DocumentHistory> {
+    const res = await fetch(
+      this.buildUrl("/api/markdown-file/history", { path: relativePath }),
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Failed to list history for ${relativePath}: ${res.status}`,
+      );
+    }
+    return res.json();
+  }
+
+  async getSnapshot(relativePath: string, id: string): Promise<string> {
+    const res = await fetch(
+      this.buildUrl(`/api/markdown-file/history/${encodeURIComponent(id)}`, {
+        path: relativePath,
+      }),
+    );
+    if (!res.ok) {
+      throw new Error(`Failed to read snapshot ${id}: ${res.status}`);
+    }
+    const payload = (await res.json()) as { content?: unknown };
+    if (typeof payload.content !== "string") {
+      throw new Error(`Snapshot ${id} carried no content`);
+    }
+    return payload.content;
   }
 
   async completeReview(
