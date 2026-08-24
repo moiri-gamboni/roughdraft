@@ -5,6 +5,8 @@
  * take plain strings so the interesting cases can be written as literals.
  */
 
+import type { DocumentDiskChangeState } from "./storage";
+
 const RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
 
 /** Backoff for the save retry loop: 1s, 2s, 4s, 8s, then 15s forever. */
@@ -79,4 +81,64 @@ export function resolveConflict({
     return "base-unchanged";
   }
   return "real";
+}
+
+/**
+ * What a file-watcher event means for the open document.
+ *
+ * - `ignore`: nothing to do — the write was ours, or the document is already in
+ *   a state the reviewer has to resolve.
+ * - `flag-changed`: raise the disk-change banner and pause autosave.
+ * - `reload`: nothing local is at stake, so take the file's content.
+ */
+export type DiskChangeDecision = "ignore" | "flag-changed" | "reload";
+
+/**
+ * Decide what a watcher event means, given everything the session knows about
+ * its own writes.
+ *
+ * Callers must settle the saves already in flight before asking. A write of
+ * ours reaches the watcher before the save that caused it reports its version,
+ * and an echo judged too early looks exactly like somebody else's edit — which
+ * pauses autosave over our own work. Waiting is also why `savedVersions` is a
+ * list: by the time an echo is judged, later writes may already have moved the
+ * document on, so the newest version alone does not identify it.
+ */
+export function resolveDiskChange({
+  event,
+  documentVersion,
+  savedVersions,
+  dirty,
+  diskChangeState,
+  draftRestorePending,
+}: {
+  event: { exists: boolean; version: string | null };
+  documentVersion: string | null;
+  /** Every version this session has written, newest last. */
+  savedVersions: readonly string[];
+  dirty: boolean;
+  diskChangeState: DocumentDiskChangeState;
+  draftRestorePending: boolean;
+}): DiskChangeDecision {
+  if (
+    event.version &&
+    (event.version === documentVersion || savedVersions.includes(event.version))
+  ) {
+    return "ignore";
+  }
+
+  // An unsent draft is waiting on the reviewer; neither reloading over it nor
+  // relabelling the banner would help them decide.
+  if (diskChangeState === "draft-restore") return "ignore";
+
+  // A restore in flight looks exactly like unsaved local work, and pausing
+  // autosave over it would strand the very edits being restored. The save
+  // carries the loaded version, so a genuinely changed file still comes back as
+  // a conflict.
+  if (draftRestorePending) return "ignore";
+
+  if (!event.exists) return "flag-changed";
+  if (diskChangeState === "paused") return "ignore";
+  if (dirty) return "flag-changed";
+  return "reload";
 }

@@ -196,6 +196,24 @@ function fileVersionFromFile(filePath: string): string {
   return fileVersionFromContent(stats, content);
 }
 
+/**
+ * The version of a file that may no longer be there, `null` if it has gone.
+ *
+ * Reading a version is two syscalls, so the file can disappear between them —
+ * a reviewer deleting or moving it, or a branch switch. Request handlers can
+ * let that throw and answer 500, but the file watcher cannot: its callback runs
+ * outside any request, so an exception there takes the whole server down and
+ * every open document with it.
+ */
+export function fileVersionIfPresent(filePath: string): string | null {
+  try {
+    return fileVersionFromFile(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 function normalizeOverallComment(input: unknown): string | undefined {
   if (typeof input !== "string") return undefined;
   const trimmed = input.trim();
@@ -611,12 +629,15 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     res.write("retry: 1000\n\n");
 
     const sendChange = (stats: fs.Stats) => {
-      const exists = stats.nlink > 0;
+      // The poll said the file was there; the read is what decides, because it
+      // happens later and the file may have gone in between.
+      const version =
+        stats.nlink > 0 ? fileVersionIfPresent(absolutePath) : null;
       res.write(
         `event: change\ndata: ${JSON.stringify({
           path: relativePath,
-          exists,
-          version: exists ? fileVersionFromFile(absolutePath) : null,
+          exists: version !== null,
+          version,
         })}\n\n`,
       );
     };

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   nextRetryDelayMs,
   resolveConflict,
+  resolveDiskChange,
   resolveRestore,
 } from "./save-recovery";
 
@@ -148,5 +149,103 @@ describe("resolveConflict", () => {
         editorContent: "new body",
       }),
     ).toBe("real");
+  });
+});
+
+describe("resolveDiskChange", () => {
+  const externalChange = {
+    event: { exists: true, version: "v-someone-else" },
+    documentVersion: "v-loaded",
+    savedVersions: [],
+    dirty: false,
+    diskChangeState: "clean",
+    draftRestorePending: false,
+  } satisfies Parameters<typeof resolveDiskChange>[0];
+
+  it("ignores the version the open document already holds", () => {
+    expect(
+      resolveDiskChange({
+        ...externalChange,
+        event: { exists: true, version: "v-loaded" },
+      }),
+    ).toBe("ignore");
+  });
+
+  it("ignores an echo of the write we just made", () => {
+    expect(
+      resolveDiskChange({
+        ...externalChange,
+        savedVersions: ["v-ours"],
+        event: { exists: true, version: "v-ours" },
+        dirty: true,
+      }),
+    ).toBe("ignore");
+  });
+
+  /**
+   * The watcher polls, and classification waits for the saves already in
+   * flight, so an echo can be judged only once later writes have moved the
+   * document on. Remembering the newest version alone would call our own
+   * earlier write somebody else's edit and pause autosave over it.
+   */
+  it("ignores an echo of an earlier write of ours after later writes landed", () => {
+    expect(
+      resolveDiskChange({
+        ...externalChange,
+        savedVersions: ["v-ours-1", "v-ours-2", "v-ours-3"],
+        documentVersion: "v-ours-3",
+        event: { exists: true, version: "v-ours-1" },
+        dirty: true,
+      }),
+    ).toBe("ignore");
+  });
+
+  it("flags a change when an unknown version arrives over unsaved edits", () => {
+    expect(resolveDiskChange({ ...externalChange, dirty: true })).toBe(
+      "flag-changed",
+    );
+  });
+
+  it("reloads when an unknown version arrives and nothing is unsaved", () => {
+    expect(resolveDiskChange(externalChange)).toBe("reload");
+  });
+
+  it("flags a change when the file is gone", () => {
+    expect(
+      resolveDiskChange({
+        ...externalChange,
+        event: { exists: false, version: null },
+      }),
+    ).toBe("flag-changed");
+  });
+
+  it("leaves a paused document paused", () => {
+    expect(
+      resolveDiskChange({
+        ...externalChange,
+        diskChangeState: "paused",
+        dirty: true,
+      }),
+    ).toBe("ignore");
+  });
+
+  it("leaves an offered draft restore alone", () => {
+    expect(
+      resolveDiskChange({
+        ...externalChange,
+        diskChangeState: "draft-restore",
+        dirty: true,
+      }),
+    ).toBe("ignore");
+  });
+
+  it("leaves a restore that is still in flight alone", () => {
+    expect(
+      resolveDiskChange({
+        ...externalChange,
+        draftRestorePending: true,
+        dirty: true,
+      }),
+    ).toBe("ignore");
   });
 });
