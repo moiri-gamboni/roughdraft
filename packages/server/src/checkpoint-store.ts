@@ -5,8 +5,9 @@
  * The on-disk layout is a **format, not an API**: a bash hook in another repo
  * derives the same paths from a file path alone and prunes by the same rules,
  * so `<dirname>/.roughdraft-history/v1/<stem>/<id>.md`, the snapshot id
- * grammar, the content-only dedup and the count cap are all frozen. See
- * `docs/spec/history-sidecar.md`.
+ * grammar, the content-only dedup and the count cap are all frozen. The
+ * normative description is `docs/spec/history-sidecar.md` (written alongside
+ * the rest of the feature's documentation).
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -46,6 +47,13 @@ const SNAPSHOT_ID_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z--p(\d+)--(save|review|replaced|hook)$/;
 /** The canonical id is 44 characters at a 7-digit pid; the rest is slack. */
 const MAX_SNAPSHOT_ID_LENGTH = 64;
+/**
+ * Consecutive `save` snapshots inside this window fold into the first one.
+ * The app autosaves 500ms after the last keystroke, so without this the fifty
+ * slots hold a few minutes of typing and evict the clobber they exist to keep.
+ * The bash hook debounces by the same amount.
+ */
+const SAVE_COALESCE_WINDOW_MS = 90_000;
 
 /** `<dirname(document)>/.roughdraft-history/v1/<stem>/` */
 export function historyDirFor(documentPath: string): string {
@@ -63,26 +71,36 @@ export function parseSnapshotId(
   const match = SNAPSHOT_ID_PATTERN.exec(id);
   if (!match) return null;
 
-  const [, year, month, day, hour, minute, second, ms, pid, trigger] = match;
+  const [, year, month, day, hour, minute, second, ms, digits, name] = match;
   const createdAt = new Date(
     `${year}-${month}-${day}T${hour}:${minute}:${second}.${ms}Z`,
   );
   if (Number.isNaN(createdAt.getTime())) return null;
 
-  return {
-    createdAt,
-    pid: Number(pid),
-    trigger: trigger as SnapshotTrigger,
-  };
+  const pid = Number(digits);
+  const trigger = name as SnapshotTrigger;
+  // `2026-02-30T…` is not an invalid date, it is March 2nd. Insisting the id
+  // round-trips rejects every such rollover, which is what lets the rest of
+  // this module treat codepoint order on ids as chronological order.
+  if (formatSnapshotId(createdAt, pid, trigger) !== id) return null;
+
+  return { createdAt, pid, trigger };
 }
 
-/** Newest first. An absent history is empty; an unreadable one is an error. */
+/**
+ * Newest first. An absent history is not an error — it reads the same to a
+ * consumer as an `ok` listing with no snapshots, and neither deserves its own
+ * empty state. An unreadable directory is an error, because that is a
+ * different fact. `reason` carries a raw fs message including the absolute
+ * path: log it, never put it in an HTTP body.
+ */
 export function listSnapshots(documentPath: string): SnapshotListing {
   const directory = historyDirFor(documentPath);
   let entries: string[];
   try {
     entries = fs.readdirSync(directory);
   } catch (error) {
+    assertFilesystemFailure(error);
     if (errorCode(error) === "ENOENT") return { status: "absent" };
     return { status: "error", reason: describeError(error) };
   }
@@ -93,10 +111,15 @@ export function listSnapshots(documentPath: string): SnapshotListing {
     // Anything not named like a snapshot file (`.gitignore`, an abandoned
     // temporary) is none of our business; a `.md` we cannot parse is.
     if (!entry.endsWith(".md")) continue;
+    const stat = lstatOrNull(path.join(directory, entry));
+    // Gone since the readdir — a concurrent prune, not grammar drift. A
+    // symlink or a directory is not a snapshot either, and following one is
+    // how a planted link turns the history route into a file reader.
+    if (!stat?.isFile()) continue;
+
     const id = entry.slice(0, -".md".length);
     const parsed = parseSnapshotId(id);
-    const stat = statOrNull(path.join(directory, entry));
-    if (!parsed || !stat) {
+    if (!parsed) {
       unreadable += 1;
       continue;
     }
@@ -108,35 +131,39 @@ export function listSnapshots(documentPath: string): SnapshotListing {
     });
   }
 
-  snapshots.sort((left, right) => {
-    const byTime = right.createdAt.getTime() - left.createdAt.getTime();
-    if (byTime !== 0) return byTime;
-    // Same millisecond from two processes. Plain codepoint order, because the
-    // bash pruner decides the same tie by sorting filenames — a locale-aware
-    // comparison could disagree with it about which snapshot is the older one.
-    return right.id > left.id ? 1 : -1;
-  });
+  // Every id that parses has a fixed-width zero-padded timestamp, so codepoint
+  // order is time order — the same order the bash pruner gets by sorting
+  // filenames under `LC_ALL=C`. One rule, so the two cannot disagree about
+  // which snapshot is the oldest and therefore the next to be deleted.
+  snapshots.sort((left, right) => (right.id > left.id ? 1 : -1));
   return { status: "ok", snapshots, unreadable };
 }
 
 export function readSnapshot(documentPath: string, id: string): string | null {
   if (!parseSnapshotId(id)) return null;
+  const target = path.join(historyDirFor(documentPath), `${id}.md`);
+
+  let handle: number;
   try {
-    return fs.readFileSync(
-      path.join(historyDirFor(documentPath), `${id}.md`),
-      "utf8",
-    );
+    handle = fs.openSync(target, fs.constants.O_RDONLY | noFollow());
   } catch (error) {
-    if (errorCode(error) === "ENOENT") return null;
+    const code = errorCode(error);
+    // ELOOP is a symlink where a snapshot should be: as good as not there.
+    if (code === "ENOENT" || code === "ELOOP") return null;
     throw error;
+  }
+  try {
+    return fs.readFileSync(handle, "utf8");
+  } finally {
+    fs.closeSync(handle);
   }
 }
 
 /**
  * Records `content` as the newest snapshot of `documentPath`, unless the
- * newest snapshot already holds it. Returns `null` — never throws — when the
- * history cannot be written, so a failing store can never fail a document
- * write.
+ * newest snapshot already holds it. Returns `null` — never for an I/O reason
+ * throws — when there was nothing to store or the history could not be
+ * written, so a failing store can never fail a document write.
  */
 export function captureSnapshot(
   documentPath: string,
@@ -146,16 +173,9 @@ export function captureSnapshot(
   try {
     const directory = ensureHistoryDir(documentPath);
     if (!directory) return null;
-
-    const newest = newestSnapshot(documentPath);
-    if (newest && readSnapshot(documentPath, newest.id) === content) {
-      return promoteToReview(directory, newest, trigger);
-    }
-
-    const summary = writeSnapshot(directory, content, trigger, newest);
-    evictExcess(documentPath);
-    return summary;
+    return capture(documentPath, directory, content, trigger);
   } catch (error) {
+    assertFilesystemFailure(error);
     warn(`could not snapshot ${documentPath}: ${describeError(error)}`);
     return null;
   }
@@ -210,6 +230,33 @@ export function atomicWriteFileSync(targetPath: string, content: string): void {
   }
 }
 
+function capture(
+  documentPath: string,
+  directory: string,
+  content: string,
+  trigger: SnapshotTrigger,
+): SnapshotSummary | null {
+  const listing = listSnapshots(documentPath);
+  const previous = listing.status === "ok" ? listing.snapshots : [];
+  const newest = previous[0];
+
+  if (newest && snapshotHolds(documentPath, newest, content)) {
+    return promoteToReview(directory, newest, trigger);
+  }
+  if (coalescesWith(newest, trigger)) return null;
+
+  const summary = writeSnapshot(directory, content, trigger, newest);
+  if (!summary) return null;
+  try {
+    pruneExcess(directory, previous, summary);
+  } catch (error) {
+    // The snapshot is on disk; only the pruning failed. Reporting that as a
+    // failed capture would tell the caller its save went unrecorded.
+    warn(`could not prune ${documentPath}: ${describeError(error)}`);
+  }
+  return summary;
+}
+
 function sidecarRootFor(documentPath: string): string {
   return path.join(path.dirname(documentPath), HISTORY_DIR_NAME);
 }
@@ -228,7 +275,10 @@ function ensureHistoryDir(documentPath: string): string | null {
       warn(`refusing to snapshot through the symlinked path ${level}`);
       return null;
     }
-    if (!existing) fs.mkdirSync(level);
+    // `recursive` for its tolerance of an existing directory, not its depth:
+    // five writers race to create this, and the loser's `EEXIST` would cost
+    // the document its very first snapshot.
+    if (!existing) fs.mkdirSync(level, { recursive: true });
   }
 
   // One ignore file at the top covers the whole sidecar, and the bash hook
@@ -240,9 +290,26 @@ function ensureHistoryDir(documentPath: string): string | null {
   return leaf;
 }
 
-function newestSnapshot(documentPath: string): SnapshotSummary | undefined {
-  const listing = listSnapshots(documentPath);
-  return listing.status === "ok" ? listing.snapshots[0] : undefined;
+function snapshotHolds(
+  documentPath: string,
+  newest: SnapshotSummary,
+  content: string,
+): boolean {
+  // Size first: reading the whole snapshot back is the expensive half, and
+  // this runs on the event loop at the autosave cadence.
+  if (newest.bytes !== Buffer.byteLength(content)) return false;
+  return readSnapshot(documentPath, newest.id) === content;
+}
+
+function coalescesWith(
+  newest: SnapshotSummary | undefined,
+  trigger: SnapshotTrigger,
+): boolean {
+  // Only an ordinary save folds into an ordinary save. A `replaced` is the
+  // record of someone else's write, a `review` is the state being pinned, and
+  // a `hook` comes from the other implementation — none may be dropped.
+  if (trigger !== "save" || newest?.trigger !== "save") return false;
+  return Date.now() - newest.createdAt.getTime() < SAVE_COALESCE_WINDOW_MS;
 }
 
 /**
@@ -273,13 +340,20 @@ function writeSnapshot(
   content: string,
   trigger: SnapshotTrigger,
   newest: SnapshotSummary | undefined,
-): SnapshotSummary {
+): SnapshotSummary | null {
   // The id is what orders the history, so a capture is never stamped at or
   // before the snapshot it follows — several land in one millisecond, and a
   // pre-write `replaced` must not sort after the write that caused it.
   const earliest = newest ? newest.createdAt.getTime() + 1 : 0;
   const createdAt = new Date(Math.max(Date.now(), earliest));
   const id = formatSnapshotId(createdAt, process.pid, trigger);
+  if (!parseSnapshotId(id)) {
+    // Past the year 9999 `toISOString` switches to expanded-year form, which
+    // the grammar rejects. Writing it would produce a file this module cannot
+    // see, and then a new one on every save for ever.
+    warn(`refusing to write a snapshot named ${id}: it is not a snapshot id`);
+    return null;
+  }
 
   atomicWriteFileSync(path.join(directory, `${id}.md`), content);
   return { id, createdAt, trigger, bytes: Buffer.byteLength(content) };
@@ -297,17 +371,21 @@ function formatSnapshotId(
 }
 
 /** Oldest first, but the newest `review` entry keeps its slot. */
-function evictExcess(documentPath: string): void {
-  const listing = listSnapshots(documentPath);
-  if (listing.status !== "ok") return;
-  const excess = listing.snapshots.length - MAX_SNAPSHOTS_PER_DOCUMENT;
+function pruneExcess(
+  directory: string,
+  previous: SnapshotSummary[],
+  added: SnapshotSummary,
+): void {
+  // `added` is newest by construction, so this is the listing after the write
+  // without paying for a second one.
+  const snapshots = [added, ...previous];
+  const excess = snapshots.length - MAX_SNAPSHOTS_PER_DOCUMENT;
   if (excess <= 0) return;
 
-  const pinnedId = listing.snapshots.find(
+  const pinnedId = snapshots.find(
     (snapshot) => snapshot.trigger === "review",
   )?.id;
-  const directory = historyDirFor(documentPath);
-  const evictable = listing.snapshots
+  const evictable = snapshots
     .filter((snapshot) => snapshot.id !== pinnedId)
     .reverse();
   for (const snapshot of evictable.slice(0, excess)) {
@@ -331,10 +409,27 @@ function captureReplacedContent(
     }
     return null;
   }
-  if (current === priorContent) return null;
+
+  // `priorContent` is the caller vouching for these bytes — nobody else wrote
+  // them, so there is nothing to preserve. That holds only once the history
+  // has something in it: with an empty history these are the document's
+  // original bytes, which no snapshot records and which are the likeliest
+  // thing anyone will ever ask to recover.
+  if (current === priorContent && hasSnapshots(documentPath)) return null;
+
   // Bytes nobody claims to have written: capture them before they are gone.
   // The content dedup drops this again if it is already the newest snapshot.
   return captureSnapshot(documentPath, current, "replaced");
+}
+
+function hasSnapshots(documentPath: string): boolean {
+  const listing = listSnapshots(documentPath);
+  return listing.status === "ok" && listing.snapshots.length > 0;
+}
+
+/** `O_NOFOLLOW` is POSIX-only; where it does not exist the flag is a no-op. */
+function noFollow(): number {
+  return fs.constants.O_NOFOLLOW ?? 0;
 }
 
 function statOrNull(target: string): fs.Stats | null {
@@ -351,6 +446,15 @@ function lstatOrNull(target: string): fs.Stats | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Every filesystem failure carries an errno. Anything without one is this
+ * module broken rather than the disk misbehaving, and swallowing that would
+ * hide a bug behind "the history is unavailable" on a server nobody tails.
+ */
+function assertFilesystemFailure(error: unknown): void {
+  if (errorCode(error) === undefined) throw error;
 }
 
 function errorCode(error: unknown): string | undefined {

@@ -13,9 +13,16 @@ import {
   parseSnapshotId,
   readSnapshot,
   type SnapshotSummary,
+  type SnapshotTrigger,
 } from "./checkpoint-store";
 
 const CANONICAL_ID = "2026-08-24T10-11-12-345Z--p1234--hook";
+/** Mirrors the module's own formatting, so tests can plant dated snapshots. */
+const idAt = (when: Date, pid: number, trigger: SnapshotTrigger) =>
+  `${when.toISOString().replace(/[:.]/g, "-")}--p${pid}--${trigger}`;
+
+/** Permission bits mean nothing to root, so those tests would pass vacuously. */
+const asRoot = process.getuid?.() === 0;
 
 let projectDir: string;
 let docPath: string;
@@ -46,6 +53,22 @@ function ids(documentPath: string): string[] {
   return readableSnapshots(documentPath).snapshots.map(
     (snapshot) => snapshot.id,
   );
+}
+
+function contents(documentPath: string): (string | null)[] {
+  return ids(documentPath).map((id) => readSnapshot(documentPath, id));
+}
+
+/** Puts a snapshot on disk without going through the store. */
+function plantSnapshot(
+  documentPath: string,
+  id: string,
+  content: string,
+): string {
+  const directory = historyDirFor(documentPath);
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, `${id}.md`), content);
+  return id;
 }
 
 describe("historyDirFor", () => {
@@ -105,6 +128,19 @@ describe("parseSnapshotId", () => {
     expect(parseSnapshotId("2026-13-42T99-11-12-345Z--p1--save")).toBeNull();
   });
 
+  it("rejects a date that only parses by rolling over into another day", () => {
+    // `new Date("2026-02-30T…")` is not an Invalid Date — it silently becomes
+    // March 2nd, which would make the parsed instant disagree with the
+    // filename, and filename order is what the bash pruner deletes by.
+    expect(parseSnapshotId("2026-02-30T00-00-00-000Z--p1--save")).toBeNull();
+    expect(parseSnapshotId("2026-01-01T24-00-00-000Z--p1--save")).toBeNull();
+    expect(parseSnapshotId("2026-01-01T00-60-00-000Z--p1--save")).toBeNull();
+  });
+
+  it("rejects a non-canonical spelling of a valid instant", () => {
+    expect(parseSnapshotId("2026-08-24T10-11-12-345Z--p007--save")).toBeNull();
+  });
+
   it("round-trips the id of a freshly captured snapshot", () => {
     const before = Date.now();
     const summary = captureSnapshot(docPath, "hello", "review");
@@ -161,7 +197,7 @@ describe("captureSnapshot", () => {
     );
     fs.writeFileSync(gitignore, "*\n!keep-me\n");
 
-    captureSnapshot(docPath, "goodbye", "save");
+    captureSnapshot(docPath, "goodbye", "hook");
 
     expect(fs.readFileSync(gitignore, "utf8")).toBe("*\n!keep-me\n");
   });
@@ -182,9 +218,9 @@ describe("captureSnapshot", () => {
   });
 
   it("captures again once the content has changed back and forth", () => {
-    captureSnapshot(docPath, "a", "save");
-    captureSnapshot(docPath, "b", "save");
-    captureSnapshot(docPath, "a", "save");
+    captureSnapshot(docPath, "a", "hook");
+    captureSnapshot(docPath, "b", "hook");
+    captureSnapshot(docPath, "a", "hook");
 
     expect(readableSnapshots(docPath).snapshots).toHaveLength(3);
   });
@@ -205,6 +241,29 @@ describe("captureSnapshot", () => {
     expect(readSnapshot(docPath, snapshots[0].id)).toBe("same");
   });
 
+  it("promotes a replaced snapshot too, so clobbered bytes can be pinned", () => {
+    const clobbered = captureSnapshot(
+      docPath,
+      "the bytes an agent ate",
+      "replaced",
+    );
+    if (!clobbered) throw new Error("expected a snapshot");
+
+    const promoted = captureSnapshot(
+      docPath,
+      "the bytes an agent ate",
+      "review",
+    );
+
+    const { snapshots } = readableSnapshots(docPath);
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0].trigger).toBe("review");
+    expect(promoted?.id).toBe(snapshots[0].id);
+    expect(readSnapshot(docPath, snapshots[0].id)).toBe(
+      "the bytes an agent ate",
+    );
+  });
+
   it("leaves an already-review newest snapshot alone on a tie", () => {
     const original = captureSnapshot(docPath, "same", "review");
     const again = captureSnapshot(docPath, "same", "review");
@@ -213,15 +272,48 @@ describe("captureSnapshot", () => {
     expect(ids(docPath)).toEqual([original?.id]);
   });
 
-  it("returns null instead of throwing when the sidecar cannot be created", () => {
-    if (process.getuid?.() === 0) return; // root ignores the mode bits
-    fs.chmodSync(projectDir, 0o500);
-    try {
-      expect(captureSnapshot(docPath, "hello", "save")).toBeNull();
-    } finally {
-      fs.chmodSync(projectDir, 0o700);
-    }
+  it("stamps a capture after a newest snapshot dated in the future", () => {
+    // Clock skew, or another writer with a fast clock. Ids order the history,
+    // so a later capture must still sort later.
+    const future = new Date(Date.now() + 60_000);
+    plantSnapshot(docPath, idAt(future, 1, "save"), "from the future");
+
+    const summary = captureSnapshot(docPath, "now", "hook");
+
+    expect(summary?.createdAt.getTime()).toBeGreaterThan(future.getTime());
+    expect(ids(docPath)[0]).toBe(summary?.id);
   });
+
+  it("refuses to write a snapshot whose id would leave the grammar", () => {
+    // One millisecond past the end of the grammar's range, `toISOString`
+    // switches to expanded-year form. Writing that would produce a file the
+    // store cannot see, and then one new file per save for ever.
+    const poisoned = plantSnapshot(
+      docPath,
+      "9999-12-31T23-59-59-999Z--p1--save",
+      "at the end of time",
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(
+      captureSnapshot(docPath, "after the end of time", "hook"),
+    ).toBeNull();
+
+    expect(warn).toHaveBeenCalled();
+    expect(fs.readdirSync(historyDirFor(docPath))).toEqual([`${poisoned}.md`]);
+  });
+
+  it.skipIf(asRoot)(
+    "returns null instead of throwing when the sidecar cannot be created",
+    () => {
+      fs.chmodSync(projectDir, 0o500);
+      try {
+        expect(captureSnapshot(docPath, "hello", "save")).toBeNull();
+      } finally {
+        fs.chmodSync(projectDir, 0o700);
+      }
+    },
+  );
 
   it("refuses a symlinked history leaf", () => {
     const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-out-"));
@@ -249,16 +341,71 @@ describe("captureSnapshot", () => {
       fs.rmSync(elsewhere, { recursive: true, force: true });
     }
   });
+
+  it("rethrows a programmer error rather than degrading to no history", () => {
+    // A blanket catch that swallows everything hides a broken refactor behind
+    // "the history is just unavailable" on a server nobody tails.
+    vi.spyOn(fs, "readdirSync").mockImplementation(() => {
+      throw new TypeError("readdirSync is not a function");
+    });
+
+    expect(() => captureSnapshot(docPath, "hello", "save")).toThrow(TypeError);
+  });
+});
+
+describe("save coalescing", () => {
+  it("folds a burst of saves into the first one", () => {
+    const first = captureSnapshot(docPath, "typing", "save");
+    const second = captureSnapshot(docPath, "typing a bit more", "save");
+
+    expect(second).toBeNull();
+    expect(ids(docPath)).toEqual([first?.id]);
+  });
+
+  it("captures a save once the window has passed", () => {
+    plantSnapshot(
+      docPath,
+      idAt(new Date(Date.now() - 120_000), 1, "save"),
+      "two minutes ago",
+    );
+
+    const summary = captureSnapshot(docPath, "now", "save");
+
+    expect(summary?.trigger).toBe("save");
+    expect(ids(docPath)).toHaveLength(2);
+  });
+
+  it("never coalesces a replaced, review or hook capture", () => {
+    captureSnapshot(docPath, "typing", "save");
+
+    expect(captureSnapshot(docPath, "clobbered", "replaced")?.trigger).toBe(
+      "replaced",
+    );
+    expect(captureSnapshot(docPath, "reviewed", "review")?.trigger).toBe(
+      "review",
+    );
+    expect(captureSnapshot(docPath, "by an agent", "hook")?.trigger).toBe(
+      "hook",
+    );
+  });
+
+  it("does not coalesce a save behind a snapshot of another kind", () => {
+    captureSnapshot(docPath, "by an agent", "hook");
+
+    expect(captureSnapshot(docPath, "ours", "save")?.trigger).toBe("save");
+  });
 });
 
 describe("snapshot eviction", () => {
-  it("caps a document at 50 snapshots", () => {
+  it("freezes the documented cap at 50", () => {
+    // Every other test uses the symbol; this is the one place that pins the
+    // number the cross-repo format promises, so the bash pruner can match it.
     expect(MAX_SNAPSHOTS_PER_DOCUMENT).toBe(50);
   });
 
   it("evicts the oldest snapshots once the cap is exceeded", () => {
     for (let index = 0; index < MAX_SNAPSHOTS_PER_DOCUMENT + 3; index += 1) {
-      captureSnapshot(docPath, `revision ${index}`, "save");
+      captureSnapshot(docPath, `revision ${index}`, "hook");
     }
 
     const { snapshots } = readableSnapshots(docPath);
@@ -268,6 +415,19 @@ describe("snapshot eviction", () => {
     );
     expect(readSnapshot(docPath, snapshots[snapshots.length - 1].id)).toBe(
       "revision 3",
+    );
+  });
+
+  it("holds the cap on the path production writes through", () => {
+    for (let index = 0; index < MAX_SNAPSHOTS_PER_DOCUMENT + 3; index += 1) {
+      commitDocumentWrite(docPath, `revision ${index}`, {
+        priorContent: `revision ${index - 1}`,
+        trigger: "hook",
+      });
+    }
+
+    expect(readableSnapshots(docPath).snapshots).toHaveLength(
+      MAX_SNAPSHOTS_PER_DOCUMENT,
     );
   });
 
@@ -303,13 +463,34 @@ describe("snapshot eviction", () => {
     expect(surviving).toContain(pinned.id);
     expect(surviving).not.toContain(superseded.id);
   });
+
+  it("reports the snapshot it wrote even when pruning fails", () => {
+    // Injected because an unlink failure inside a directory we just wrote to
+    // is not reachable in-process; the point is that a pruning problem must
+    // not be reported as "this save was not checkpointed".
+    for (let index = 0; index < MAX_SNAPSHOTS_PER_DOCUMENT; index += 1) {
+      captureSnapshot(docPath, `revision ${index}`, "hook");
+    }
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(fs, "rmSync").mockImplementation(() => {
+      throw Object.assign(new Error("EACCES: permission denied"), {
+        code: "EACCES",
+      });
+    });
+
+    const summary = captureSnapshot(docPath, "one too many", "hook");
+
+    expect(summary?.trigger).toBe("hook");
+    expect(warn).toHaveBeenCalled();
+  });
 });
 
 describe("listSnapshots", () => {
   it("distinguishes an absent history from an unreadable one", () => {
     expect(listSnapshots(docPath)).toEqual({ status: "absent" });
+  });
 
-    if (process.getuid?.() === 0) return; // root ignores the mode bits
+  it.skipIf(asRoot)("reports an unreadable history as an error", () => {
     captureSnapshot(docPath, "hello", "save");
     fs.chmodSync(historyDirFor(docPath), 0o000);
     try {
@@ -320,9 +501,9 @@ describe("listSnapshots", () => {
   });
 
   it("orders snapshots newest first", () => {
-    const first = captureSnapshot(docPath, "one", "save");
-    const second = captureSnapshot(docPath, "two", "save");
-    const third = captureSnapshot(docPath, "three", "save");
+    const first = captureSnapshot(docPath, "one", "hook");
+    const second = captureSnapshot(docPath, "two", "hook");
+    const third = captureSnapshot(docPath, "three", "hook");
 
     expect(ids(docPath)).toEqual([third?.id, second?.id, first?.id]);
   });
@@ -330,13 +511,16 @@ describe("listSnapshots", () => {
   it("breaks a same-millisecond tie the way a filename sort does", () => {
     // The bash pruner walks `sort`ed filenames, so both implementations have to
     // agree on which of two same-instant snapshots is the older one.
-    const directory = historyDirFor(docPath);
-    fs.mkdirSync(directory, { recursive: true });
-    const lowPid = "2020-01-01T00-00-00-000Z--p10--save";
-    const highPid = "2020-01-01T00-00-00-000Z--p9--save";
-    for (const id of [lowPid, highPid]) {
-      fs.writeFileSync(path.join(directory, `${id}.md`), id);
-    }
+    const lowPid = plantSnapshot(
+      docPath,
+      "2020-01-01T00-00-00-000Z--p10--save",
+      "ten",
+    );
+    const highPid = plantSnapshot(
+      docPath,
+      "2020-01-01T00-00-00-000Z--p9--save",
+      "nine",
+    );
 
     expect(ids(docPath)).toEqual([highPid, lowPid]);
   });
@@ -352,6 +536,38 @@ describe("listSnapshots", () => {
     ]);
     expect(listing.unreadable).toBe(1);
   });
+
+  it("skips anything that is not a regular file, without calling it unreadable", () => {
+    const kept = captureSnapshot(docPath, "hello", "save");
+    const directory = historyDirFor(docPath);
+    fs.symlinkSync(
+      path.join(projectDir, "nowhere"),
+      path.join(directory, "2026-08-24T10-11-12-345Z--p1--save.md"),
+    );
+    fs.mkdirSync(path.join(directory, "2026-08-24T10-11-12-346Z--p1--save.md"));
+
+    const listing = readableSnapshots(docPath);
+    expect(listing.snapshots.map((snapshot) => snapshot.id)).toEqual([
+      kept?.id,
+    ]);
+    expect(listing.unreadable).toBe(0);
+  });
+
+  it("skips a snapshot pruned between the listing and the stat", () => {
+    // A concurrent prune by the bash hook must not inflate the "N unreadable"
+    // count, which is meant to mean "someone is writing the wrong filenames".
+    captureSnapshot(docPath, "hello", "save");
+    vi.spyOn(fs, "lstatSync").mockImplementation(() => {
+      throw Object.assign(new Error("ENOENT: no such file"), {
+        code: "ENOENT",
+      });
+    });
+
+    expect(readableSnapshots(docPath)).toMatchObject({
+      snapshots: [],
+      unreadable: 0,
+    });
+  });
 });
 
 describe("readSnapshot", () => {
@@ -360,6 +576,20 @@ describe("readSnapshot", () => {
 
     expect(readSnapshot(docPath, CANONICAL_ID)).toBeNull();
     expect(readSnapshot(docPath, "../../notes.md")).toBeNull();
+  });
+
+  it("refuses to read through a symlinked snapshot", () => {
+    // Task 2 serves snapshot bytes over an unauthenticated route, so a planted
+    // link must not turn it into a file-read primitive.
+    const secret = path.join(projectDir, "secret.txt");
+    fs.writeFileSync(secret, "not a snapshot");
+    const directory = historyDirFor(docPath);
+    fs.mkdirSync(directory, { recursive: true });
+    const planted = "2026-08-24T10-11-12-345Z--p1--save";
+    fs.symlinkSync(secret, path.join(directory, `${planted}.md`));
+
+    expect(readSnapshot(docPath, planted)).toBeNull();
+    expect(ids(docPath)).toEqual([]);
   });
 });
 
@@ -372,6 +602,34 @@ describe("commitDocumentWrite", () => {
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0].trigger).toBe("save");
     expect(readSnapshot(docPath, snapshots[0].id)).toBe("first draft");
+  });
+
+  it("keeps the original bytes of a document it has never snapshotted", () => {
+    // The first save of a document Roughdraft just opened: the caller's
+    // `priorContent` matches disk, so nothing looks amiss — but this is the
+    // pre-Roughdraft state, and the likeliest thing anyone will ask to recover.
+    fs.writeFileSync(docPath, "original review content {>>keep me<<}");
+
+    commitDocumentWrite(docPath, "edited", {
+      priorContent: "original review content {>>keep me<<}",
+      trigger: "save",
+    });
+
+    expect(contents(docPath)).toContain(
+      "original review content {>>keep me<<}",
+    );
+  });
+
+  it("captures the disk bytes as replaced when the caller vouches for nothing", () => {
+    fs.writeFileSync(docPath, "on disk already");
+    captureSnapshot(docPath, "something else entirely", "hook");
+
+    const result = commitDocumentWrite(docPath, "next", { trigger: "save" });
+
+    expect(result.preCapture?.trigger).toBe("replaced");
+    expect(readSnapshot(docPath, result.preCapture?.id ?? "")).toBe(
+      "on disk already",
+    );
   });
 
   it("captures diverged disk bytes as replaced before overwriting them", () => {
@@ -393,7 +651,26 @@ describe("commitDocumentWrite", () => {
     ).toEqual(["save", "replaced", "save"]);
   });
 
-  it("skips the replaced capture when disk still holds what the writer last wrote", () => {
+  it("captures a clobber even while saves are being coalesced", () => {
+    commitDocumentWrite(docPath, "ours", { trigger: "save" });
+    commitDocumentWrite(docPath, "ours, edited", {
+      priorContent: "ours",
+      trigger: "save",
+    });
+    fs.writeFileSync(docPath, "an agent wrote this");
+
+    const result = commitDocumentWrite(docPath, "ours, edited again", {
+      priorContent: "ours, edited",
+      trigger: "save",
+    });
+
+    expect(result.preCapture?.trigger).toBe("replaced");
+    expect(readSnapshot(docPath, result.preCapture?.id ?? "")).toBe(
+      "an agent wrote this",
+    );
+  });
+
+  it("coalesces the steady state down to one snapshot", () => {
     commitDocumentWrite(docPath, "ours", { trigger: "save" });
 
     const result = commitDocumentWrite(docPath, "ours edited", {
@@ -402,7 +679,8 @@ describe("commitDocumentWrite", () => {
     });
 
     expect(result.preCapture).toBeNull();
-    expect(ids(docPath)).toHaveLength(2);
+    expect(result.postCapture).toBeNull();
+    expect(ids(docPath)).toHaveLength(1);
   });
 
   it("skips the replaced capture when the diverged bytes are already the newest snapshot", () => {
@@ -441,28 +719,29 @@ describe("commitDocumentWrite", () => {
     expect(result.postCapture?.id).toBe(snapshots[0].id);
   });
 
-  it("still writes the document when the history sidecar cannot be written", () => {
-    if (process.getuid?.() === 0) return; // root ignores the mode bits
-    const sidecar = path.join(projectDir, ".roughdraft-history");
-    fs.mkdirSync(sidecar);
-    fs.chmodSync(sidecar, 0o500);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it.skipIf(asRoot)(
+    "still writes the document when the history sidecar cannot be written",
+    () => {
+      const sidecar = path.join(projectDir, ".roughdraft-history");
+      fs.mkdirSync(sidecar);
+      fs.chmodSync(sidecar, 0o500);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    try {
-      const result = commitDocumentWrite(docPath, "survives", {
-        trigger: "save",
-      });
+      try {
+        const result = commitDocumentWrite(docPath, "survives", {
+          trigger: "save",
+        });
 
-      expect(result.postCapture).toBeNull();
-      expect(fs.readFileSync(docPath, "utf8")).toBe("survives");
-      expect(warn).toHaveBeenCalled();
-    } finally {
-      fs.chmodSync(sidecar, 0o700);
-    }
-  });
+        expect(result.postCapture).toBeNull();
+        expect(fs.readFileSync(docPath, "utf8")).toBe("survives");
+        expect(warn).toHaveBeenCalled();
+      } finally {
+        fs.chmodSync(sidecar, 0o700);
+      }
+    },
+  );
 
-  it("propagates a failure to write the document itself", () => {
-    if (process.getuid?.() === 0) return; // root ignores the mode bits
+  it.skipIf(asRoot)("propagates a failure to write the document itself", () => {
     const readOnlyDir = path.join(projectDir, "locked");
     fs.mkdirSync(readOnlyDir);
     fs.chmodSync(readOnlyDir, 0o500);
@@ -530,12 +809,11 @@ describe("atomicWriteFileSync", () => {
 
   it("leaves no temporary behind when the write fails", () => {
     fs.writeFileSync(docPath, "before");
-    const hugeButInvalid = " ".repeat(4);
     // A directory at the target path makes renameSync fail after the temp exists.
     const blocked = path.join(projectDir, "blocked.md");
     fs.mkdirSync(blocked);
 
-    expect(() => atomicWriteFileSync(blocked, hugeButInvalid)).toThrow();
+    expect(() => atomicWriteFileSync(blocked, "content")).toThrow();
     expect(fs.readdirSync(projectDir).sort()).toEqual([
       "blocked.md",
       "notes.md",
