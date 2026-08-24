@@ -493,6 +493,27 @@ describe("createApp", () => {
       expect(JSON.stringify(response.body)).not.toContain(projectDir);
     });
 
+    it("does not leak filesystem detail when a snapshot cannot be read", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      fs.mkdirSync(path.join(projectDir, ".roughdraft-history", "v1"), {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        path.join(projectDir, ".roughdraft-history", "v1", "draft"),
+        "",
+      );
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .get("/api/markdown-file/history/2026-08-24T14-28-49-132Z--p1234--save")
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({ error: "Snapshot unavailable" });
+      // Left to Express, this answers with a stack trace naming real paths.
+      expect(response.text).not.toContain(projectDir);
+    });
+
     it("rejects a snapshot id that is shaped like a traversal", async () => {
       fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
       fs.writeFileSync(path.join(projectDir, "secret.md"), "# Secret\n");
