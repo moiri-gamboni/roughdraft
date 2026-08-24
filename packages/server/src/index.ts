@@ -692,7 +692,19 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
 
     // The store refuses any id that is not a canonical snapshot id, so a
     // traversal-shaped one reads as missing rather than as a path.
-    const content = readSnapshot(target.absolutePath, req.params.id);
+    let content: string | null;
+    try {
+      content = readSnapshot(target.absolutePath, req.params.id);
+    } catch (error) {
+      // A readable id over an unreadable file throws. Left to Express that
+      // answers with a stack trace naming real paths, on an unauthenticated
+      // route — so it is logged and reported the same way the list route is.
+      console.warn(
+        `[roughdraft:history] could not read snapshot ${req.params.id} of ${target.absolutePath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      res.status(500).json({ error: "Snapshot unavailable" });
+      return;
+    }
     if (content === null) {
       res.status(404).json({ error: "Snapshot not found" });
       return;
