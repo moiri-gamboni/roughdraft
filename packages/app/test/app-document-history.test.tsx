@@ -57,6 +57,8 @@ interface FakeBackend {
    * request is the one that settles last. */
   releaseHeldSnapshotsInReverse(): void;
   setSavesFail(fail: boolean): void;
+  /** Not a conflict: the document simply cannot be read back. */
+  setReadsFail(fail: boolean): void;
   heldSnapshotCount(): number;
 }
 
@@ -101,6 +103,7 @@ function createFakeBackend({
 } = {}): FakeBackend {
   /** Not a conflict: the destination is simply not answering. */
   let savesFail = false;
+  let readsFail = false;
   const saved: FakeBackend["saved"] = [];
   const historyCalls: string[] = [];
   const snapshotCalls: string[] = [];
@@ -149,6 +152,9 @@ function createFakeBackend({
     setSavesFail(fail) {
       savesFail = fail;
     },
+    setReadsFail(fail) {
+      readsFail = fail;
+    },
     releaseHeldSnapshotsInReverse() {
       const waiting = heldSnapshots.splice(0, heldSnapshots.length).reverse();
       for (const resolve of waiting) resolve();
@@ -176,6 +182,7 @@ function createFakeBackend({
       },
       canManageProjects: false,
       async getMarkdownFile() {
+        if (readsFail) throw new Error("The document cannot be read");
         return { ...page };
       },
       async saveMarkdownFile(_path, nextContent, expectedVersion) {
@@ -798,6 +805,24 @@ describe("telling the reviewer their text moved", () => {
     await click(queryByTestId("external-change-notice-view-history"));
 
     await waitFor(() => queryByTestId("document-history-dialog") !== null);
+  });
+
+  it("raises the conflict banner when the reload it tried to do failed", async () => {
+    // Saying nothing leaves the editor showing bytes that are not on disk with
+    // autosave still running, and the reviewer meets it later as a conflict
+    // they cannot account for.
+    const fake = createFakeBackend();
+    detectBackendMock.mockResolvedValue(fake.backend);
+
+    await renderApp();
+    fake.setReadsFail(true);
+    await act(async () => {
+      fake.emitDiskChange("v-agent");
+      await Promise.resolve();
+    });
+
+    await waitFor(() => queryByTestId("file-conflict-notice") !== null);
+    expect(queryByTestId("external-change-notice")).toBeNull();
   });
 
   it("still says so on a backend that watches but cannot browse history", async () => {
