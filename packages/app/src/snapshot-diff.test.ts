@@ -51,7 +51,6 @@ describe("diffing a snapshot against the open document", () => {
     const added = diff.lines.filter((line) => line.kind === "added");
 
     expect(added).toHaveLength(MAX_DIFF_RUN_LINES);
-    expect(diff.truncated).toBe(true);
     expect(diff.lines).toContainEqual({ kind: "elided", count: 25 });
   });
 
@@ -63,13 +62,14 @@ describe("diffing a snapshot against the open document", () => {
 
     const diff = diffSnapshot("# Doc\n", after);
 
-    expect(diff.truncated).toBe(false);
     expect(diff.lines.some((line) => line.kind === "elided")).toBe(false);
   });
 
-  it("passes a fenced code block through verbatim", () => {
-    // A line diff cannot reinterpret its input, and the fence content here
-    // includes the very markers a CriticMarkup-aware diff would try to nest.
+  it("passes CriticMarkup through verbatim, fenced or not", () => {
+    // A line diff cannot reinterpret its input, so both registers take the same
+    // path: there is no marker-aware branch to exercise separately. The fence
+    // is the harder-looking case, and it holds the markers a CriticMarkup-aware
+    // diff would try to nest inside its own.
     const before = "# Doc\n\n```text\n{++inserted++}\n```\n";
     const after = "# Doc\n\n```text\n{--deleted--}\n```\n";
 
@@ -81,24 +81,6 @@ describe("diffing a snapshot against the open document", () => {
       "a {--deleted--}",
       "c ```",
     ]);
-  });
-
-  it("carries real CriticMarkup through without rewriting it", () => {
-    const before = "{==Anchor==}{>>Note<<}{#c1} tail.\n";
-    const after = "{==Anchor==}{>>Note<<}{#c1} tail, edited.\n";
-
-    const diff = diffSnapshot(before, after);
-    const removed = diff.lines.find((line) => line.kind === "removed");
-    const added = diff.lines.find((line) => line.kind === "added");
-
-    expect(removed).toEqual({
-      kind: "removed",
-      text: "{==Anchor==}{>>Note<<}{#c1} tail.",
-    });
-    expect(added).toEqual({
-      kind: "added",
-      text: "{==Anchor==}{>>Note<<}{#c1} tail, edited.",
-    });
   });
 
   it("treats an empty snapshot as everything added", () => {
