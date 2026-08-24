@@ -1461,6 +1461,7 @@ export function DocumentWorkspace({
           backend={backend}
           documentPath={activeDocumentPath}
           documentFilenameLabel={documentFilenameLabel}
+          documentContent={documentPage?.content ?? ""}
           restoreAvailability={restoreAvailability}
           onRestore={onRestoreSnapshot}
         />

@@ -125,6 +125,36 @@ test.describe("recovering a clobbered review from history", () => {
     });
   });
 
+  test("shows what the agent's write changed against a stored version", async ({
+    page,
+  }) => {
+    const filePath = writeProjectFile(projectDir, "diff.md", REVIEWED);
+    await openMarkdownFile(page, filePath, "code");
+    await appendInCodeEditor(page, "\nReviewer note.\n");
+    await expect(documentSaveStatus(page)).toHaveAttribute(
+      "aria-label",
+      "Saved",
+    );
+
+    fs.writeFileSync(filePath, CLOBBERED);
+    await expect(page.getByTestId("external-change-notice")).toBeVisible();
+
+    await openHistoryAndSelectNewest(page);
+    await page.getByTestId("document-history-view-diff").click();
+
+    const diff = page.getByTestId("document-history-diff");
+    await expect(diff).toBeVisible();
+    // The review is gone from the open document and the agent's line is new.
+    await expect(
+      diff.getByTestId("document-history-diff-line-removed").first(),
+    ).toContainText("{==Reviewed line==}");
+    await expect(
+      diff.getByTestId("document-history-diff-line-added").first(),
+    ).toContainText("overwrote everything");
+
+    logE2eEvent("history-restore.diff-pane", { file: "diff.md" });
+  });
+
   test("opens above the sticky document header rather than under it", async ({
     page,
   }) => {
