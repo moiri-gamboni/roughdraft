@@ -160,6 +160,28 @@ describe("createApp", () => {
     expect(response.body.version).toEqual(expect.any(String));
   });
 
+  it("saves a document whose bytes are not valid UTF-8", async () => {
+    // A note saved as Latin-1 decodes with U+FFFD. Hashing the raw bytes for
+    // the comparison and the decoded string for the reply makes every
+    // version-quoting save 409 against the version it was just handed.
+    const filePath = path.join(projectDir, "latin.md");
+    fs.writeFileSync(filePath, Buffer.from("23 20 43 61 66 e9 0a".split(" ").map((byte) => Number.parseInt(byte, 16))));
+    const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+    const read = await request(app)
+      .get("/api/markdown-file")
+      .query({ projectPath: projectDir, path: "latin.md" });
+    expect(read.status).toBe(200);
+
+    const write = await request(app)
+      .put("/api/markdown-file")
+      .query({ projectPath: projectDir, path: "latin.md" })
+      .send({ content: "# Edited\n", expectedVersion: read.body.version });
+
+    expect(write.status).toBe(200);
+    expect(fs.readFileSync(filePath, "utf-8")).toBe("# Edited\n");
+  });
+
   it("lists, reads, and deletes page-backed markdown files", async () => {
     fs.writeFileSync(path.join(projectDir, "alpha.md"), "# Alpha\n");
 
@@ -379,21 +401,36 @@ describe("createApp", () => {
       );
     });
 
-    it("preserves the replaced bytes when a save carries no expected version", async () => {
+    it("keeps the replaced bytes of a blind save, but not of a version-quoting one", async () => {
       fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
       const { app } = createApp({ homeDir, staticDirPath: projectDir });
 
-      const response = await request(app)
+      // A save quoting a version accounted for what it overwrote, so the only
+      // unclaimed bytes are the ones the document held before Roughdraft saw
+      // it. Capturing on every save instead would spend the fifty slots in
+      // about twenty-five keystroke pauses and evict the clobber they exist to
+      // hold.
+      expect((await save(app, "# One\n")).status).toBe(200);
+      expect((await save(app, "# Two\n")).status).toBe(200);
+      expect((await save(app, "# Three\n")).status).toBe(200);
+
+      const afterQuoted = snapshotsOfDraft().filter(
+        (snapshot) => snapshot.trigger === "replaced",
+      );
+      expect(afterQuoted).toHaveLength(1);
+      expect(snapshotContent(afterQuoted[0].id)).toBe("# Original\n");
+
+      const blind = await request(app)
         .put("/api/markdown-file")
         .query({ projectPath: projectDir, path: "draft.md" })
         .send({ content: "# Overwritten\n" });
-      expect(response.status).toBe(200);
+      expect(blind.status).toBe(200);
 
-      const replaced = snapshotsOfDraft().filter(
+      const afterBlind = snapshotsOfDraft().filter(
         (snapshot) => snapshot.trigger === "replaced",
       );
-      expect(replaced).toHaveLength(1);
-      expect(snapshotContent(replaced[0].id)).toBe("# Original\n");
+      expect(afterBlind).toHaveLength(2);
+      expect(snapshotContent(afterBlind[0].id)).toBe("# Three\n");
     });
 
     it("leaves the reviewed state as the newest snapshot", async () => {
@@ -545,6 +582,35 @@ describe("createApp", () => {
 
       expect(response.status).toBe(404);
       expect(response.body).toEqual({ error: "Snapshot not found" });
+      // A refusal that served the file under a 404 would pass on status alone.
+      expect(response.text).not.toContain("# Secret");
+    });
+
+    it("refuses a snapshot reached as a page id through an encoded slash", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+      await save(app, "# Saved\n");
+
+      const snapshotId = snapshotsOfDraft()[0].id;
+      // Express matches `:id` against the encoded path and decodes afterwards,
+      // so `%2F` smuggles a whole sidecar path past a route that never
+      // resolves a document path.
+      const pageId = encodeURIComponent(
+        `.roughdraft-history/v1/draft/${snapshotId}`,
+      );
+
+      const read = await request(app)
+        .get(`/api/pages/${pageId}`)
+        .query({ projectPath: projectDir });
+      expect(read.status).toBe(404);
+      expect(read.text).not.toContain("# Saved");
+
+      const removed = await request(app)
+        .delete(`/api/pages/${pageId}`)
+        .query({ projectPath: projectDir });
+      expect(removed.status).toBe(404);
+
+      expect(snapshotContent(snapshotId)).toBe("# Saved\n");
     });
 
     it("refuses to treat a snapshot as a document", async () => {
@@ -1045,6 +1111,79 @@ describe("createApp", () => {
       paths: ["notes/", "notes/nested/", "notes/alpha.md", "zeta.md"],
     });
   });
+
+  it("keeps the history sidecar out of the project tree", async () => {
+    fs.writeFileSync(path.join(projectDir, "draft.md"), "# Draft\n");
+    const { app } = createApp({ homeDir, staticDirPath: projectDir });
+    await request(app)
+      .put("/api/markdown-file")
+      .query({ projectPath: projectDir, path: "draft.md" })
+      .send({ content: "# Saved\n" });
+
+    const response = await request(app).get("/api/file-tree").query({
+      projectPath: projectDir,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ paths: ["draft.md"] });
+  });
+
+  describe("error handling", () => {
+    it("answers a generic 400 for an id that cannot be decoded", async () => {
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .get("/api/markdown-file/history/%zz")
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ error: "Bad request" });
+      expect(response.text).not.toContain("node_modules");
+    });
+
+    it("answers a generic 500 without naming the path it could not write", async () => {
+      // Express's default handler answers a stack trace naming the absolute
+      // document path, the temp filename and the server's own source files, on
+      // an unauthenticated route.
+      fs.mkdirSync(path.join(projectDir, "note.md"));
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .put("/api/markdown-file")
+        .query({ projectPath: projectDir, path: "note.md" })
+        .send({ content: "# Edited\n" });
+
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({ error: "Internal server error" });
+      expect(response.text).not.toContain(projectDir);
+    });
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "still saves a writable document inside a read-only directory",
+    async () => {
+      // A plain write succeeded here before the store took over document
+      // writes; needing to create a temporary alongside would refuse it.
+      const locked = path.join(projectDir, "locked");
+      fs.mkdirSync(locked);
+      const filePath = path.join(locked, "note.md");
+      fs.writeFileSync(filePath, "# Note\n");
+      fs.chmodSync(locked, 0o555);
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      try {
+        const response = await request(app)
+          .put("/api/markdown-file")
+          .query({ projectPath: projectDir, path: "locked/note.md" })
+          .send({ content: "# Edited\n" });
+
+        expect(response.status).toBe(200);
+        expect(fs.readFileSync(filePath, "utf-8")).toBe("# Edited\n");
+      } finally {
+        fs.chmodSync(locked, 0o700);
+      }
+    },
+  );
 
   it("opens and creates project directories", async () => {
     const createdDir = path.join(projectDir, "created", "workspace");
