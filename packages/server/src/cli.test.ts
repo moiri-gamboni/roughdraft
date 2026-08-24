@@ -6,6 +6,12 @@ import { fileURLToPath } from "node:url";
 import { validateRoughdraftMarkdown } from "@roughdraft/rfm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  commitDocumentWrite,
+  historyDirFor,
+  listSnapshots,
+  readSnapshot,
+} from "./checkpoint-store";
+import {
   createCliDependencies,
   createDefaultOpenUrl,
   ensureServerRunning,
@@ -2990,5 +2996,420 @@ describe("runCli open in remote mode reconnects", () => {
     expect(cli.calls.attachedSessions).toEqual([]);
     expect(cli.logs).toHaveLength(1);
     expect(cli.logs[0]).toContain("?session=");
+  });
+
+  function snapshotContents(): string[] {
+    const listing = listSnapshots(filePath);
+    if (listing.status !== "ok") return [];
+    return listing.snapshots.map(
+      (snapshot) => readSnapshot(filePath, snapshot.id) ?? "",
+    );
+  }
+
+  it("keeps a foreign disk change that a remote save is about to overwrite", async () => {
+    const streams: ReturnType<typeof eventStream>[] = [];
+
+    const cli = startCli({
+      events: () => {
+        if (streams.length >= 1) throw new TypeError("fetch failed");
+        const stream = eventStream();
+        streams.push(stream);
+        return stream.response;
+      },
+    });
+
+    await waitFor(() => streams.length === 1, "the attach");
+    fs.writeFileSync(filePath, "an agent wrote this\n");
+    streams[0].save("from the browser\n");
+    await waitFor(
+      () => fs.readFileSync(filePath, "utf-8") === "from the browser\n",
+      "the remote save",
+    );
+    streams[0].end();
+
+    expect(await cli.promise).toBe(1);
+    const listing = listSnapshots(filePath);
+    expect(listing.status).toBe("ok");
+    if (listing.status !== "ok") throw new Error("unreachable");
+    const replaced = listing.snapshots.find(
+      (snapshot) => snapshot.trigger === "replaced",
+    );
+    expect(replaced).toBeDefined();
+    expect(readSnapshot(filePath, replaced?.id ?? "")).toBe(
+      "an agent wrote this\n",
+    );
+    expect(cli.errors.join("\n")).toContain("changed on disk");
+  });
+
+  it("does not report a save of its own as an edit from outside", async () => {
+    const streams: ReturnType<typeof eventStream>[] = [];
+
+    const cli = startCli({
+      events: () => {
+        if (streams.length >= 1) throw new TypeError("fetch failed");
+        const stream = eventStream();
+        streams.push(stream);
+        return stream.response;
+      },
+    });
+
+    await waitFor(() => streams.length === 1, "the attach");
+    streams[0].save("first\n");
+    await waitFor(
+      () => fs.readFileSync(filePath, "utf-8") === "first\n",
+      "the first save",
+    );
+    streams[0].save("second\n");
+    await waitFor(
+      () => fs.readFileSync(filePath, "utf-8") === "second\n",
+      "the second save",
+    );
+    streams[0].end();
+
+    expect(await cli.promise).toBe(1);
+    // The store keeps the pre-session bytes of a document whose history is
+    // empty, so a snapshot appearing here is expected and says nothing about
+    // who wrote the file.
+    expect(cli.errors.join("\n")).not.toContain("changed on disk");
+  });
+
+  it("keeps a foreign disk change found while re-registering after an outage", async () => {
+    const streams: ReturnType<typeof eventStream>[] = [];
+
+    const cli = startCli({
+      session: (attempt) => {
+        if (attempt === 1) {
+          // The host forgot the session, and the file moved on meanwhile.
+          fs.writeFileSync(filePath, "edited on disk\n");
+          return notFound();
+        }
+        return serving(filePath);
+      },
+      events: () => {
+        if (streams.length >= 1) throw new TypeError("fetch failed");
+        const stream = eventStream();
+        streams.push(stream);
+        return stream.response;
+      },
+    });
+
+    await waitFor(() => streams.length === 1, "the attach after re-register");
+    streams[0].end();
+
+    expect(await cli.promise).toBe(1);
+    expect(snapshotContents()).toEqual(["edited on disk\n"]);
+    expect(cli.errors.join("\n")).toContain("changed on disk");
+  });
+});
+
+describe("runCli history", () => {
+  let tempDir: string;
+  let projectDir: string;
+  let filePath: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-cli-history-"));
+    projectDir = path.join(tempDir, "project");
+    fs.mkdirSync(projectDir, { recursive: true });
+    filePath = path.join(projectDir, "draft.md");
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  async function runHistory(args: string[]): Promise<{
+    exitCode: number;
+    logs: string[];
+    errors: string[];
+    fetchCalls: number;
+  }> {
+    const logs: string[] = [];
+    const errors: string[] = [];
+    let fetchCalls = 0;
+
+    const exitCode = await runCli(["history", ...args], {
+      env: {},
+      cwd: projectDir,
+      log: (message) => logs.push(message),
+      error: (message) => errors.push(message),
+      openUrl: () => "disabled",
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        throw new Error("history must not contact a server");
+      },
+    });
+
+    return { exitCode, logs, errors, fetchCalls };
+  }
+
+  it("lists snapshots newest first without contacting a server", async () => {
+    const older = commitDocumentWrite(filePath, "one\n", { trigger: "save" });
+    const newer = commitDocumentWrite(filePath, "two\n", { trigger: "review" });
+
+    const run = await runHistory([filePath]);
+
+    expect(run.exitCode).toBe(0);
+    expect(run.fetchCalls).toBe(0);
+    const output = run.logs.join("\n");
+    const newerAt = output.indexOf(newer.postCapture?.id ?? "");
+    const olderAt = output.indexOf(older.postCapture?.id ?? "");
+    expect(newerAt).toBeGreaterThanOrEqual(0);
+    expect(olderAt).toBeGreaterThan(newerAt);
+    expect(output).toContain("review");
+    expect(output).toContain("4 bytes");
+  });
+
+  it("emits every snapshot field from --json", async () => {
+    const saved = commitDocumentWrite(filePath, "one\n", { trigger: "save" });
+
+    const run = await runHistory([filePath, "--json"]);
+
+    expect(run.exitCode).toBe(0);
+    const payload = JSON.parse(run.logs[0] ?? "{}") as {
+      path: string;
+      historyDir: string;
+      unreadable: number;
+      snapshots: unknown[];
+    };
+    expect(payload.path).toBe(filePath);
+    expect(payload.historyDir).toBe(historyDirFor(filePath));
+    expect(payload.unreadable).toBe(0);
+    expect(payload.snapshots).toEqual([
+      {
+        id: saved.postCapture?.id,
+        trigger: "save",
+        createdAt: saved.postCapture?.createdAt.toISOString(),
+        bytes: 4,
+      },
+    ]);
+  });
+
+  it("says where history lives when a document has none", async () => {
+    fs.writeFileSync(filePath, "never saved through Roughdraft\n");
+
+    const run = await runHistory([filePath]);
+
+    expect(run.exitCode).toBe(0);
+    const output = run.logs.join("\n");
+    expect(output).toContain("No history");
+    expect(output).toContain("renamed");
+  });
+
+  it("counts history files that are not snapshots", async () => {
+    commitDocumentWrite(filePath, "one\n", { trigger: "save" });
+    fs.writeFileSync(path.join(historyDirFor(filePath), "notes.md"), "junk\n");
+
+    const run = await runHistory([filePath, "--json"]);
+
+    const payload = JSON.parse(run.logs[0] ?? "{}") as { unreadable: number };
+    expect(payload.unreadable).toBe(1);
+  });
+
+  it("reports unreadable history files even when no snapshot is readable", async () => {
+    fs.mkdirSync(historyDirFor(filePath), { recursive: true });
+    fs.writeFileSync(path.join(historyDirFor(filePath), "notes.md"), "junk\n");
+
+    const run = await runHistory([filePath]);
+
+    expect(run.exitCode).toBe(0);
+    expect(run.logs.join("\n")).toContain("1 file(s)");
+  });
+
+  it("prints a snapshot with --show without adding a blank line", async () => {
+    const saved = commitDocumentWrite(filePath, "one\n", { trigger: "save" });
+    commitDocumentWrite(filePath, "two\n", { trigger: "save" });
+
+    const run = await runHistory([
+      filePath,
+      "--show",
+      saved.postCapture?.id ?? "",
+    ]);
+
+    expect(run.exitCode).toBe(0);
+    expect(`${run.logs.join("\n")}\n`).toBe("one\n");
+  });
+
+  it("emits the snapshot content from --show --json", async () => {
+    const saved = commitDocumentWrite(filePath, "one\n", { trigger: "save" });
+    const id = saved.postCapture?.id ?? "";
+
+    const run = await runHistory([filePath, "--show", id, "--json"]);
+
+    expect(run.exitCode).toBe(0);
+    expect(JSON.parse(run.logs[0] ?? "{}")).toEqual({
+      path: filePath,
+      id,
+      content: "one\n",
+    });
+  });
+
+  it("names the replaced snapshot in --restore --json", async () => {
+    const saved = commitDocumentWrite(filePath, "reviewed\n", {
+      trigger: "review",
+    });
+    fs.writeFileSync(filePath, "clobbered by an agent\n");
+
+    const run = await runHistory([
+      filePath,
+      "--restore",
+      saved.postCapture?.id ?? "",
+      "--json",
+    ]);
+
+    expect(run.exitCode).toBe(0);
+    const payload = JSON.parse(run.logs[0] ?? "{}") as {
+      restored: boolean;
+      path: string;
+      id: string;
+      replacedSnapshotId: string | null;
+    };
+    expect(payload.restored).toBe(true);
+    expect(payload.path).toBe(filePath);
+    expect(payload.id).toBe(saved.postCapture?.id);
+    expect(readSnapshot(filePath, payload.replacedSnapshotId ?? "")).toBe(
+      "clobbered by an agent\n",
+    );
+  });
+
+  it("reports a snapshot id that is not in the history", async () => {
+    commitDocumentWrite(filePath, "one\n", { trigger: "save" });
+
+    const run = await runHistory([
+      filePath,
+      "--show",
+      "2026-01-01T00-00-00-000Z--p1--save",
+    ]);
+
+    expect(run.exitCode).toBe(1);
+    expect(run.errors.join("\n")).toContain(
+      "2026-01-01T00-00-00-000Z--p1--save",
+    );
+  });
+
+  it("refuses a snapshot id that is a path rather than an id", async () => {
+    commitDocumentWrite(filePath, "one\n", { trigger: "save" });
+    const outsider = path.join(tempDir, "outside.md");
+    fs.writeFileSync(outsider, "not yours\n");
+
+    // Four levels up from `<project>/.roughdraft-history/v1/draft/` is the
+    // temp root, so this id would read `outsider` if the id were ever treated
+    // as a path fragment.
+    const run = await runHistory([filePath, "--show", "../../../../outside"]);
+
+    expect(run.exitCode).toBe(1);
+    expect(run.logs.join("\n")).not.toContain("not yours");
+  });
+
+  it("restores a snapshot over the current file", async () => {
+    const saved = commitDocumentWrite(filePath, "reviewed\n", {
+      trigger: "review",
+    });
+    fs.writeFileSync(filePath, "clobbered by an agent\n");
+
+    const run = await runHistory([
+      filePath,
+      "--restore",
+      saved.postCapture?.id ?? "",
+    ]);
+
+    expect(run.exitCode).toBe(0);
+    expect(fs.readFileSync(filePath, "utf8")).toBe("reviewed\n");
+  });
+
+  it("keeps the clobbered content a restore replaces, and names it", async () => {
+    const saved = commitDocumentWrite(filePath, "reviewed\n", {
+      trigger: "review",
+    });
+    fs.writeFileSync(filePath, "clobbered by an agent\n");
+
+    const run = await runHistory([
+      filePath,
+      "--restore",
+      saved.postCapture?.id ?? "",
+    ]);
+
+    const listing = listSnapshots(filePath);
+    expect(listing.status).toBe("ok");
+    if (listing.status !== "ok") throw new Error("unreachable");
+    const replaced = listing.snapshots.find(
+      (snapshot) => snapshot.trigger === "replaced",
+    );
+    expect(readSnapshot(filePath, replaced?.id ?? "")).toBe(
+      "clobbered by an agent\n",
+    );
+    expect(run.logs.join("\n")).toContain(replaced?.id);
+  });
+
+  it("undoes a restore by restoring what it captured", async () => {
+    const saved = commitDocumentWrite(filePath, "reviewed\n", {
+      trigger: "review",
+    });
+    fs.writeFileSync(filePath, "clobbered by an agent\n");
+    await runHistory([filePath, "--restore", saved.postCapture?.id ?? ""]);
+
+    const listing = listSnapshots(filePath);
+    if (listing.status !== "ok") throw new Error("unreachable");
+    const replaced = listing.snapshots.find(
+      (snapshot) => snapshot.trigger === "replaced",
+    );
+    const undo = await runHistory([filePath, "--restore", replaced?.id ?? ""]);
+
+    expect(undo.exitCode).toBe(0);
+    expect(fs.readFileSync(filePath, "utf8")).toBe("clobbered by an agent\n");
+  });
+
+  it("restores a document that was deleted from disk", async () => {
+    const saved = commitDocumentWrite(filePath, "reviewed\n", {
+      trigger: "review",
+    });
+    fs.rmSync(filePath);
+
+    const run = await runHistory([
+      filePath,
+      "--restore",
+      saved.postCapture?.id ?? "",
+    ]);
+
+    expect(run.exitCode).toBe(0);
+    expect(fs.readFileSync(filePath, "utf8")).toBe("reviewed\n");
+  });
+
+  it("refuses --show together with --restore", async () => {
+    const saved = commitDocumentWrite(filePath, "one\n", { trigger: "save" });
+    const id = saved.postCapture?.id ?? "";
+
+    const run = await runHistory([filePath, "--show", id, "--restore", id]);
+
+    expect(run.exitCode).toBe(2);
+    expect(run.errors.join("\n")).toContain("--restore");
+    expect(fs.readFileSync(filePath, "utf8")).toBe("one\n");
+  });
+
+  it("rejects a path that is not markdown", async () => {
+    const notMarkdown = path.join(projectDir, "notes.txt");
+    fs.writeFileSync(notMarkdown, "hello\n");
+
+    const run = await runHistory([notMarkdown]);
+
+    expect(run.exitCode).toBe(2);
+    expect(run.errors.join("\n")).toContain(".md");
+  });
+
+  it("documents the history flags in its command help", async () => {
+    const logs: string[] = [];
+    const exitCode = await runCli(["help", "history"], {
+      env: {},
+      cwd: projectDir,
+      log: (message) => logs.push(message),
+      error: () => {},
+      openUrl: () => "disabled",
+    });
+
+    expect(exitCode).toBe(0);
+    const output = logs.join("\n");
+    expect(output).toContain("roughdraft history <path>");
+    expect(output).toContain("--show");
+    expect(output).toContain("--restore");
   });
 });
