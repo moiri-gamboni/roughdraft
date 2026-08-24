@@ -27,10 +27,8 @@ function ScrollArea({
 }
 
 function ScrollAreaScrollbar({
-  className,
   orientation = "vertical",
-  ...props
-}: ScrollAreaPrimitive.Scrollbar.Props) {
+}: Pick<ScrollAreaPrimitive.Scrollbar.Props, "orientation">) {
   return (
     <ScrollAreaPrimitive.Scrollbar
       data-slot="scroll-area-scrollbar"
@@ -39,9 +37,7 @@ function ScrollAreaScrollbar({
         "flex touch-none select-none rounded-full bg-transparent p-px opacity-0 transition-opacity delay-300 data-hovering:opacity-100 data-hovering:delay-0 data-scrolling:opacity-100 data-scrolling:delay-0",
         orientation === "vertical" && "w-1.5",
         orientation === "horizontal" && "h-1.5 flex-col",
-        className,
       )}
-      {...props}
     >
       <ScrollAreaPrimitive.Thumb
         data-slot="scroll-area-thumb"
