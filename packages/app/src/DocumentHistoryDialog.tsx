@@ -37,6 +37,7 @@ export function logHistoryEvent(
 export type RestoreAvailability =
   | "ready"
   | "blocked-by-draft-offer"
+  | "blocked-by-unsent-edits"
   | "needs-overwrite";
 
 const restoreBlockedCopy: Record<
@@ -45,6 +46,8 @@ const restoreBlockedCopy: Record<
 > = {
   "blocked-by-draft-offer":
     "Answer the unsent-draft offer first. Restoring now would decide that question for you.",
+  "blocked-by-unsent-edits":
+    "Edits in this tab have not reached the file yet. Restoring would replace them, and no version holds them — while saves are failing it could not land either.",
   "needs-overwrite":
     "This file changed on disk, so restoring cannot save over it. Overwrite instead — Roughdraft records a version of what it replaces, so you can undo this.",
 };
@@ -176,7 +179,7 @@ interface DocumentHistoryDialogProps {
   documentPath: string;
   documentFilenameLabel: string;
   /** The open document, as the other side of the diff. */
-  documentContent: string;
+  getDocumentContent: () => string;
   restoreAvailability: RestoreAvailability;
   onRestore: (restore: SnapshotRestore) => void | Promise<void>;
 }
@@ -197,13 +200,17 @@ export function DocumentHistoryDialog({
   backend,
   documentPath,
   documentFilenameLabel,
-  documentContent,
+  getDocumentContent,
   restoreAvailability,
   onRestore,
 }: DocumentHistoryDialogProps) {
   const [listing, setListing] = useState<Listing>({ status: "loading" });
   const [viewing, setViewing] = useState<Viewing | null>(null);
   const [pane, setPane] = useState<"snapshot" | "diff">("snapshot");
+  // Captured when the dialog opens rather than read per render: the dialog is
+  // modal, so the editor cannot move underneath it, and this keeps the diff
+  // off the render path of a ref that changes on every keystroke.
+  const [documentContent, setDocumentContent] = useState("");
   /** The version whose read is allowed to land; later clicks supersede it. */
   const requestedIdRef = useRef<string | null>(null);
 
@@ -217,6 +224,7 @@ export function DocumentHistoryDialog({
     setViewing(null);
     setPane("snapshot");
     requestedIdRef.current = null;
+    setDocumentContent(getDocumentContent());
     logHistoryEvent("opened", { path: documentPath });
 
     void (async () => {
@@ -238,7 +246,7 @@ export function DocumentHistoryDialog({
     return () => {
       cancelled = true;
     };
-  }, [backend, documentPath, open]);
+  }, [backend, documentPath, getDocumentContent, open]);
 
   const selectSnapshot = useCallback(
     (id: string) => {

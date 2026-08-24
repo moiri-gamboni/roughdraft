@@ -187,6 +187,38 @@ const restoreAvailabilityByDiskState: Record<
   paused: "needs-overwrite",
 };
 
+/**
+ * The disk state says what the *file* will accept; it says nothing about work
+ * sitting in this tab that never reached the file. Those edits are on no disk
+ * anywhere, so no snapshot holds them and a restore over them is unrecoverable
+ * — and while saves are failing the restore could not land either way.
+ */
+export function resolveRestoreAvailability({
+  diskChangeState,
+  hasUnsentEdits,
+}: {
+  diskChangeState: DocumentDiskChangeState;
+  hasUnsentEdits: boolean;
+}): RestoreAvailability {
+  const fromDisk = restoreAvailabilityByDiskState[diskChangeState];
+  // Only ever tightens: the other two reasons already stop the reviewer, and
+  // both name a problem more actionable than this one.
+  if (fromDisk === "ready" && hasUnsentEdits) return "blocked-by-unsent-edits";
+  return fromDisk;
+}
+
+export interface DocumentHistoryWiring {
+  /**
+   * The editor's current text, read when the dialog opens. A getter rather
+   * than a prop because the live text lives in a ref that deliberately does
+   * not re-render the tree on every keystroke — and the last *saved* copy is
+   * the wrong answer, since the states that offer the overwrite escape are
+   * exactly the states where unsaved work has been accumulating.
+   */
+  getDocumentContent: () => string;
+  onRestore: (restore: SnapshotRestore) => void | Promise<void>;
+}
+
 export interface DraftRestoreOffer {
   mode: DraftMode;
   onRestore: () => void;
@@ -487,10 +519,12 @@ interface DocumentWorkspaceProps {
    */
   externalChangeNotice?: { onDismiss: () => void } | null;
   /**
-   * Absent where there is nothing to restore into — the preview page runs on an
-   * in-memory backend with no file behind it — which also hides the control.
+   * Everything the history dialog needs from its owner, as one value so a
+   * caller cannot wire up the control and forget half of it. Absent where there
+   * is nothing to restore into — the preview page runs on an in-memory backend
+   * with no file behind it — which also hides the control.
    */
-  onRestoreSnapshot?: (restore: SnapshotRestore) => void | Promise<void>;
+  history?: DocumentHistoryWiring | null;
   onReloadDocumentFromDisk: () => void | Promise<void>;
   onKeepEditingWithoutAutosave: () => void;
   onOverwriteDocumentOnDisk: () => void | Promise<void>;
@@ -517,7 +551,7 @@ export function DocumentWorkspace({
   contentRestore = null,
   draftRestoreOffer = null,
   externalChangeNotice = null,
-  onRestoreSnapshot = undefined,
+  history = null,
   onReloadDocumentFromDisk,
   onKeepEditingWithoutAutosave,
   onOverwriteDocumentOnDisk,
@@ -784,8 +818,13 @@ export function DocumentWorkspace({
       : conflictNoticeCopy[documentDiskChangeState];
   const draftRestoreNotice =
     documentDiskChangeState === "draft-restore" ? draftRestoreOffer : null;
+  // Both backend methods, not just the listing: a backend that could list but
+  // not read would leave the viewer on "Loading version…" for good.
   const canBrowseHistory =
-    !!backend?.listSnapshots && !!activeDocumentPath && !!onRestoreSnapshot;
+    !!backend?.listSnapshots &&
+    !!backend?.getSnapshot &&
+    !!activeDocumentPath &&
+    !!history;
   // One banner at a time, and this is the least urgent of the three: the file
   // has already been reloaded, so nothing is blocked or at risk.
   const showExternalChangeNotice =
@@ -795,8 +834,13 @@ export function DocumentWorkspace({
     !draftRestoreNotice;
   const hasTopNotice =
     !!conflictNotice || !!draftRestoreNotice || showExternalChangeNotice;
-  const restoreAvailability =
-    restoreAvailabilityByDiskState[documentDiskChangeState];
+  const restoreAvailability = resolveRestoreAvailability({
+    diskChangeState: documentDiskChangeState,
+    // Only the states where delivery is genuinely stuck. "unsaved"/"saving"
+    // are the autosave debounce, a sub-second window that would make the
+    // button flicker for anyone who had just typed.
+    hasUnsentEdits: saveState === "error" || documentRetryPending,
+  });
   const showReviewHandoffButton =
     !!activeDocumentPath &&
     (reviewWatcherCount > 0 || reviewHandoffState !== "idle");
@@ -1451,19 +1495,16 @@ export function DocumentWorkspace({
           </div>
         )}
       </div>
-      {backend &&
-      canBrowseHistory &&
-      activeDocumentPath &&
-      onRestoreSnapshot ? (
+      {backend && canBrowseHistory && activeDocumentPath && history ? (
         <DocumentHistoryDialog
           open={historyOpen}
           onOpenChange={setHistoryOpen}
           backend={backend}
           documentPath={activeDocumentPath}
           documentFilenameLabel={documentFilenameLabel}
-          documentContent={documentPage?.content ?? ""}
+          getDocumentContent={history.getDocumentContent}
           restoreAvailability={restoreAvailability}
-          onRestore={onRestoreSnapshot}
+          onRestore={history.onRestore}
         />
       ) : null}
     </div>

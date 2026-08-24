@@ -45,7 +45,11 @@ import {
   DialogTrigger,
 } from "./components/ui/dialog";
 import { logHistoryEvent, type SnapshotRestore } from "./DocumentHistoryDialog";
-import { DocumentWorkspace, type DraftRestoreOffer } from "./DocumentWorkspace";
+import {
+  type DocumentHistoryWiring,
+  DocumentWorkspace,
+  type DraftRestoreOffer,
+} from "./DocumentWorkspace";
 import { BackendUnavailableError, detectBackend } from "./detect-backend";
 import { logDraftEvent } from "./draft-store";
 import {
@@ -2121,9 +2125,19 @@ export function App() {
 
       // Through the same latch as the autosave and the retry: this deliberately
       // sends no expectedVersion, so it must not overlap a save that does.
-      const savedDocument = await runExclusively(async () =>
-        currentBackend.saveMarkdownFile(currentPath, content),
-      );
+      let savedDocument: Page | undefined;
+      try {
+        savedDocument = await runExclusively(async () =>
+          currentBackend.saveMarkdownFile(currentPath, content),
+        );
+      } catch (error) {
+        // The write that was going to end the restore never happened. Leaving
+        // the marker set would keep the watcher standing down for the rest of
+        // the session, so every later write to this file would go unreported —
+        // and this is the one path that always sets it before writing.
+        setContentRestore(null);
+        throw error;
+      }
 
       applyDocumentPage(
         savedDocument ??
@@ -2173,12 +2187,35 @@ export function App() {
       setExternalChangeSeen(false);
       logHistoryEvent("restored", { id, overwrite });
 
-      if (overwrite) {
+      if (!overwrite) return;
+
+      try {
         await overwriteDocumentWith(content);
+      } catch (error) {
+        // The save machinery already tells the reviewer the write is not
+        // landing, and the restore marker was lifted on the way out, so there
+        // is nothing left to do but say which restore it was. Rethrowing would
+        // only reach the dialog's fire-and-forget caller as an unhandled
+        // rejection.
+        logHistoryEvent("restore-failed", { id, reason: String(error) });
       }
     },
     [overwriteDocumentWith],
   );
+
+  // Stable, so the dialog can depend on it honestly: it reads refs at call
+  // time, which is the point — the editor's live text must not be captured
+  // into a closure that goes stale between renders.
+  const getDocumentContent = useCallback(
+    () =>
+      documentDraftContentRef.current ?? documentPageRef.current?.content ?? "",
+    [],
+  );
+
+  const documentHistoryWiring: DocumentHistoryWiring = {
+    getDocumentContent,
+    onRestore: handleRestoreSnapshot,
+  };
 
   const dismissExternalChangeNotice = useCallback(() => {
     setExternalChangeSeen(false);
@@ -2380,7 +2417,7 @@ export function App() {
         externalChangeNotice={
           externalChangeSeen ? { onDismiss: dismissExternalChangeNotice } : null
         }
-        onRestoreSnapshot={handleRestoreSnapshot}
+        history={documentHistoryWiring}
         onReloadDocumentFromDisk={handleReloadDocumentFromDisk}
         onKeepEditingWithoutAutosave={handleKeepEditingWithoutAutosave}
         onOverwriteDocumentOnDisk={handleOverwriteDocumentOnDisk}
