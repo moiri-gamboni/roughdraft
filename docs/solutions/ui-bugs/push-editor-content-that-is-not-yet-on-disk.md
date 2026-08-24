@@ -10,6 +10,7 @@ symptoms:
   - "A restore performed on boot never reached the file, with no error shown"
   - "The save status pill stayed red on Save failed after the edits had actually landed"
   - "Autosave paused itself with File changed on disk immediately after Roughdraft's own successful write"
+  - "External writes stopped being reported for the rest of the session after a restore hit a save conflict"
 root_cause: state_machine
 resolution_type: code_fix
 severity: high
@@ -68,12 +69,17 @@ The reconciliation effect is a negotiation between two writers of the same text,
 
 Standing the watcher down during a restore does not weaken the disk-divergence protection, because the save still carries the loaded `expectedVersion`. A file that genuinely moved comes back as a `409` and reaches the conflict banner through `resolveConflict`. The watcher was only ever an early-warning path.
 
+That argument holds for the restore's own save and stops there. It says nothing about when the watcher stands back *up*, and the first version of this fix never answered that question on the losing path: the marker was cleared when a save landed, but a restore that came back as an unresolvable `409` left it set for the life of the tab. From then on every disk change was swallowed by the stand-down — including the overwriting agent the conflict banner exists to warn about, in exactly the situation where an agent is most likely to be writing. The marker now clears on both exits, losing as well as landing: the conflict catch in `deliverDocumentSave` and `handleOverwriteDocumentOnDisk`.
+
+The channel is also no longer draft-only. It is `ContentRestore`, carrying a `source` of `"draft"` or `"snapshot"`, because restoring a version from document history hands the editor unsaved content by exactly this route.
+
 ## Prevention
 
 - When handing a component content the destination has not seen, state that in the call rather than letting the component infer it from equality checks.
 - Any effect that schedules a timer or a request must survive being replayed after cleanup. If a ref guard would suppress the replay, the guard and the side effect have to be cleaned up together — or the guard has to go.
 - Read refs, not render-scoped state, in effects that reconcile against content arriving mid-commit.
 - After a write, ignore watcher events carrying the version just written, recorded synchronously rather than through React state.
+- A marker that suppresses a subsystem has to be cleared on every exit from the state it describes, not only the successful one. Ask what clears it when the operation fails, and write the test from that path.
 - Exercise recovery paths in a real browser. StrictMode's effect replay, the live file watcher, and a real reload are all absent from jsdom, and each of these four defects was invisible without them.
 
 ## Related Issues
