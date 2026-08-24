@@ -8,7 +8,20 @@ import {
   appendRoughdraftDocumentComment,
   extractRoughdraftReviewIndex,
 } from "@roughdraft/rfm";
-import express, { type Express, type Request, type Response } from "express";
+import express, {
+  type Express,
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
+import {
+  captureSnapshot,
+  commitDocumentWrite,
+  HISTORY_DIR_NAME,
+  listSnapshots,
+  readSnapshot,
+  refusesHistorySegment,
+} from "./checkpoint-store.js";
 import {
   hasNonLoopbackHost,
   ROUGHDRAFT_DEFAULT_PORT,
@@ -37,6 +50,13 @@ interface DirectoryListing {
   path: string;
   parentPath: string | null;
   directories: DirectoryEntry[];
+}
+
+/** A request's document, resolved and known to be inside the project. */
+interface MarkdownTarget {
+  relativePath: string;
+  absolutePath: string;
+  projectDir: string;
 }
 
 interface FileSystemEntry {
@@ -182,18 +202,33 @@ function titleFromContent(content: string, fallback: string): string {
   return firstLine.replace(/^#*\s*/, "").trim() || fallback;
 }
 
-function fileVersionFromContent(
-  stats: fs.Stats,
-  content: string | Buffer,
-): string {
+function fileVersionFromContent(stats: fs.Stats, content: string): string {
   const contentHash = crypto.createHash("sha256").update(content).digest("hex");
   return `${stats.mtimeMs}:${stats.size}:${contentHash}`;
 }
 
-function fileVersionFromFile(filePath: string): string {
-  const content = fs.readFileSync(filePath);
+/**
+ * The bytes and the version from a single read, for the handlers that need
+ * both — a version check followed by a separate read could compare against one
+ * state and then write over another.
+ *
+ * Every version in the server comes from here or from `markdownPageFromFile`,
+ * and both hash the *decoded* string. Hashing raw bytes anywhere would make a
+ * document containing invalid UTF-8 unsaveable: it decodes to U+FFFD, so the
+ * version a client is handed and the version its save is checked against stop
+ * matching, and every version-quoting save 409s against its own version.
+ */
+function readFileWithVersion(filePath: string): {
+  content: string;
+  version: string;
+} {
+  const content = fs.readFileSync(filePath, "utf-8");
   const stats = fs.statSync(filePath);
-  return fileVersionFromContent(stats, content);
+  return { content, version: fileVersionFromContent(stats, content) };
+}
+
+function fileVersionFromFile(filePath: string): string {
+  return readFileWithVersion(filePath).version;
 }
 
 /**
@@ -272,8 +307,21 @@ function ensureProjectPath(
   return absolute;
 }
 
+/** The 4xx an error carries when middleware refused the request, else `null`. */
+function clientErrorStatus(error: unknown): number | null {
+  const carried = error as { status?: unknown; statusCode?: unknown };
+  const status = carried.status ?? carried.statusCode;
+  if (typeof status !== "number" || status < 400 || status >= 500) return null;
+  return status;
+}
+
 function pageFilePathFromId(projectDir: string, id: string): string | null {
-  return ensureProjectPath(projectDir, `${id}.md`);
+  const absolutePath = ensureProjectPath(projectDir, `${id}.md`);
+  // Express matches `:id` against the encoded path and decodes afterwards, so
+  // `%2F` puts a whole sidecar path in here without ever passing through the
+  // document resolver that would otherwise refuse it.
+  if (!absolutePath || refusesHistorySegment(absolutePath)) return null;
+  return absolutePath;
 }
 
 function nextAssetPath(projectDir: string, filename: string): string {
@@ -420,6 +468,10 @@ function listProjectTree(projectDir: string): ProjectTreeListing {
       const absolutePath = path.join(dir, entry.name);
 
       if (entry.isDirectory()) {
+        // A document's history is an implementation detail of the document
+        // beside it, not part of the project a reviewer browses. This is the
+        // one enumerator that recurses, so it is the one that would find it.
+        if (entry.name.toLowerCase() === HISTORY_DIR_NAME) continue;
         paths.push(toCanonicalRelativePath(projectDir, absolutePath, true));
         visitDirectory(absolutePath);
         continue;
@@ -524,10 +576,15 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     return resolvedProjectDir;
   }
 
-  function markdownPathFromRequest(
+  /**
+   * Where a request points, without asking whether anything is there — the
+   * history of a document outlives the document, so recovery after a deletion
+   * needs a resolver that a missing file does not turn into a 404.
+   */
+  function resolveMarkdownPath(
     req: Request,
     res: Response,
-  ): { relativePath: string; absolutePath: string; projectDir: string } | null {
+  ): MarkdownTarget | null {
     const projectDir = projectDirFromRequest(req, res);
     if (!projectDir) return null;
 
@@ -544,12 +601,31 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return null;
     }
 
-    if (!fs.existsSync(absolutePath)) {
+    // This covers every route that resolves a document path; the pages routes
+    // resolve their own and refuse the same segment there. It is not a claim
+    // that snapshot bytes are unreachable — `GET /api/files` serves any
+    // in-project path, and the MCP tools reach documents by their own route.
+    if (refusesHistorySegment(absolutePath)) {
       res.status(404).json({ error: "Markdown file not found" });
       return null;
     }
 
     return { relativePath, absolutePath, projectDir };
+  }
+
+  function markdownPathFromRequest(
+    req: Request,
+    res: Response,
+  ): MarkdownTarget | null {
+    const target = resolveMarkdownPath(req, res);
+    if (!target) return null;
+
+    if (!fs.existsSync(target.absolutePath)) {
+      res.status(404).json({ error: "Markdown file not found" });
+      return null;
+    }
+
+    return target;
   }
 
   // --- API routes ---
@@ -584,43 +660,79 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
   });
 
   app.get("/api/markdown-file", (req, res) => {
-    const projectDir = projectDirFromRequest(req, res);
-    if (!projectDir) return;
+    const target = markdownPathFromRequest(req, res);
+    if (!target) return;
 
-    const relativePath =
-      typeof req.query.path === "string" ? req.query.path : "";
-    const absolutePath = ensureProjectPath(projectDir, relativePath);
+    res.json(markdownPageFromFile(target.relativePath, target.absolutePath));
+  });
 
-    if (!absolutePath?.toLowerCase().endsWith(".md")) {
-      res.status(404).json({ error: "Markdown file not found" });
+  /**
+   * The snapshots of a document, newest first. Resolve-only, so a document that
+   * has been deleted still lists the history it left behind — that is the whole
+   * recovery path after a clobber that removed the file.
+   */
+  app.get("/api/markdown-file/history", (req, res) => {
+    const target = resolveMarkdownPath(req, res);
+    if (!target) return;
+
+    const listing = listSnapshots(target.absolutePath);
+    if (listing.status === "error") {
+      // These routes are unauthenticated and the reason is a raw fs message
+      // carrying absolute paths, so it stays in the server log.
+      console.warn(
+        `[roughdraft:history] could not list ${target.absolutePath}: ${listing.reason}`,
+      );
+      res.status(500).json({ error: "History unavailable" });
+      return;
+    }
+    // No history is an empty history, not an error: a document nobody has saved
+    // yet and one whose snapshots are gone read the same to a client.
+    if (listing.status === "absent") {
+      res.json({ path: target.relativePath, snapshots: [], unreadable: 0 });
       return;
     }
 
-    if (!fs.existsSync(absolutePath)) {
-      res.status(404).json({ error: "Markdown file not found" });
+    res.json({
+      path: target.relativePath,
+      snapshots: listing.snapshots.map((snapshot) => ({
+        ...snapshot,
+        createdAt: snapshot.createdAt.toISOString(),
+      })),
+      unreadable: listing.unreadable,
+    });
+  });
+
+  app.get("/api/markdown-file/history/:id", (req, res) => {
+    const target = resolveMarkdownPath(req, res);
+    if (!target) return;
+
+    // The store refuses any id that is not a canonical snapshot id, so a
+    // traversal-shaped one reads as missing rather than as a path.
+    let content: string | null;
+    try {
+      content = readSnapshot(target.absolutePath, req.params.id);
+    } catch (error) {
+      // A readable id over an unreadable file throws. Left to Express that
+      // answers with a stack trace naming real paths, on an unauthenticated
+      // route — so it is logged and reported the same way the list route is.
+      console.warn(
+        `[roughdraft:history] could not read snapshot ${req.params.id} of ${target.absolutePath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      res.status(500).json({ error: "Snapshot unavailable" });
+      return;
+    }
+    if (content === null) {
+      res.status(404).json({ error: "Snapshot not found" });
       return;
     }
 
-    res.json(markdownPageFromFile(relativePath, absolutePath));
+    res.json({ id: req.params.id, content });
   });
 
   app.get("/api/markdown-file/events", (req, res) => {
-    const projectDir = projectDirFromRequest(req, res);
-    if (!projectDir) return;
-
-    const relativePath =
-      typeof req.query.path === "string" ? req.query.path : "";
-    const absolutePath = ensureProjectPath(projectDir, relativePath);
-
-    if (!absolutePath?.toLowerCase().endsWith(".md")) {
-      res.status(404).json({ error: "Markdown file not found" });
-      return;
-    }
-
-    if (!fs.existsSync(absolutePath)) {
-      res.status(404).json({ error: "Markdown file not found" });
-      return;
-    }
+    const target = markdownPathFromRequest(req, res);
+    if (!target) return;
+    const { absolutePath, relativePath } = target;
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -698,7 +810,15 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
         })
       : markdown;
     if (persistedMarkdown !== markdown) {
-      fs.writeFileSync(target.absolutePath, persistedMarkdown);
+      commitDocumentWrite(target.absolutePath, persistedMarkdown, {
+        priorContent: markdown,
+        trigger: "review",
+      });
+    } else {
+      // Finishing a review without an overall comment writes nothing, but the
+      // reviewed state still has to reach the history: the `review` label is
+      // what pins it against later eviction.
+      captureSnapshot(target.absolutePath, markdown, "review");
     }
 
     const index = extractRoughdraftReviewIndex(persistedMarkdown);
@@ -757,46 +877,21 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     });
   });
 
-  app.put("/api/pages/:id", (req, res) => {
-    const projectDir = projectDirFromRequest(req, res);
-    if (!projectDir) return;
-
-    const id = req.params.id;
-    const filePath = pageFilePathFromId(projectDir, id);
-    if (!filePath || !fs.existsSync(filePath)) {
-      res.status(404).json({ error: "Page not found" });
-      return;
-    }
-    const { content } = req.body as { content: string };
-    fs.writeFileSync(filePath, content);
-    res.json({ id, title: titleFromContent(content, id), content });
-  });
-
   app.put("/api/markdown-file", (req, res) => {
-    const projectDir = projectDirFromRequest(req, res);
-    if (!projectDir) return;
-
-    const relativePath =
-      typeof req.query.path === "string" ? req.query.path : "";
-    const absolutePath = ensureProjectPath(projectDir, relativePath);
-
-    if (!absolutePath?.toLowerCase().endsWith(".md")) {
-      res.status(404).json({ error: "Markdown file not found" });
-      return;
-    }
-
-    if (!fs.existsSync(absolutePath)) {
-      res.status(404).json({ error: "Markdown file not found" });
-      return;
-    }
+    const target = markdownPathFromRequest(req, res);
+    if (!target) return;
+    const { absolutePath, relativePath } = target;
 
     const { content, expectedVersion } = req.body as {
       content: string;
       expectedVersion?: string;
     };
-    const currentVersion = fileVersionFromFile(absolutePath);
+    // Read, check and write with nothing awaited in between: two tabs, the MCP
+    // process and the remote pump all write here, so a suspension point between
+    // the version check and the write is a lost update.
+    const current = readFileWithVersion(absolutePath);
 
-    if (expectedVersion && expectedVersion !== currentVersion) {
+    if (expectedVersion && expectedVersion !== current.version) {
       res.status(409).json({
         error: "Markdown file changed on disk",
         current: markdownPageFromFile(relativePath, absolutePath),
@@ -804,7 +899,13 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return;
     }
 
-    fs.writeFileSync(absolutePath, content);
+    commitDocumentWrite(absolutePath, content, {
+      // A save quoting a version has accounted for what is on disk. One that
+      // does not is overwriting blind, so those bytes are unclaimed and the
+      // store keeps them as `replaced`.
+      priorContent: expectedVersion ? current.content : undefined,
+      trigger: "save",
+    });
     res.json(markdownPageFromFile(relativePath, absolutePath));
   });
 
@@ -819,6 +920,8 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     const id = nextUntitledId(projectDir);
     const content = bodyContent || `# ${title || "Untitled"}\n`;
     const filePath = path.join(projectDir, `${id}.md`);
+    // create-only: name always free, so this write replaces nothing and has no
+    // history to preserve.
     fs.writeFileSync(filePath, content);
 
     res.status(201).json(markdownPageFromFile(`${id}.md`, filePath));
@@ -1283,6 +1386,40 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
   app.get("/{*splat}", (_req, res) => {
     res.sendFile(path.join(staticDirPath, "index.html"));
   });
+
+  /**
+   * Express's default handler answers a stack trace naming absolute paths, the
+   * server's own sources and its dependency versions — on routes that need no
+   * credentials. The routes above report their own failures; this catches what
+   * they cannot, including the router's own decode failure, which runs before
+   * any handler and so cannot be caught inside one.
+   */
+  app.use(
+    (error: Error, _req: Request, res: Response, next: NextFunction): void => {
+      if (res.headersSent) {
+        next(error);
+        return;
+      }
+      console.warn(`[roughdraft] request failed: ${error.message}`);
+      // A URIError is the router failing to decode a param, which is the
+      // caller's malformed request rather than anything wrong here.
+      if (error instanceof URIError) {
+        res.status(400).json({ error: "Bad request" });
+        return;
+      }
+      // `express.json` marks its own refusals with a 4xx status — a malformed
+      // body is 400, one over the size limit 413. Answering 500 for those
+      // would blame the server for the request, and an asset upload big
+      // enough to cross the limit is a real thing a reviewer does. The body
+      // stays the fixed string, so honouring the status discloses nothing.
+      const status = clientErrorStatus(error);
+      if (status !== null) {
+        res.status(status).json({ error: "Bad request" });
+        return;
+      }
+      res.status(500).json({ error: "Internal server error" });
+    },
+  );
 
   return { app, port };
 }

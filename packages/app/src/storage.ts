@@ -44,14 +44,48 @@ export type DocumentDiskChangeState =
 export type LocalContentOrigin = "edit" | "adopt";
 
 /**
- * An unsent draft the app wants put back into the editor.
+ * Content the app wants put back into the editor as unsaved work — an unsent
+ * local draft, or a snapshot the reviewer restored from history. `source` says
+ * which, so a reader never has to guess where the bytes came from.
  *
  * Each offer is a distinct object, and that identity is the signal: restoring
  * the same bytes twice is a real request, not a repeat, so the value must come
  * from state rather than be built inline while rendering.
  */
-export interface DraftRestore {
+export interface ContentRestore {
   content: string;
+  source: "draft" | "snapshot";
+}
+
+/**
+ * What caused a snapshot to be taken. `replaced` is the bytes a write was
+ * about to destroy, which is the entry a clobber recovery reaches for.
+ *
+ * A third declaration of one vocabulary: this one, `SnapshotTrigger` in
+ * `packages/server/src/checkpoint-store.ts`, and the trigger table in
+ * `docs/spec/history-sidecar.md`. The app cannot import the server's — it does
+ * not depend on that package — so adding a value means editing all three.
+ * `DocumentHistoryDialog` renders an unrecognised one as "unknown" rather than
+ * as a blank badge, which is what a build that missed the edit will show.
+ */
+export type SnapshotTrigger = "save" | "review" | "replaced" | "hook";
+
+export interface SnapshotSummary {
+  id: string;
+  /** ISO 8601, as the wire carries it. */
+  createdAt: string;
+  trigger: SnapshotTrigger;
+  bytes: number;
+}
+
+/**
+ * The snapshots of one document, newest first. `unreadable` counts sidecar
+ * files whose name is not a canonical id: content that exists and cannot be
+ * listed, which is worth saying out loud rather than quietly dropping.
+ */
+export interface DocumentHistory {
+  snapshots: SnapshotSummary[];
+  unreadable: number;
 }
 
 export interface StoredAsset {
@@ -95,6 +129,10 @@ export interface StorageBackend {
     relativePath: string,
     onChange: (event: MarkdownFileChangeEvent) => void,
   ): () => void;
+  /** Absent on a backend with no snapshot store; the UI gates the whole
+   * history affordance on it rather than offering a control that cannot work. */
+  listSnapshots?(relativePath: string): Promise<DocumentHistory>;
+  getSnapshot?(relativePath: string, id: string): Promise<string>;
   completeReview?(
     relativePath: string,
     options?: CompleteReviewOptions,

@@ -10,6 +10,15 @@ import {
   validateRoughdraftMarkdown,
 } from "@roughdraft/rfm";
 import {
+  captureSnapshot,
+  commitDocumentWrite,
+  historyDirFor,
+  listSnapshots,
+  readSnapshot,
+  refusesHistorySegment,
+  type SnapshotSummary,
+} from "./checkpoint-store.js";
+import {
   ROUGHDRAFT_BIND_HOST,
   ROUGHDRAFT_DEFAULT_PORT,
   ROUGHDRAFT_LOOPBACK_HOSTS,
@@ -45,6 +54,7 @@ const KNOWN_COMMANDS = [
   "status",
   "stop",
   "watch",
+  "history",
   "mcp",
   "doctor",
   "help",
@@ -96,6 +106,8 @@ export interface CliDependencies {
   spawnServerProcess: (options: {
     port: number;
     projectDir: string;
+    /** Where the detached child's stdout and stderr go. */
+    logPath: string;
   }) => Promise<SpawnedServer> | SpawnedServer;
   isProcessRunning: (pid: number) => boolean;
   stopProcess: (pid: number) => Promise<void>;
@@ -166,6 +178,14 @@ interface ParsedCommandOptions {
   stateFile?: string;
   timeoutSeconds?: number;
   watch: boolean;
+  positionals: string[];
+}
+
+interface ParsedHistoryOptions {
+  help: boolean;
+  json: boolean;
+  restoreId?: string;
+  showId?: string;
   positionals: string[];
 }
 
@@ -543,6 +563,65 @@ function parseWatchOptions(args: string[]): ParsedWatchOptions {
   return parsed;
 }
 
+function parseHistoryOptions(args: string[]): ParsedHistoryOptions {
+  const parsed: ParsedHistoryOptions = {
+    help: false,
+    json: false,
+    positionals: [],
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--") {
+      parsed.positionals.push(...args.slice(index + 1));
+      break;
+    }
+
+    if (arg === "-h" || arg === "--help") {
+      parsed.help = true;
+      continue;
+    }
+
+    if (arg === "--json") {
+      parsed.json = true;
+      continue;
+    }
+
+    if (arg === "--show") {
+      const next = takeFlagValue(args, index, arg);
+      parsed.showId = next.value;
+      index = next.nextIndex;
+      continue;
+    }
+
+    if (arg.startsWith("--show=")) {
+      parsed.showId = arg.slice("--show=".length);
+      continue;
+    }
+
+    if (arg === "--restore") {
+      const next = takeFlagValue(args, index, arg);
+      parsed.restoreId = next.value;
+      index = next.nextIndex;
+      continue;
+    }
+
+    if (arg.startsWith("--restore=")) {
+      parsed.restoreId = arg.slice("--restore=".length);
+      continue;
+    }
+
+    if (arg.startsWith("-")) {
+      throw new Error(`Unknown flag: ${arg}`);
+    }
+
+    parsed.positionals.push(arg);
+  }
+
+  return parsed;
+}
+
 function parsePositiveNumber(value: string, flag: string): number {
   const parsed = Number.parseFloat(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -786,25 +865,46 @@ async function defaultStopProcess(pid: number): Promise<void> {
 function defaultSpawnServerProcess(options: {
   port: number;
   projectDir: string;
+  logPath: string;
 }): SpawnedServer {
   const serverEntryPath = fileURLToPath(new URL("./child.js", import.meta.url));
-  const child = spawn(
-    process.execPath,
-    [
-      serverEntryPath,
-      "--port",
-      String(options.port),
-      "--project-dir",
-      options.projectDir,
-    ],
-    {
-      cwd: options.projectDir,
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-      env: process.env,
-    },
-  );
+  // Detached with `stdio: "ignore"` there was no destination at all: the
+  // server's startup errors and every warning the history store emits went to
+  // a closed descriptor. Each run starts a fresh log, so the file stays to one
+  // run's worth, but the previous one is kept: a server that dies is usually
+  // met with another `roughdraft open`, which would otherwise truncate the
+  // evidence before anyone thought to read it.
+  fs.mkdirSync(path.dirname(options.logPath), { recursive: true });
+  try {
+    fs.renameSync(options.logPath, `${options.logPath}.1`);
+  } catch {
+    // No previous log, or it cannot be moved. Neither is a reason to refuse
+    // to start a server.
+  }
+  const logFd = fs.openSync(options.logPath, "w");
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn(
+      process.execPath,
+      [
+        serverEntryPath,
+        "--port",
+        String(options.port),
+        "--project-dir",
+        options.projectDir,
+      ],
+      {
+        cwd: options.projectDir,
+        detached: true,
+        stdio: ["ignore", logFd, logFd],
+        windowsHide: true,
+        env: process.env,
+      },
+    );
+  } finally {
+    // The child holds its own duplicate of the descriptor.
+    fs.closeSync(logFd);
+  }
 
   child.unref();
 
@@ -865,6 +965,7 @@ function printHelp(log: (message: string) => void) {
   log("  status             Show server status");
   log("  stop               Stop the managed background server");
   log("  watch <path>       Wait for a Done Reviewing event");
+  log("  history <path>     List, print, and restore a file's snapshots");
   log("  mcp                Start the experimental stdio MCP server");
   log("  doctor [path]      Diagnose setup or validate Markdown");
   log("  help agent         Print the agent setup prompt");
@@ -1012,6 +1113,27 @@ function printCommandHelp(
     );
     log("  --state-file <path>       Server state file");
     log("  --state-dir <dir>         Directory containing server.json");
+    return;
+  }
+
+  if (command === "history") {
+    log("Usage:");
+    log("  roughdraft history <path> [--json] [--show <id>] [--restore <id>]");
+    log("");
+    log("Lists, prints, and restores the snapshots of one Markdown file.");
+    log(
+      "History is stored beside the file, so this works with no server running.",
+    );
+    log("");
+    log("Flags:");
+    log("  --show <id>          Print one snapshot to stdout");
+    log("  --restore <id>       Write one snapshot back over the file");
+    log("  --json               Print machine-readable output");
+    log("");
+    log(
+      "A restore keeps the content it replaces as a snapshot, so it can be undone.",
+    );
+    log("A review can rename a snapshot id, so re-list if an id is rejected.");
     return;
   }
 
@@ -1202,15 +1324,6 @@ function parseSseEvents(buffer: string): ParsedSseChunk {
   return { events, remainder: normalized.slice(cursor) };
 }
 
-async function atomicWriteFile(
-  targetPath: string,
-  content: string,
-): Promise<void> {
-  const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
-  await fs.promises.writeFile(tmpPath, content);
-  await fs.promises.rename(tmpPath, targetPath);
-}
-
 function appendTokenToViewerUrl(viewerUrl: string, token: string): string {
   if (token.length === 0) return viewerUrl;
   try {
@@ -1289,6 +1402,18 @@ async function runRemoteOpen(
   // stream is being pumped at the time.
   const runDeadline = new AbortController();
 
+  // The content of the origin file as this process last saw it. Anything else
+  // on disk was written by someone else, and is preserved before Roughdraft's
+  // copy of the document goes over it.
+  let lastWrittenContent: string | null = null;
+
+  function warnForeignChange(captured: SnapshotSummary | null): void {
+    const kept = captured ? ` (kept as ${captured.id})` : "";
+    deps.error(
+      `${options.openPath} changed on disk outside Roughdraft${kept}; recover it with \`roughdraft history ${options.openPath}\`.`,
+    );
+  }
+
   // The session id travels in the viewer URL, so a session that exists on the
   // host is not necessarily still ours: it may have been swept and re-taken by
   // another CLI. Nothing attaches without passing through here first.
@@ -1355,6 +1480,14 @@ async function runRemoteOpen(
       );
       return { kind: "refused" };
     }
+
+    // Registering hands this content to the host, which will later save its
+    // own version back over it — so an edit that arrived during an outage is
+    // as much at risk here as it is under the save pump.
+    if (lastWrittenContent !== null && content !== lastWrittenContent) {
+      warnForeignChange(captureSnapshot(options.openPath, content, "replaced"));
+    }
+    lastWrittenContent = content;
 
     let response: Response;
     try {
@@ -1530,7 +1663,32 @@ async function runRemoteOpen(
           }
           if (typeof payload.content !== "string") continue;
           try {
-            await atomicWriteFile(options.openPath, payload.content);
+            // The store also pre-captures a document whose history is empty,
+            // so a snapshot appearing does not mean someone else wrote the
+            // file. Only disk disagreeing with what we put there does.
+            const origin = readOriginContent(options.openPath);
+            if (origin.status === "unreadable") {
+              deps.error(
+                `Could not read ${options.openPath} before saving from remote: ${origin.reason}`,
+              );
+            }
+            const foreign =
+              lastWrittenContent !== null &&
+              (origin.status === "missing" ||
+                (origin.status === "read" &&
+                  origin.content !== lastWrittenContent));
+            const { preCapture } = commitDocumentWrite(
+              options.openPath,
+              payload.content,
+              {
+                priorContent: lastWrittenContent ?? undefined,
+                trigger: "save",
+              },
+            );
+            lastWrittenContent = payload.content;
+            if (foreign) {
+              warnForeignChange(preCapture);
+            }
             if (!options.json) {
               deps.log(`Saved ${options.openPath} from remote.`);
             }
@@ -1721,6 +1879,35 @@ export function getServerStateFilePath(
   }
 
   return path.join(os.homedir(), ".roughdraft", "server.json");
+}
+
+export type OriginRead =
+  | { status: "read"; content: string }
+  /** Gone: itself a change, and the one the reviewer most needs told about. */
+  | { status: "missing" }
+  | { status: "unreadable"; reason: string };
+
+/**
+ * Whether the bytes beside the origin CLI are the ones it last wrote there.
+ *
+ * "I cannot look" is a third answer, not a change: reporting it as one names a
+ * write that did not happen, and the credibility of the only warning this pump
+ * emits is the whole reason the warning exists.
+ */
+export function readOriginContent(openPath: string): OriginRead {
+  try {
+    return { status: "read", content: fs.readFileSync(openPath, "utf-8") };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { status: "missing" };
+    }
+    return { status: "unreadable", reason: describeError(error) };
+  }
+}
+
+/** Beside the state file, so one directory holds everything about a server. */
+function getServerLogFilePath(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(path.dirname(getServerStateFilePath(env)), "server.log");
 }
 
 function isValidServerState(value: unknown): value is RoughdraftServerState {
@@ -2051,6 +2238,7 @@ export async function ensureServerRunning(
   const spawned = await deps.spawnServerProcess({
     port,
     projectDir,
+    logPath: getServerLogFilePath(deps.env),
   });
 
   try {
@@ -2195,6 +2383,7 @@ async function runDoctor(
     commandPath,
     stateFile: stateFilePath,
     stateFileExists: fs.existsSync(stateFilePath),
+    serverLog: getServerLogFilePath(deps.env),
     managedPid: persistedState?.pid ?? null,
     managedPidRunning,
     recordedPort: persistedState?.port ?? null,
@@ -2230,6 +2419,7 @@ async function runDoctor(
   deps.log(`Command path: ${report.commandPath ?? "unknown"}`);
   deps.log(`State file: ${report.stateFile}`);
   deps.log(`State file exists: ${report.stateFileExists ? "yes" : "no"}`);
+  deps.log(`Server log: ${report.serverLog}`);
   deps.log(
     `Managed PID: ${
       report.managedPid === null
@@ -2346,6 +2536,194 @@ async function runMarkdownDoctor(
   }
 
   return validation.ok ? 0 : 1;
+}
+
+/**
+ * Reads the history sidecar directly, so recovery works when no server runs —
+ * including for a document that has been deleted from disk.
+ */
+function runHistory(
+  deps: CliDependencies,
+  targetPath: string,
+  options: ParsedHistoryOptions,
+  json: boolean,
+): number {
+  if (!isMarkdownPath(targetPath)) {
+    deps.error(`Roughdraft history can only read .md files: ${targetPath}`);
+    return USAGE_ERROR;
+  }
+
+  const absolutePath = path.resolve(deps.cwd, targetPath);
+  // The same refusal the routes and the MCP tools apply. A snapshot has no
+  // history of its own, so without this the command answers an empty listing
+  // for a sidecar that was never going to exist, and `--restore` would nest a
+  // history inside a history.
+  if (refusesHistorySegment(absolutePath)) {
+    deps.error(
+      `That path is inside a document's history, not a document: ${absolutePath}`,
+    );
+    return USAGE_ERROR;
+  }
+  if (options.showId !== undefined) {
+    return showSnapshot(deps, absolutePath, options.showId, json);
+  }
+  if (options.restoreId !== undefined) {
+    return restoreSnapshot(deps, absolutePath, options.restoreId, json);
+  }
+  return listHistory(deps, absolutePath, json);
+}
+
+function listHistory(
+  deps: CliDependencies,
+  absolutePath: string,
+  json: boolean,
+): number {
+  const listing = listSnapshots(absolutePath);
+  if (listing.status === "error") {
+    deps.error(
+      `Could not read the history of ${absolutePath}: ${listing.reason}`,
+    );
+    return 1;
+  }
+
+  // `absent` and an empty `ok` listing are the same answer to the reader.
+  const snapshots = listing.status === "ok" ? listing.snapshots : [];
+  const unreadable = listing.status === "ok" ? listing.unreadable : 0;
+
+  if (json) {
+    emitJson(deps.log, {
+      path: absolutePath,
+      historyDir: historyDirFor(absolutePath),
+      unreadable,
+      snapshots: snapshots.map((snapshot) => ({
+        id: snapshot.id,
+        trigger: snapshot.trigger,
+        createdAt: snapshot.createdAt.toISOString(),
+        bytes: snapshot.bytes,
+      })),
+    });
+    return 0;
+  }
+
+  const displayPath = relativeDisplayPath(deps.cwd, absolutePath);
+  // An unreadable entry is how a writer that disagrees about the on-disk format
+  // shows up, so say so even when there is nothing else to report.
+  const unreadableNotice =
+    unreadable > 0
+      ? `${unreadable} file(s) in the history directory are not readable snapshots.`
+      : null;
+
+  if (snapshots.length === 0) {
+    deps.log(`No history for ${displayPath}.`);
+    deps.log(
+      `Roughdraft keeps snapshots in ${historyDirFor(absolutePath)}; a renamed document keeps its history under its old name.`,
+    );
+    if (unreadableNotice) deps.log(unreadableNotice);
+    return 0;
+  }
+
+  deps.log(`Roughdraft history: ${displayPath}`);
+  deps.log(`${snapshots.length} snapshot(s), newest first.`);
+  deps.log("");
+  // Ids vary in width with the trigger name and the writing process's pid.
+  const idWidth = Math.max(...snapshots.map((snapshot) => snapshot.id.length));
+  for (const snapshot of snapshots) {
+    deps.log(
+      `  ${snapshot.id.padEnd(idWidth)}  ${snapshot.trigger.padEnd(8)}  ${snapshot.createdAt.toISOString()}  ${snapshot.bytes} bytes`,
+    );
+  }
+  if (unreadableNotice) {
+    deps.log("");
+    deps.log(unreadableNotice);
+  }
+  deps.log("");
+  deps.log(`Print one with \`roughdraft history ${displayPath} --show <id>\`.`);
+  deps.log(
+    `Restore one with \`roughdraft history ${displayPath} --restore <id>\`.`,
+  );
+  return 0;
+}
+
+/**
+ * `null` for a snapshot that is not there, and a printed reason plus `null` for
+ * one that is there and cannot be read — an unreadable file is the caller's
+ * problem to hear about, not a Node stack trace out of `runCli`.
+ */
+function readSnapshotOrReport(
+  deps: CliDependencies,
+  absolutePath: string,
+  id: string,
+): string | null {
+  try {
+    const content = readSnapshot(absolutePath, id);
+    if (content === null) deps.error(`No snapshot ${id} for ${absolutePath}.`);
+    return content;
+  } catch (error) {
+    deps.error(`Could not read snapshot ${id}: ${describeError(error)}`);
+    return null;
+  }
+}
+
+function showSnapshot(
+  deps: CliDependencies,
+  absolutePath: string,
+  id: string,
+  json: boolean,
+): number {
+  const content = readSnapshotOrReport(deps, absolutePath, id);
+  if (content === null) return 1;
+
+  if (json) {
+    emitJson(deps.log, { path: absolutePath, id, content });
+    return 0;
+  }
+
+  // `log` puts back the newline dropped here, so a newline-terminated snapshot
+  // redirects byte for byte. One that is not terminated gains a newline —
+  // every line this CLI prints ends in one; `--json` is the exact channel.
+  deps.log(content.endsWith("\n") ? content.slice(0, -1) : content);
+  return 0;
+}
+
+function restoreSnapshot(
+  deps: CliDependencies,
+  absolutePath: string,
+  id: string,
+  json: boolean,
+): number {
+  const content = readSnapshotOrReport(deps, absolutePath, id);
+  if (content === null) return 1;
+
+  let preCapture: SnapshotSummary | null;
+  try {
+    // No priorContent: nothing here claims to know what is on disk, so the
+    // store preserves it first and the restore is itself undoable.
+    ({ preCapture } = commitDocumentWrite(absolutePath, content, {
+      trigger: "save",
+    }));
+  } catch (error) {
+    deps.error(`Could not restore ${absolutePath}: ${describeError(error)}`);
+    return 1;
+  }
+
+  if (json) {
+    emitJson(deps.log, {
+      restored: true,
+      path: absolutePath,
+      id,
+      replacedSnapshotId: preCapture?.id ?? null,
+    });
+    return 0;
+  }
+
+  const displayPath = relativeDisplayPath(deps.cwd, absolutePath);
+  deps.log(`Restored ${displayPath} from ${id}.`);
+  if (preCapture) {
+    deps.log(
+      `Undo with \`roughdraft history ${displayPath} --restore ${preCapture.id}\`.`,
+    );
+  }
+  return 0;
 }
 
 interface WatchResultPayload {
@@ -2697,6 +3075,7 @@ export async function runCli(
         deps.log(`PID: ${server.pid}`);
         deps.log(`Started: ${server.startedAt}`);
         deps.log(`State file: ${getServerStateFilePath(deps.env)}`);
+        deps.log(`Server log: ${getServerLogFilePath(deps.env)}`);
       } else {
         deps.log(
           `This server is not managed by ${getServerStateFilePath(deps.env)}.`,
@@ -2902,6 +3281,40 @@ export async function runCli(
       const json = parsed.global.json || options.json;
       shouldPrintUpdateNotice = !json;
       return runWatch(deps, options.positionals[0] ?? "", options, json);
+    }
+
+    if (command === "history") {
+      let options: ParsedHistoryOptions;
+      try {
+        options = parseHistoryOptions(rest);
+      } catch (error) {
+        deps.error(error instanceof Error ? error.message : "Invalid usage.");
+        return USAGE_ERROR;
+      }
+
+      if (options.help) {
+        printCommandHelp("history", deps.log);
+        return 0;
+      }
+
+      if (options.positionals.length !== 1) {
+        deps.error(
+          "Usage: roughdraft history <path> [--json] [--show <id>] [--restore <id>]",
+        );
+        return USAGE_ERROR;
+      }
+
+      if (options.showId !== undefined && options.restoreId !== undefined) {
+        deps.error("Use either --show or --restore, not both.");
+        return USAGE_ERROR;
+      }
+
+      return runHistory(
+        deps,
+        options.positionals[0] ?? "",
+        options,
+        parsed.global.json || options.json,
+      );
     }
 
     if (command === "mcp") {

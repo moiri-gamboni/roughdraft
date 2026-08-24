@@ -6,6 +6,10 @@ import {
   extractRoughdraftReviewIndex,
   markRoughdraftResolved,
 } from "@roughdraft/rfm";
+import {
+  commitDocumentWrite,
+  refusesHistorySegment,
+} from "./checkpoint-store.js";
 
 interface JsonRpcRequest {
   jsonrpc?: "2.0";
@@ -314,7 +318,10 @@ export async function callTool(
       message,
       author: typeof args.author === "string" ? args.author : "AI",
     });
-    fs.writeFileSync(documentPath, updated);
+    commitDocumentWrite(documentPath, updated, {
+      priorContent: markdown,
+      trigger: "save",
+    });
     return { ok: true, documentPath };
   }
 
@@ -326,7 +333,10 @@ export async function callTool(
       targetId,
       summary: typeof args.summary === "string" ? args.summary : undefined,
     });
-    fs.writeFileSync(documentPath, updated);
+    commitDocumentWrite(documentPath, updated, {
+      priorContent: markdown,
+      trigger: "save",
+    });
     return { ok: true, documentPath };
   }
 
@@ -345,11 +355,21 @@ function objectArgs(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/**
+ * There is no project containment here, so history lands wherever the agent
+ * names a `.md` file — accepted: the tools already read and write that same
+ * arbitrary path, and a snapshot beside it widens nothing.
+ */
 function requireDocumentPath(args: Record<string, unknown>): string {
   const documentPath = requireString(args, "documentPath");
   const absolutePath = path.resolve(documentPath);
   if (!absolutePath.toLowerCase().endsWith(".md")) {
     throw new Error(`Roughdraft can only read .md files: ${absolutePath}`);
+  }
+  if (refusesHistorySegment(absolutePath)) {
+    throw new Error(
+      `That path is inside a document's history, not a document: ${absolutePath}`,
+    );
   }
   if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) {
     throw new Error(`Markdown file not found: ${absolutePath}`);
