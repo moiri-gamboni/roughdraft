@@ -589,7 +589,14 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     // start a history of the history. The history routes are the only way to
     // reach snapshot bytes. Refusing here covers every route that resolves a
     // document path, which is why the dead directory enumerators need no filter.
-    if (absolutePath.split(path.sep).includes(HISTORY_DIR_NAME)) {
+    // Case-insensitively, because on a case-insensitive filesystem a shifted
+    // segment still resolves to the real sidecar, and the route above already
+    // treats the `.md` extension the same way.
+    if (
+      absolutePath
+        .split(path.sep)
+        .some((segment) => segment.toLowerCase() === HISTORY_DIR_NAME)
+    ) {
       res.status(404).json({ error: "Markdown file not found" });
       return null;
     }
