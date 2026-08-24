@@ -7,8 +7,10 @@ import { diffLines } from "diff";
  */
 export const MAX_DIFF_RUN_LINES = 40;
 
+export type DiffLineKind = "added" | "removed" | "context";
+
 export type DiffLine =
-  | { kind: "added" | "removed" | "context"; text: string }
+  | { kind: DiffLineKind; text: string }
   | { kind: "elided"; count: number };
 
 export interface SnapshotDiff {
@@ -30,10 +32,7 @@ function toLines(value: string): string[] {
   return lines;
 }
 
-function kindOf(change: {
-  added?: boolean;
-  removed?: boolean;
-}): "added" | "removed" | "context" {
+function kindOf(change: { added?: boolean; removed?: boolean }): DiffLineKind {
   if (change.added) return "added";
   if (change.removed) return "removed";
   return "context";
