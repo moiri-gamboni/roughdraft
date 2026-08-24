@@ -100,14 +100,12 @@ A capture records content as the newest snapshot of a document, subject to three
 
 **Review promotion.** When dedup suppresses a `review` capture and the newest snapshot's trigger is not already `review`, the writer MUST rename that snapshot so its id ends in `review`, keeping the rest of the id unchanged. It MUST rename rather than write a second copy. A `review` capture always leaves a `review`-labelled newest entry, which is what Retention pins.
 
-**Coalescing.** A writer MAY skip a capture when the newest snapshot is younger than 90 seconds, so that an edit burst cannot evict the whole history. A writer MUST NOT skip a capture when the leaf is empty.
-
-The two implementations narrow that permission differently, and a reader may assume neither:
+**Coalescing.** A writer MAY skip a capture when the newest snapshot is younger than 90 seconds AND carries the same trigger the writer is about to use, so that an edit burst cannot evict the whole history. A snapshot of a different trigger MUST NOT suppress a capture, whatever its age, and a writer MUST NOT skip a capture when the leaf is empty.
 
 - The store skips only a `save` whose newest snapshot is also a `save`, measured from the newest snapshot's id. A `replaced`, `review`, or `hook` capture is never skipped.
-- The hook skips its `hook` capture whenever the newest snapshot is younger than 90 seconds, whatever that snapshot's trigger, measured from the file's mtime.
+- The hook skips its `hook` capture only when the newest snapshot is itself a `hook` snapshot, measured from the file's mtime.
 
-A history therefore records at most one state per 90 seconds per writer, and intermediate states within a burst are not recoverable.
+A history therefore records at most one state per 90 seconds per writer within a same-trigger burst, and intermediate states within such a burst are not recoverable.
 
 ## Retention
 
@@ -157,7 +155,7 @@ Both implementations are conforming; these are the places where they answer diff
 | Point | The store (and this repository's server routes) | The hook |
 |---|---|---|
 | Documents recognised | Any path ending in `.md`, compared case-insensitively | Only a path matching `*.md` |
-| Coalescing applies to | A `save` behind a `save` | Any capture behind any snapshot |
+| Coalescing applies to | A `save` behind a `save` | A `hook` behind a `hook` |
 | Coalescing measures | The newest snapshot's id, to the millisecond | The newest snapshot's mtime, to the second |
 | Increasing ids | Advanced against the newest id | Left to the clock |
 | Snapshot mode | `0600` | The document's mode |
