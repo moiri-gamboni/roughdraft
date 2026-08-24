@@ -8,6 +8,7 @@ import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createApp,
+  fileVersionIfPresent,
   REMOTE_SESSION_TTL_MS,
   type RemoteSession,
   sweepRemoteSessions,
@@ -1172,6 +1173,38 @@ describe("createApp", () => {
 
       expect(await cli.waitFor("event: save")).toContain('"content":"after"');
     });
+  });
+});
+
+describe("fileVersionIfPresent", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-version-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reports the version of a file that is there", () => {
+    const filePath = path.join(dir, "note.md");
+    fs.writeFileSync(filePath, "# Note\n");
+
+    expect(fileVersionIfPresent(filePath)).toBe(fileVersionIfPresent(filePath));
+    expect(fileVersionIfPresent(filePath)).toMatch(
+      /^\d+(\.\d+)?:\d+:[0-9a-f]{64}$/,
+    );
+  });
+
+  /**
+   * The file watcher polls, so the file can go between the poll and the read —
+   * a reviewer deleting or moving it, or a branch switch. Throwing there is
+   * fatal rather than merely wrong: the throw comes out of an `fs.watchFile`
+   * listener, where nothing catches it, and the whole server exits.
+   */
+  it("reports no version, rather than throwing, when the file has gone", () => {
+    expect(fileVersionIfPresent(path.join(dir, "vanished.md"))).toBeNull();
   });
 });
 
