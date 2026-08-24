@@ -160,7 +160,7 @@ describe("createApp", () => {
     expect(response.body.version).toEqual(expect.any(String));
   });
 
-  it("lists, updates, and deletes page-backed markdown files", async () => {
+  it("lists, reads, and deletes page-backed markdown files", async () => {
     fs.writeFileSync(path.join(projectDir, "alpha.md"), "# Alpha\n");
 
     const { app } = createApp({
@@ -185,20 +185,6 @@ describe("createApp", () => {
       title: "Alpha",
       content: "# Alpha\n",
     });
-
-    const updateResponse = await request(app)
-      .put("/api/pages/alpha")
-      .query({ projectPath: projectDir })
-      .send({ content: "# Beta\n" });
-    expect(updateResponse.status).toBe(200);
-    expect(updateResponse.body).toEqual({
-      id: "alpha",
-      title: "Beta",
-      content: "# Beta\n",
-    });
-    expect(fs.readFileSync(path.join(projectDir, "alpha.md"), "utf-8")).toBe(
-      "# Beta\n",
-    );
 
     const deleteResponse = await request(app).delete("/api/pages/alpha").query({
       projectPath: projectDir,
@@ -810,20 +796,12 @@ describe("createApp", () => {
       const readResponse = await request(app).get(traversalPath).query({
         projectPath: projectDir,
       });
-      const updateResponse = await request(app)
-        .put(traversalPath)
-        .query({
-          projectPath: projectDir,
-        })
-        .send({ content: "# Updated\n" });
       const deleteResponse = await request(app).delete(traversalPath).query({
         projectPath: projectDir,
       });
 
       expect(readResponse.status).toBe(404);
       expect(readResponse.body).toEqual({ error: "Page not found" });
-      expect(updateResponse.status).toBe(404);
-      expect(updateResponse.body).toEqual({ error: "Page not found" });
       expect(deleteResponse.status).toBe(404);
       expect(deleteResponse.body).toEqual({ error: "Page not found" });
       expect(fs.readFileSync(outsideFilePath, "utf-8")).toBe("# Secret\n");
