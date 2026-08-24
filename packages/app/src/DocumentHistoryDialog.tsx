@@ -46,7 +46,7 @@ const restoreBlockedCopy: Record<
   "blocked-by-draft-offer":
     "Answer the unsent-draft offer first. Restoring now would decide that question for you.",
   "needs-overwrite":
-    "This file changed on disk, so a plain restore would be refused. Overwriting is undoable: the bytes it replaces are snapshotted first.",
+    "This file changed on disk, so restoring cannot save over it. Overwrite instead — Roughdraft records a version of what it replaces, so you can undo this.",
 };
 
 const triggerLabels: Record<SnapshotSummary["trigger"], string> = {
@@ -272,8 +272,8 @@ export function DocumentHistoryDialog({
             History of {documentFilenameLabel}
           </DialogTitle>
           <DialogDescription>
-            Every version Roughdraft wrote, newest first. Snapshots are shown as
-            raw Markdown, so review markers appear exactly as they were stored.
+            Every version Roughdraft wrote, newest first. Shown as raw Markdown,
+            so review markers appear exactly as they were stored.
           </DialogDescription>
         </DialogHeader>
 
@@ -289,7 +289,7 @@ export function DocumentHistoryDialog({
                   aria-hidden="true"
                 />
                 <span>
-                  {listing.history.unreadable} snapshot
+                  {listing.history.unreadable} version
                   {listing.history.unreadable === 1 ? "" : "s"} could not be
                   listed. The files are still on disk beside the document.
                 </span>
@@ -320,8 +320,8 @@ export function DocumentHistoryDialog({
                 data-testid="document-history-empty"
                 className="px-1 text-xs text-stone-500 dark:text-slate-400"
               >
-                No versions yet. Roughdraft snapshots this file every time it
-                writes to it.
+                No versions yet. Roughdraft records one every time it writes to
+                this file.
               </p>
             ) : null}
 
