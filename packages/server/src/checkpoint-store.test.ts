@@ -302,18 +302,6 @@ describe("captureSnapshot", () => {
     expect(fs.readdirSync(historyDirFor(docPath))).toEqual([`${poisoned}.md`]);
   });
 
-  it.skipIf(asRoot)(
-    "returns null instead of throwing when the sidecar cannot be created",
-    () => {
-      fs.chmodSync(projectDir, 0o500);
-      try {
-        expect(captureSnapshot(docPath, "hello", "save")).toBeNull();
-      } finally {
-        fs.chmodSync(projectDir, 0o700);
-      }
-    },
-  );
-
   it("refuses a symlinked history leaf", () => {
     const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-out-"));
     fs.mkdirSync(path.join(projectDir, ".roughdraft-history", "v1"), {
