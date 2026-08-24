@@ -20,6 +20,7 @@ import {
   HISTORY_DIR_NAME,
   listSnapshots,
   readSnapshot,
+  refusesHistorySegment,
 } from "./checkpoint-store.js";
 import {
   hasNonLoopbackHost,
@@ -304,21 +305,6 @@ function ensureProjectPath(
   }
 
   return absolute;
-}
-
-/**
- * Snapshots are `.md` files inside the project, so without this they would be
- * openable, savable and reviewable as documents — and each save would start a
- * history of the history.
- *
- * Case-insensitively, because on a case-insensitive filesystem a shifted
- * segment still resolves to the real sidecar, and the routes treat the `.md`
- * extension the same way.
- */
-function refusesHistorySegment(absolutePath: string): boolean {
-  return absolutePath
-    .split(path.sep)
-    .some((segment) => segment.toLowerCase() === HISTORY_DIR_NAME);
 }
 
 function pageFilePathFromId(projectDir: string, id: string): string | null {

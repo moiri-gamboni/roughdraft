@@ -58,6 +58,21 @@ const SAVE_COALESCE_WINDOW_MS = 90_000;
 /** Directory permissions that stop a temporary being created, but not a write. */
 const IN_PLACE_WRITE_CODES = ["EACCES", "EPERM", "EROFS"];
 
+/**
+ * Snapshots are `.md` files inside the project, so without this they would be
+ * openable, savable and reviewable as documents — and each write would start a
+ * history of the history. Every resolver that turns caller input into a
+ * document path shares this one, so none of them can be the one that forgot.
+ *
+ * Case-insensitively, because on a case-insensitive filesystem a shifted
+ * segment still resolves to the real sidecar.
+ */
+export function refusesHistorySegment(absolutePath: string): boolean {
+  return absolutePath
+    .split(path.sep)
+    .some((segment) => segment.toLowerCase() === HISTORY_DIR_NAME);
+}
+
 /** `<dirname(document)>/.roughdraft-history/v1/<stem>/` */
 export function historyDirFor(documentPath: string): string {
   return path.join(

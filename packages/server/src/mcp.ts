@@ -6,7 +6,10 @@ import {
   extractRoughdraftReviewIndex,
   markRoughdraftResolved,
 } from "@roughdraft/rfm";
-import { commitDocumentWrite } from "./checkpoint-store.js";
+import {
+  commitDocumentWrite,
+  refusesHistorySegment,
+} from "./checkpoint-store.js";
 
 interface JsonRpcRequest {
   jsonrpc?: "2.0";
@@ -362,6 +365,11 @@ function requireDocumentPath(args: Record<string, unknown>): string {
   const absolutePath = path.resolve(documentPath);
   if (!absolutePath.toLowerCase().endsWith(".md")) {
     throw new Error(`Roughdraft can only read .md files: ${absolutePath}`);
+  }
+  if (refusesHistorySegment(absolutePath)) {
+    throw new Error(
+      `That path is inside a document's history, not a document: ${absolutePath}`,
+    );
   }
   if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) {
     throw new Error(`Markdown file not found: ${absolutePath}`);
