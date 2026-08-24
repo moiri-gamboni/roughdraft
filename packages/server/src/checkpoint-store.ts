@@ -55,6 +55,8 @@ const MAX_SNAPSHOT_ID_LENGTH = 64;
  * The bash hook debounces by the same amount.
  */
 const SAVE_COALESCE_WINDOW_MS = 90_000;
+/** Directory permissions that stop a temporary being created, but not a write. */
+const IN_PLACE_WRITE_CODES = ["EACCES", "EPERM", "EROFS"];
 
 /** `<dirname(document)>/.roughdraft-history/v1/<stem>/` */
 export function historyDirFor(documentPath: string): string {
@@ -97,11 +99,14 @@ export function parseSnapshotId(
  */
 export function listSnapshots(documentPath: string): SnapshotListing {
   const directory = historyDirFor(documentPath);
-  // The write path refuses to descend through a symlinked sidecar; a listing
-  // read through one would make a planted link serve chosen "snapshots".
-  const directoryStat = lstatOrNull(directory);
-  if (directoryStat && !directoryStat.isDirectory()) {
-    return { status: "error", reason: "history path is not a directory" };
+  // The write path refuses to descend through a symlinked sidecar at any of its
+  // three levels; a listing that only checked the leaf would still let a link
+  // planted higher up serve chosen "snapshots".
+  for (const level of sidecarLevelsFor(documentPath)) {
+    const levelStat = lstatOrNull(level);
+    if (levelStat && !levelStat.isDirectory()) {
+      return { status: "error", reason: `${level} is not a directory` };
+    }
   }
   let entries: string[];
   try {
@@ -202,8 +207,29 @@ export function commitDocumentWrite(
   atomicWriteFileSync(documentPath, nextContent);
   return {
     preCapture,
-    postCapture: captureSnapshot(documentPath, nextContent, options.trigger),
+    postCapture: capturePostWrite(documentPath, nextContent, options.trigger),
   };
+}
+
+/**
+ * The document is already on disk by the time this runs, so a bug in the store
+ * must not come back out of the write: the caller would answer 500 and the
+ * client would retry a save that landed. Rethrowing from a microtask still
+ * crashes the process as loudly, just not through the write's return path.
+ */
+function capturePostWrite(
+  documentPath: string,
+  content: string,
+  trigger: SnapshotTrigger,
+): SnapshotSummary | null {
+  try {
+    return captureSnapshot(documentPath, content, trigger);
+  } catch (error) {
+    queueMicrotask(() => {
+      throw error;
+    });
+    return null;
+  }
 }
 
 /**
@@ -214,13 +240,33 @@ export function commitDocumentWrite(
  * replaces the link rather than following it.
  */
 export function atomicWriteFileSync(targetPath: string, content: string): void {
+  // A rename would replace a symlink with a regular file and break a hard
+  // link, so the name the caller was given would quietly stop being the file
+  // they meant to edit. A snapshot never takes this path: its target is a fresh
+  // id that does not exist yet.
+  const target = lstatOrNull(targetPath);
+  if (target?.isSymbolicLink() || (target?.isFile() && target.nlink > 1)) {
+    fs.writeFileSync(targetPath, content);
+    return;
+  }
+
   const suffix = crypto.randomBytes(8).toString("hex");
   const tempPath = path.join(
     path.dirname(targetPath),
     `.${path.basename(targetPath)}.tmp-${suffix}`,
   );
 
-  const handle = fs.openSync(tempPath, "wx", 0o600);
+  let handle: number;
+  try {
+    handle = fs.openSync(tempPath, "wx", 0o600);
+  } catch (error) {
+    // A temporary needs write permission on the directory, which a plain write
+    // to an already-writable file does not. Failing here would refuse a save
+    // that succeeded before this writer existed.
+    if (!IN_PLACE_WRITE_CODES.includes(errorCode(error) ?? "")) throw error;
+    fs.writeFileSync(targetPath, content);
+    return;
+  }
   try {
     try {
       fs.writeFileSync(handle, content);
@@ -244,6 +290,13 @@ function capture(
   trigger: SnapshotTrigger,
 ): SnapshotSummary | null {
   const listing = listSnapshots(documentPath);
+  if (listing.status === "error") {
+    // Reading an unlistable directory as an empty one disables dedup,
+    // coalescing and pruning at once: every save would write a fresh copy of
+    // identical bytes, for ever, into a directory nobody can read.
+    warn(`could not list the history of ${documentPath}: ${listing.reason}`);
+    return null;
+  }
   const previous = listing.status === "ok" ? listing.snapshots : [];
   const newest = previous[0];
 
@@ -269,6 +322,20 @@ function sidecarRootFor(documentPath: string): string {
 }
 
 /**
+ * Root, version directory, leaf — the three levels both the write path and the
+ * listing refuse to descend through a symlink, kept in one place so the two
+ * cannot come to cover different depths.
+ */
+function sidecarLevelsFor(documentPath: string): string[] {
+  const root = sidecarRootFor(documentPath);
+  return [
+    root,
+    path.join(root, HISTORY_FORMAT_DIR_NAME),
+    historyDirFor(documentPath),
+  ];
+}
+
+/**
  * Creates the sidecar levels that are missing, refusing to descend through a
  * symlink — otherwise anyone able to plant one turns a save into a write into
  * an arbitrary directory.
@@ -276,7 +343,7 @@ function sidecarRootFor(documentPath: string): string {
 function ensureHistoryDir(documentPath: string): string | null {
   const root = sidecarRootFor(documentPath);
   const leaf = historyDirFor(documentPath);
-  for (const level of [root, path.join(root, HISTORY_FORMAT_DIR_NAME), leaf]) {
+  for (const level of sidecarLevelsFor(documentPath)) {
     const existing = lstatOrNull(level);
     if (existing?.isSymbolicLink()) {
       warn(`refusing to snapshot through the symlinked path ${level}`);

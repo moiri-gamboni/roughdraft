@@ -342,6 +342,28 @@ describe("captureSnapshot", () => {
     }
   });
 
+  it.skipIf(asRoot)(
+    "refuses to capture into a history it cannot list",
+    () => {
+      // A leaf that is writable but not readable makes every capture look like
+      // the first one: no dedup, no coalescing and no pruning, so the cap stops
+      // holding and the directory grows a snapshot per keystroke pause.
+      captureSnapshot(docPath, "first", "save");
+      const leaf = historyDirFor(docPath);
+      fs.chmodSync(leaf, 0o300);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        expect(captureSnapshot(docPath, "second", "save")).toBeNull();
+        expect(warn).toHaveBeenCalled();
+      } finally {
+        fs.chmodSync(leaf, 0o700);
+      }
+
+      expect(contents(docPath)).toEqual(["first"]);
+    },
+  );
+
   it("rethrows a programmer error rather than degrading to no history", () => {
     // A blanket catch that swallows everything hides a broken refactor behind
     // "the history is just unavailable" on a server nobody tails.
@@ -611,6 +633,33 @@ describe("readSnapshot", () => {
       fs.rmSync(elsewhere, { recursive: true, force: true });
     }
   });
+
+  it.each([
+    { level: "sidecar root", link: [".roughdraft-history"], inner: ["v1", "notes"] },
+    { level: "version directory", link: [".roughdraft-history", "v1"], inner: ["notes"] },
+  ])(
+    "refuses to list through a symlinked $level",
+    ({ link, inner }: { link: string[]; inner: string[] }) => {
+      // The write path refuses a symlink at all three levels; a listing that
+      // only checked the leaf would still serve a planted link's contents.
+      const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "rd-elsewhere-"));
+      try {
+        const leaf = path.join(elsewhere, ...inner);
+        fs.mkdirSync(leaf, { recursive: true });
+        fs.writeFileSync(
+          path.join(leaf, "2026-08-24T10-11-12-345Z--p1--save.md"),
+          "planted",
+        );
+        const linkPath = path.join(projectDir, ...link);
+        fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+        fs.symlinkSync(elsewhere, linkPath);
+
+        expect(listSnapshots(docPath).status).toBe("error");
+      } finally {
+        fs.rmSync(elsewhere, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("commitDocumentWrite", () => {
@@ -761,6 +810,27 @@ describe("commitDocumentWrite", () => {
     },
   );
 
+  it("crashes out of band rather than failing a write that already landed", () => {
+    // The post-capture runs after the document is on disk, so a bug in the
+    // store must not answer 500 to a save that succeeded — the client would
+    // retry a write it already made.
+    const deferred: Array<() => void> = [];
+    vi.spyOn(globalThis, "queueMicrotask").mockImplementation((task) => {
+      deferred.push(task);
+    });
+    vi.spyOn(fs, "readdirSync").mockImplementation(() => {
+      throw new TypeError("readdirSync is not a function");
+    });
+
+    expect(() =>
+      commitDocumentWrite(docPath, "landed", { trigger: "save" }),
+    ).not.toThrow();
+
+    expect(fs.readFileSync(docPath, "utf8")).toBe("landed");
+    expect(deferred).toHaveLength(1);
+    expect(deferred[0]).toThrow(TypeError);
+  });
+
   it.skipIf(asRoot)("propagates a failure to write the document itself", () => {
     const readOnlyDir = path.join(projectDir, "locked");
     fs.mkdirSync(readOnlyDir);
@@ -797,18 +867,50 @@ describe("atomicWriteFileSync", () => {
     expect(fs.statSync(docPath).mode & 0o777).toBe(0o640);
   });
 
-  it("replaces a symlinked target rather than writing through it", () => {
+  it("writes through a symlinked target rather than replacing the link", () => {
+    // Renaming over the link would leave the reviewer editing a new file while
+    // the document they opened keeps its old bytes, and report success.
     const outside = path.join(projectDir, "outside.md");
-    fs.writeFileSync(outside, "untouched");
+    fs.writeFileSync(outside, "before");
     const link = path.join(projectDir, "link.md");
     fs.symlinkSync(outside, link);
 
     atomicWriteFileSync(link, "written");
 
-    expect(fs.readFileSync(outside, "utf8")).toBe("untouched");
-    expect(fs.lstatSync(link).isSymbolicLink()).toBe(false);
-    expect(fs.readFileSync(link, "utf8")).toBe("written");
+    expect(fs.readFileSync(outside, "utf8")).toBe("written");
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
   });
+
+  it("writes through a hard-linked target rather than breaking the link", () => {
+    const other = path.join(projectDir, "other.md");
+    fs.writeFileSync(docPath, "before");
+    fs.linkSync(docPath, other);
+
+    atomicWriteFileSync(docPath, "written");
+
+    expect(fs.readFileSync(other, "utf8")).toBe("written");
+    expect(fs.statSync(docPath).nlink).toBe(2);
+  });
+
+  it.skipIf(asRoot)(
+    "falls back to an in-place write when the directory forbids a temporary",
+    () => {
+      // A plain write to an already-writable file used to succeed here, and a
+      // save that worked before this store existed must not start failing.
+      const locked = path.join(projectDir, "locked");
+      fs.mkdirSync(locked);
+      const target = path.join(locked, "notes.md");
+      fs.writeFileSync(target, "before");
+      fs.chmodSync(locked, 0o555);
+
+      try {
+        atomicWriteFileSync(target, "written");
+        expect(fs.readFileSync(target, "utf8")).toBe("written");
+      } finally {
+        fs.chmodSync(locked, 0o700);
+      }
+    },
+  );
 
   it("refuses to write through a pre-existing temporary file", () => {
     const suffix = Buffer.from("0123456789abcdef", "hex");
