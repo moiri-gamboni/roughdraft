@@ -123,11 +123,9 @@ export function listSnapshots(documentPath: string): SnapshotListing {
   // The write path refuses to descend through a symlinked sidecar at any of its
   // three levels; a listing that only checked the leaf would still let a link
   // planted higher up serve chosen "snapshots".
-  for (const level of sidecarLevelsFor(documentPath)) {
-    const levelStat = lstatOrNull(level);
-    if (levelStat && !levelStat.isDirectory()) {
-      return { status: "error", reason: `${level} is not a directory` };
-    }
+  const blocked = nonDirectorySidecarLevel(documentPath);
+  if (blocked) {
+    return { status: "error", reason: `${blocked} is not a directory` };
   }
   let entries: string[];
   try {
@@ -174,6 +172,13 @@ export function listSnapshots(documentPath: string): SnapshotListing {
 
 export function readSnapshot(documentPath: string, id: string): string | null {
   if (!parseSnapshotId(id)) return null;
+  // `O_NOFOLLOW` below covers the snapshot file itself, not the directories
+  // above it. This route never lists first, so without the same three-level
+  // refusal the listing applies, a link planted at the sidecar root serves
+  // chosen content as this document's history — and `--restore` writes it
+  // back into the document. `null` is the answer the ELOOP branch already
+  // gives for the same reason: as good as not there.
+  if (nonDirectorySidecarLevel(documentPath)) return null;
   const target = path.join(historyDirFor(documentPath), `${id}.md`);
 
   let handle: number;
@@ -371,6 +376,20 @@ function sidecarLevelsFor(documentPath: string): string[] {
     path.join(root, HISTORY_FORMAT_DIR_NAME),
     historyDirFor(documentPath),
   ];
+}
+
+/**
+ * The first sidecar level that exists and is not a directory, or `null` when
+ * every level is sound. Both readers consult this rather than each checking a
+ * depth of its own: a link planted at any level redirects whichever reader
+ * looks past it, and the two must not disagree about which paths are safe.
+ */
+function nonDirectorySidecarLevel(documentPath: string): string | null {
+  for (const level of sidecarLevelsFor(documentPath)) {
+    const stat = lstatOrNull(level);
+    if (stat && !stat.isDirectory()) return level;
+  }
+  return null;
 }
 
 /**
