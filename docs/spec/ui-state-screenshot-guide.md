@@ -122,12 +122,22 @@ suggestions:
 | Document | Save status: saving | Type and capture during autosave | `document-save-status` | Spinner-only pending state; accessible label is `Saving`. Transient; easiest with mocked delayed save. |
 | Document | Save status: failed | Force save error and let the retry ceiling pass, or block the save with the retry cancelled | `document-save-status` | Icon-only error state; accessible label is `Save failed`. Use backend/API mocking or a component harness. |
 | Document | Save status: retrying | Abort the save PUT (`page.route(...).abort()`), then type | `document-save-status` | Icon-only warning state, refresh icon; accessible label is `Changes saved in this browser, retrying`. Warning tone, not the danger tone of `Save failed`. |
-| Document | Unsent draft found | Abort the save PUT, type, then reload the page | `draft-restore-notice`, `draft-restore-action-restore`, `draft-restore-action-discard` | Banner title: `Unsent edits found in this browser`. Slate palette rather than the conflict banner's amber; never rendered together with `file-conflict-notice`. Remote sessions render it even when the base matches. |
+| Document | Unsent draft found | Abort the save PUT, type, then reload the page | `draft-restore-notice`, `draft-restore-action-restore`, `draft-restore-action-discard` | Banner title: `Unsent edits found in this browser`. Slate palette rather than the conflict banner's amber; never rendered together with `file-conflict-notice`. Icon is `Inbox`, not `History`, which now opens the revision history. Remote sessions render it even when the base matches. |
 | Document | Server unreachable, still retrying | Open a local file with the server stopped | `backend-unavailable-notice`, `backend-unavailable-retry` | Title: `Roughdraft can't reach the server`. Body reads `Roughdraft keeps trying in the background.` and names the unsent draft only when one exists; capture both variants. |
 | Document | Server unreachable, retries stopped | As above, then choose Try again until the boot ladder is exhausted (5 attempts) | `backend-unavailable-notice`, `backend-unavailable-retry` | Body reads `Roughdraft has stopped retrying.` and points at Try again, which stays the only live recovery. Same two draft variants as the retrying state. |
 | Document | Disk changed | Open local file, modify file externally while browser content is clean | `file-conflict-notice`, `file-conflict-action-reload`, `file-conflict-action-overwrite` | Banner title: `File changed on disk`. |
 | Document | Save conflict | Edit in browser, then modify file externally before autosave resolves | `file-conflict-notice`, `file-conflict-action-keep-editing` | Banner title: `Save conflict`; autosave pauses. |
 | Document | Autosave paused | Keep editing after conflict | `file-conflict-notice`, `file-conflict-action-overwrite` | Banner title: `Autosave paused`; no keep-editing action. |
+| Document | File changed on disk, already reloaded | Open a clean local file, then overwrite it externally | `external-change-notice`, `external-change-notice-view-history`, `external-change-notice-dismiss` | Banner title: `File changed on disk`. Stone palette, not the conflict banner's amber: nothing is blocked and autosave keeps running. Suppressed while a conflict or draft-restore banner is up. |
+| Document history | Version list | Edit a local file so one save lands, then use `document-history-trigger` | `document-history-dialog`, `document-history-list`, `document-history-entry` | Newest first, each entry a trigger badge (`save`/`review`/`replaced`/`hook`), a relative age, an absolute timestamp and a size. Capture with the sticky header behind the dialog: the dialog must sit over it. |
+| Document history | Version contents | Select an entry in the list | `document-history-viewer` | Read-only raw Markdown, CriticMarkup markers visible. Use the review fixture so markers are in shot. |
+| Document history | Diff against the open document | Select an entry, then `document-history-view-diff` | `document-history-diff`, `document-history-diff-line-added`, `document-history-diff-line-removed` | Added green, removed red, context plain. Overwrite the file externally first so the diff is non-trivial. |
+| Document history | Diff with nothing to show | Open history on a file whose newest version matches the editor | `document-history-diff-unchanged` | Replaces the diff entirely rather than listing context lines. |
+| Document history | Long-run elision | Diff a version against a document rewritten by more than 40 lines | `document-history-diff-elided` | Italic `… N more lines` closing a capped run. |
+| Document history | Empty history | Open a local file Roughdraft has never written to | `document-history-empty` | No list is rendered at all. Note that content dedup and save coalescing mean history is not one entry per write. |
+| Document history | Unreadable snapshots | Put a file whose name is not a canonical snapshot id in `<dir>/.roughdraft-history/v1/<stem>/`, then open history | `document-history-unreadable` | Amber count above the list. Absent when the count is zero. |
+| Document history | Restore blocked, overwrite offered | Abort the save PUT, type, overwrite the file externally, allow saves, then open history and select a version | `document-history-restore`, `document-history-restore-overwrite`, `document-history-restore-blocked` | Restore disabled, amber `Restore and overwrite` beside it. |
+| Document history | Restore blocked by an unsent draft | Abort the save PUT, type, reload, then open history while the draft offer is up | `document-history-restore`, `document-history-restore-blocked` | Restore disabled and **no** overwrite escape: taking it would answer the draft offer by destroying the draft. |
 | Document | Review handoff idle | Open a local file while a watcher is connected | `review-handoff-button` | Header text: `Agent watching`. |
 | Document | Review handoff comment popover | Open a local file while a watcher is connected, then click the handoff dropdown trigger | `review-handoff-comment-trigger`, `review-handoff-comment-popover`, `review-handoff-overall-comment` | Capture the split handoff control and textarea with `Overall comment` placeholder before submission. |
 | Document | Review handoff sending | Click handoff button while watcher is connected | `review-handoff-button` | Button label: `Sending`. |
@@ -173,7 +183,7 @@ await mobile.screenshot({ path: `${outDir}/01-home-mobile.png`, fullPage: true }
 await browser.close();
 ```
 
-For interaction-heavy states, prefer selectors over coordinates. The current code has stable `data-testid` hooks for the homepage storyboard, editor view toggle, mode trigger, conflict banner/actions, review rail, rich editor, code editor, selection menu, link popover, and context menu.
+For interaction-heavy states, prefer selectors over coordinates. The current code has stable `data-testid` hooks for the homepage storyboard, editor view toggle, mode trigger, conflict banner/actions, history dialog/list/viewer/diff, review rail, rich editor, code editor, selection menu, link popover, and context menu.
 ## States That Need A Harness Or Mocking
 These are real product states, but they are awkward to capture deterministically through only public routes:
 
@@ -186,6 +196,8 @@ These are real product states, but they are awkward to capture deterministically
 - Save status: retrying, unsent-draft banner, and server unreachable
   
 - Review handoff undelivered/error
+  
+- History restore blocked, in both variants: each needs a blocked save plus an external write, or a parked draft
   
 - Remote connected/disconnected banners
   
