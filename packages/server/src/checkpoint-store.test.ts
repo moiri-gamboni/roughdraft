@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -925,6 +926,24 @@ describe("writeDocumentFileSync", () => {
     },
   );
 
+  it("does not downgrade to an in-place write when a temporary is planted", () => {
+    // The errno list is the switch between an atomic write and a non-atomic
+    // one. `EEXIST` must stay off it: a planted temporary is an error, not a
+    // reason to abandon atomicity and write straight over the document.
+    const suffix = Buffer.from("0123456789abcdef", "hex");
+    vi.spyOn(crypto, "randomBytes").mockReturnValue(
+      suffix as unknown as ReturnType<typeof crypto.randomBytes>,
+    );
+    fs.writeFileSync(docPath, "before");
+    fs.writeFileSync(
+      path.join(projectDir, `.notes.md.tmp-${suffix.toString("hex")}`),
+      "planted",
+    );
+
+    expect(() => writeDocumentFileSync(docPath, "after")).toThrow(/EEXIST/);
+    expect(fs.readFileSync(docPath, "utf8")).toBe("before");
+  });
+
   it("writes atomically when the target is an ordinary file", () => {
     fs.writeFileSync(docPath, "before");
 
@@ -967,6 +986,28 @@ describe("atomicWriteFileSync", () => {
     expect(fs.readFileSync(outside, "utf8")).toBe("untouched");
     expect(fs.lstatSync(link).isSymbolicLink()).toBe(false);
     expect(fs.readFileSync(link, "utf8")).toBe("written");
+  });
+
+  it("refuses to write through a pre-existing temporary file", () => {
+    // The errno list in `writeDocumentFileSync` is the switch between an
+    // atomic write and a non-atomic one, and `EEXIST` must stay off it:
+    // including it would let a planted temporary silently downgrade a write.
+    // Nothing else pins that boundary, so this reaches the O_EXCL refusal by
+    // fixing the suffix the writer would otherwise pick at random.
+    const suffix = Buffer.from("0123456789abcdef", "hex");
+    vi.spyOn(crypto, "randomBytes").mockReturnValue(
+      suffix as unknown as ReturnType<typeof crypto.randomBytes>,
+    );
+    fs.writeFileSync(docPath, "before");
+    const planted = path.join(
+      projectDir,
+      `.notes.md.tmp-${suffix.toString("hex")}`,
+    );
+    fs.writeFileSync(planted, "planted");
+
+    expect(() => atomicWriteFileSync(docPath, "after")).toThrow(/EEXIST/);
+    expect(fs.readFileSync(planted, "utf8")).toBe("planted");
+    expect(fs.readFileSync(docPath, "utf8")).toBe("before");
   });
 
   it("leaves no temporary behind when the write fails", () => {
