@@ -470,6 +470,29 @@ describe("createApp", () => {
       expect(response.body).toEqual({ id, content: "# Saved\n" });
     });
 
+    it("does not leak filesystem detail when the history cannot be read", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      // A file where the snapshot directory belongs: reading it fails with
+      // ENOTDIR, no permission games needed.
+      fs.mkdirSync(path.join(projectDir, ".roughdraft-history", "v1"), {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        path.join(projectDir, ".roughdraft-history", "v1", "draft"),
+        "",
+      );
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .get("/api/markdown-file/history")
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(500);
+      // These routes are unauthenticated, so the body must not carry paths.
+      expect(response.body).toEqual({ error: "History unavailable" });
+      expect(JSON.stringify(response.body)).not.toContain(projectDir);
+    });
+
     it("rejects a snapshot id that is shaped like a traversal", async () => {
       fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
       fs.writeFileSync(path.join(projectDir, "secret.md"), "# Secret\n");
