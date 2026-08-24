@@ -394,6 +394,34 @@ export function resolveAnchoredRailLayouts<T extends AnchoredRailItem>(
   return resolved;
 }
 
+/**
+ * The rail item nearest a vertical position (editor-anchor space): distance
+ * zero inside an item's anchor range, edge distance otherwise. Used to let
+ * the rail align around wherever the caret is, even in uncommented text.
+ */
+export function pickNearestRailKey<T extends AnchoredRailItem>(
+  items: readonly T[],
+  targetY: number,
+): string | null {
+  let bestKey: string | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const item of items) {
+    const distance =
+      targetY < item.anchorTop
+        ? item.anchorTop - targetY
+        : targetY > item.anchorBottom
+          ? targetY - item.anchorBottom
+          : 0;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestKey = item.key;
+    }
+  }
+
+  return bestKey;
+}
+
 export function resolveCommentThreadRailLayouts(
   items: CommentThreadRailItem[],
   heights: Record<string, number>,

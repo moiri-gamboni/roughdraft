@@ -487,7 +487,7 @@ export function DocumentWorkspace({
   backend,
 }: DocumentWorkspaceProps) {
   const [documentInteractionMode, setDocumentInteractionMode] =
-    useState<DocumentInteractionMode>("suggesting");
+    useState<DocumentInteractionMode>("editing");
   const [saveState, setSaveState] = useState<DocumentSaveState>("saved");
   const [reviewHandoffState, setReviewHandoffState] =
     useState<ReviewHandoffState>("idle");
@@ -1127,7 +1127,12 @@ export function DocumentWorkspace({
             ref={documentHeaderRef}
             data-testid="document-page-header"
             className={cn(
-              "review-layout-grid document-page-shell mb-2 text-[0.62rem] font-medium tracking-[0.01em] text-stone-400",
+              // Sticky so the mode switcher stays reachable in a long
+              // document. Solid-ish background so content scrolling
+              // underneath stays unreadable-through; no backdrop-filter and
+              // no geometry changes — both disturb the FLIP layout-shift
+              // animation this element participates in.
+              "review-layout-grid document-page-shell sticky top-0 z-[70] mb-2 bg-[#FCFCFC]/95 py-1 dark:bg-background/95 text-[0.62rem] font-medium tracking-[0.01em] text-stone-400",
               !documentHasComments &&
                 "review-layout-grid--centered document-page-shell-no-comments",
             )}
