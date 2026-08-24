@@ -39,7 +39,7 @@ import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
 import { toHtml } from "./markdown";
 import { resolveCommentAnchor } from "./review-selection";
 import type {
-  DraftRestore,
+  ContentRestore,
   LocalContentOrigin,
   Page,
   StorageBackend,
@@ -79,7 +79,7 @@ interface PageCardProps {
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
-  draftRestore?: DraftRestore | null;
+  contentRestore?: ContentRestore | null;
 }
 
 interface PageCardEditorSurfaceProps {
@@ -100,7 +100,7 @@ interface PageCardEditorSurfaceProps {
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
-  draftRestore?: DraftRestore | null;
+  contentRestore?: ContentRestore | null;
 }
 
 interface RichTextEditorSurfaceProps {
@@ -2249,7 +2249,7 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
   onSaveControllerChange,
   saveBlocked = false,
   forceResetKey = null,
-  draftRestore = null,
+  contentRestore = null,
 }: PageCardEditorSurfaceProps) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightSaveRef = useRef<Promise<ManualSaveResult> | null>(null);
@@ -2417,24 +2417,25 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
   );
 
   /**
-   * Put an unsent draft back in the editor and send it. It is adopted as
-   * unsaved work, so the reconciliation effect below leaves it alone and the
-   * card keeps warning about it until the destination confirms.
+   * Put restored content back in the editor and send it, whatever it was
+   * restored from. It is adopted as unsaved work, so the reconciliation effect
+   * below leaves it alone and the card keeps warning about it until the
+   * destination confirms.
    */
   // Only the offer itself is a dependency. Including the callbacks would
   // re-restore whenever an unrelated prop changed their identity, and the
   // effect has to stay safe to run twice for one offer anyway: React discards
   // and replays mount effects, which cancels the save this schedules.
-  const restoreDraftRef = useRef({ acceptMarkdown, scheduleSave });
-  restoreDraftRef.current = { acceptMarkdown, scheduleSave };
+  const restoreContentRef = useRef({ acceptMarkdown, scheduleSave });
+  restoreContentRef.current = { acceptMarkdown, scheduleSave };
 
   useEffect(() => {
-    if (!draftRestore) return;
-    restoreDraftRef.current.acceptMarkdown(draftRestore.content, {
+    if (!contentRestore) return;
+    restoreContentRef.current.acceptMarkdown(contentRestore.content, {
       markSaved: false,
     });
-    restoreDraftRef.current.scheduleSave(draftRestore.content);
-  }, [draftRestore]);
+    restoreContentRef.current.scheduleSave(contentRestore.content);
+  }, [contentRestore]);
 
   useEffect(() => {
     const forceResetChanged = forceResetKeyRef.current !== forceResetKey;
@@ -2580,7 +2581,7 @@ export function PageCard({
   onSaveControllerChange,
   saveBlocked,
   forceResetKey,
-  draftRestore,
+  contentRestore,
 }: PageCardProps) {
   const [saveState, setSaveState] = useState<DocumentSaveState>("saved");
 
@@ -2608,7 +2609,7 @@ export function PageCard({
         onSaveControllerChange={onSaveControllerChange}
         saveBlocked={saveBlocked}
         forceResetKey={forceResetKey}
-        draftRestore={draftRestore}
+        contentRestore={contentRestore}
       />
     </div>
   );
