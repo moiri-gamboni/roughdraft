@@ -114,22 +114,19 @@ test.describe("CriticMarkup review flows", () => {
     await selectRichText(page, "target text");
     await page.getByTestId("selection-menu-action-comment").waitFor();
 
-    const addSamplesPromise = sampleReviewLayoutAnimation(page);
+    await recordReviewLayoutTransitions(page);
     await page.getByTestId("selection-menu-action-comment").click();
-    const addSamples = await addSamplesPromise;
+    await expectAnimatedReviewLayout(page);
 
-    expect(hasAnimatedReviewLayout(addSamples)).toBe(true);
     await page
       .getByTestId("comment-rail-c1-editor")
       .fill("Clarify this phrase.");
     await page.getByTestId("comment-rail-c1-action-save").click();
 
     await page.getByTestId("comment-rail-c1-action-delete-thread").waitFor();
-    const removeSamplesPromise = sampleReviewLayoutAnimation(page);
+    await recordReviewLayoutTransitions(page);
     await page.getByTestId("comment-rail-c1-action-delete-thread").click();
-    const removeSamples = await removeSamplesPromise;
-
-    expect(hasAnimatedReviewLayout(removeSamples)).toBe(true);
+    await expectAnimatedReviewLayout(page);
 
     logE2eEvent("criticmarkup.layout-animation", {
       file: "layout-animation.md",
@@ -211,54 +208,122 @@ test.describe("CriticMarkup review flows", () => {
   });
 });
 
-type ReviewLayoutAnimationSample = {
-  shellAnimating: boolean;
-  headerAnimating: boolean;
-  shellTranslateX: number;
-  headerTranslateX: number;
+/**
+ * The two elements the review-layout shift moves.
+ *
+ * That they move *together* is deliberately not asserted: measured 90ms and
+ * 500ms apart under load in runs where the animation was fine, so the two
+ * shifts are not always one commit and pinning it here only buys a flake back.
+ * See `docs/solutions/test-flakiness/a-time-budget-is-not-evidence.md`.
+ */
+const REVIEW_LAYOUT_TEST_IDS = ["document-page-header", "document-page-shell"];
+
+type ReviewLayoutRest = {
+  testId: string;
+  offsetX: number;
+  animating: boolean;
 };
 
-async function sampleReviewLayoutAnimation(page: Page) {
-  return page.evaluate(async () => {
-    const readTranslateX = (element: Element | null) => {
-      if (!(element instanceof HTMLElement)) return 0;
-      const transform = getComputedStyle(element).transform;
-      if (transform === "none") return 0;
-      return new DOMMatrixReadOnly(transform).m41;
-    };
-    const samples: ReviewLayoutAnimationSample[] = [];
-    const start = performance.now();
+type ReviewLayoutRecorder = {
+  reviewLayoutTransitions?: string[];
+  reviewLayoutRecording?: boolean;
+};
 
-    while (performance.now() - start < 500) {
-      const shell = document.querySelector(
-        '[data-testid="document-page-shell"]',
-      );
-      const header = document.querySelector(
-        '[data-testid="document-page-header"]',
-      );
-      samples.push({
-        shellAnimating:
-          shell instanceof HTMLElement &&
-          shell.classList.contains("review-layout-grid--animating"),
-        headerAnimating:
-          header instanceof HTMLElement &&
-          header.classList.contains("review-layout-grid--animating"),
-        shellTranslateX: readTranslateX(shell),
-        headerTranslateX: readTranslateX(header),
-      });
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-    }
+/**
+ * Start recording which review-layout elements begin a transform transition.
+ *
+ * Transition events are the only evidence of this animation that survives a
+ * busy machine. Sampling transforms across animation frames misses the whole
+ * 180ms window whenever rendering stalls, and reading a transform inside the
+ * event handler is no better: the transition is composited, so under load it
+ * has already finished by the time the main thread dispatches the event. That
+ * a `transform` transition started at all is enough — the transition property
+ * only exists while the animating class is applied, and a transition only
+ * fires when the value actually changes, which the hook keeps above 1px.
+ *
+ * Recording starts from a standstill. A shift still finishing from an earlier
+ * step would otherwise be the first start this sees for one element, and the
+ * two elements' starts would no longer be from the same movement.
+ */
+async function recordReviewLayoutTransitions(page: Page) {
+  await expectReviewLayoutAtRest(page);
+  await page.evaluate((testIds) => {
+    const recorder = window as Window & ReviewLayoutRecorder;
+    recorder.reviewLayoutTransitions = [];
+    if (recorder.reviewLayoutRecording) return;
+    recorder.reviewLayoutRecording = true;
 
-    return samples;
-  });
+    document.addEventListener(
+      "transitionstart",
+      (event) => {
+        if (event.propertyName !== "transform") return;
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+
+        const testId = target.dataset.testid ?? "";
+        if (!testIds.includes(testId)) return;
+
+        const started = recorder.reviewLayoutTransitions;
+        if (started && !started.includes(testId)) started.push(testId);
+      },
+      { capture: true },
+    );
+  }, REVIEW_LAYOUT_TEST_IDS);
 }
 
-function hasAnimatedReviewLayout(samples: ReviewLayoutAnimationSample[]) {
-  return samples.some(
-    (sample) =>
-      sample.shellAnimating &&
-      sample.headerAnimating &&
-      Math.abs(sample.shellTranslateX) > 1 &&
-      Math.abs(sample.headerTranslateX) > 1,
+function readReviewLayoutRest(page: Page) {
+  return page.evaluate(
+    (testIds) =>
+      testIds.map((testId) => {
+        const element = document.querySelector(`[data-testid="${testId}"]`);
+        if (!(element instanceof HTMLElement)) {
+          // Never equals the expected rest state, so the poll keeps waiting.
+          return {
+            testId,
+            offsetX: Number.NaN,
+            animating: false,
+          } satisfies ReviewLayoutRest;
+        }
+
+        const transform = getComputedStyle(element).transform;
+        const translateX =
+          transform === "none" ? 0 : new DOMMatrixReadOnly(transform).m41;
+        return {
+          testId,
+          offsetX: Math.abs(Math.round(translateX)),
+          animating: element.classList.contains(
+            "review-layout-grid--animating",
+          ),
+        } satisfies ReviewLayoutRest;
+      }),
+    REVIEW_LAYOUT_TEST_IDS,
   );
+}
+
+/** No shift is in flight and both elements sit on the current layout. */
+async function expectReviewLayoutAtRest(page: Page) {
+  await expect
+    .poll(() => readReviewLayoutRest(page))
+    .toEqual(
+      REVIEW_LAYOUT_TEST_IDS.map((testId) => ({
+        testId,
+        offsetX: 0,
+        animating: false,
+      })),
+    );
+}
+
+/** Both elements animated the shift, then settled onto the new layout. */
+async function expectAnimatedReviewLayout(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & ReviewLayoutRecorder).reviewLayoutTransitions ??
+          [],
+      ),
+    )
+    .toEqual(expect.arrayContaining(REVIEW_LAYOUT_TEST_IDS));
+
+  await expectReviewLayoutAtRest(page);
 }
