@@ -869,28 +869,41 @@ function defaultSpawnServerProcess(options: {
   const serverEntryPath = fileURLToPath(new URL("./child.js", import.meta.url));
   // Detached with `stdio: "ignore"` there was no destination at all: the
   // server's startup errors and every warning the history store emits went to
-  // a closed descriptor. Truncating on spawn keeps this to one run's worth,
-  // which is what anyone diagnosing a live server wants to read.
+  // a closed descriptor. Each run starts a fresh log, so the file stays to one
+  // run's worth, but the previous one is kept: a server that dies is usually
+  // met with another `roughdraft open`, which would otherwise truncate the
+  // evidence before anyone thought to read it.
   fs.mkdirSync(path.dirname(options.logPath), { recursive: true });
+  try {
+    fs.renameSync(options.logPath, `${options.logPath}.1`);
+  } catch {
+    // No previous log, or it cannot be moved. Neither is a reason to refuse
+    // to start a server.
+  }
   const logFd = fs.openSync(options.logPath, "w");
-  const child = spawn(
-    process.execPath,
-    [
-      serverEntryPath,
-      "--port",
-      String(options.port),
-      "--project-dir",
-      options.projectDir,
-    ],
-    {
-      cwd: options.projectDir,
-      detached: true,
-      stdio: ["ignore", logFd, logFd],
-      windowsHide: true,
-      env: process.env,
-    },
-  );
-  fs.closeSync(logFd);
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn(
+      process.execPath,
+      [
+        serverEntryPath,
+        "--port",
+        String(options.port),
+        "--project-dir",
+        options.projectDir,
+      ],
+      {
+        cwd: options.projectDir,
+        detached: true,
+        stdio: ["ignore", logFd, logFd],
+        windowsHide: true,
+        env: process.env,
+      },
+    );
+  } finally {
+    // The child holds its own duplicate of the descriptor.
+    fs.closeSync(logFd);
+  }
 
   child.unref();
 
