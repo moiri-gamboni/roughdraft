@@ -13,6 +13,9 @@ import {
   writeProjectFile,
 } from "./helpers";
 
+/** `fs.watchFile({ interval })` in the server's markdown-file events endpoint. */
+const WATCH_POLL_INTERVAL_MS = 500;
+
 test.describe("stale writes", () => {
   let projectDir: string;
 
@@ -67,6 +70,59 @@ test.describe("stale writes", () => {
 
     logE2eEvent("stale-write.conflict-surfaced", {
       file: "conflict.md",
+    });
+  });
+
+  test("keeps autosaving when the watcher echoes a slow save @smoke", async ({
+    page,
+  }) => {
+    const filePath = writeProjectFile(
+      projectDir,
+      "watch-echo.md",
+      "# Watch echo\n\nOriginal body.\n",
+    );
+
+    // The server writes the file before it answers, and watches it with
+    // `fs.watchFile({ interval: 500 })`. Holding the first save's response for
+    // several of those intervals is what puts the echo of our own write ahead
+    // of the response that would have identified it — the ordering the app used
+    // to misread as somebody else's edit.
+    let heldFirstSave = false;
+    await page.route(
+      (url) => url.pathname === "/api/markdown-file",
+      async (route) => {
+        if (route.request().method() !== "PUT") return route.fallback();
+        const response = await route.fetch();
+        if (!heldFirstSave) {
+          heldFirstSave = true;
+          await new Promise((resolve) =>
+            setTimeout(resolve, WATCH_POLL_INTERVAL_MS * 4),
+          );
+        }
+        await route.fulfill({ response });
+      },
+    );
+
+    await openMarkdownFile(page, filePath, "code");
+    await expect(codeEditor(page)).toContainText("Original body.");
+
+    await appendInCodeEditor(page, "\nFirst body.\n");
+    await expect
+      .poll(() => readProjectFile(projectDir, "watch-echo.md"))
+      .toContain("First body.");
+    await expect(documentSaveStatus(page)).toHaveAttribute(
+      "aria-label",
+      "Saved",
+    );
+    await expect(fileConflictNotice(page)).toHaveCount(0);
+
+    await appendInCodeEditor(page, "\nSecond body.\n");
+    await expect
+      .poll(() => readProjectFile(projectDir, "watch-echo.md"))
+      .toContain("Second body.");
+
+    logE2eEvent("stale-write.watch-echo-ignored", {
+      file: "watch-echo.md",
     });
   });
 
