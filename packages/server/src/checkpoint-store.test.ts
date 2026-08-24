@@ -13,6 +13,7 @@ import {
   readSnapshot,
   type SnapshotSummary,
   type SnapshotTrigger,
+  writeDocumentFileSync,
 } from "./checkpoint-store";
 
 const CANONICAL_ID = "2026-08-24T10-11-12-345Z--p1234--hook";
@@ -346,6 +347,36 @@ describe("captureSnapshot", () => {
     }
 
     expect(contents(docPath)).toEqual(["first"]);
+  });
+
+  it("refuses to write a snapshot through a symlink planted at a predictable id", () => {
+    // A snapshot id looks unguessable, but the monotonic clamp makes it exactly
+    // predictable: plant one valid far-future id and the next capture is
+    // stamped at newest + 1ms. The pid is not a secret either — the CLI writes
+    // it into server.json. So a snapshot target *can* pre-exist as a link, and
+    // following one is arbitrary file creation triggered by the next save.
+    fs.writeFileSync(docPath, "the document\n");
+    const leaf = historyDirFor(docPath);
+    fs.mkdirSync(leaf, { recursive: true });
+    plantSnapshot(docPath, "2099-01-01T00-00-00-000Z--p1--save", "pin\n");
+
+    const victim = path.join(projectDir, "victim.md");
+    fs.writeFileSync(victim, "untouched\n");
+    for (const trigger of ["save", "replaced"]) {
+      for (const ms of ["001", "002"]) {
+        fs.symlinkSync(
+          victim,
+          path.join(
+            leaf,
+            `2099-01-01T00-00-00-${ms}Z--p${process.pid}--${trigger}.md`,
+          ),
+        );
+      }
+    }
+
+    commitDocumentWrite(docPath, "next\n", { trigger: "save" });
+
+    expect(fs.readFileSync(victim, "utf8")).toBe("untouched\n");
   });
 
   it("rethrows a programmer error rather than degrading to no history", () => {
@@ -830,6 +861,62 @@ describe("commitDocumentWrite", () => {
   });
 });
 
+describe("writeDocumentFileSync", () => {
+  it("writes through a symlinked target rather than replacing the link", () => {
+    // Renaming over the link would leave the reviewer editing a new file while
+    // the document they opened keeps its old bytes, and report success.
+    const outside = path.join(projectDir, "outside.md");
+    fs.writeFileSync(outside, "before");
+    const link = path.join(projectDir, "link.md");
+    fs.symlinkSync(outside, link);
+
+    writeDocumentFileSync(link, "written");
+
+    expect(fs.readFileSync(outside, "utf8")).toBe("written");
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+  });
+
+  it("writes through a hard-linked target rather than breaking the link", () => {
+    const other = path.join(projectDir, "other.md");
+    fs.writeFileSync(docPath, "before");
+    fs.linkSync(docPath, other);
+
+    writeDocumentFileSync(docPath, "written");
+
+    expect(fs.readFileSync(other, "utf8")).toBe("written");
+    expect(fs.statSync(docPath).nlink).toBe(2);
+  });
+
+  it.skipIf(asRoot)(
+    "falls back to an in-place write when the directory forbids a temporary",
+    () => {
+      // A plain write to an already-writable file used to succeed here, and a
+      // save that worked before this store existed must not start failing.
+      const locked = path.join(projectDir, "locked");
+      fs.mkdirSync(locked);
+      const target = path.join(locked, "notes.md");
+      fs.writeFileSync(target, "before");
+      fs.chmodSync(locked, 0o555);
+
+      try {
+        writeDocumentFileSync(target, "written");
+        expect(fs.readFileSync(target, "utf8")).toBe("written");
+      } finally {
+        fs.chmodSync(locked, 0o700);
+      }
+    },
+  );
+
+  it("writes atomically when the target is an ordinary file", () => {
+    fs.writeFileSync(docPath, "before");
+
+    writeDocumentFileSync(docPath, "after");
+
+    expect(fs.readFileSync(docPath, "utf8")).toBe("after");
+    expect(fs.readdirSync(projectDir)).toEqual(["notes.md"]);
+  });
+});
+
 describe("atomicWriteFileSync", () => {
   it("replaces the file and leaves no temporary behind", () => {
     fs.writeFileSync(docPath, "before");
@@ -849,50 +936,20 @@ describe("atomicWriteFileSync", () => {
     expect(fs.statSync(docPath).mode & 0o777).toBe(0o640);
   });
 
-  it("writes through a symlinked target rather than replacing the link", () => {
-    // Renaming over the link would leave the reviewer editing a new file while
-    // the document they opened keeps its old bytes, and report success.
+  it("replaces a symlinked target rather than writing through it", () => {
+    // A snapshot id is predictable enough to plant a link at, so the writer
+    // snapshots go through must never follow one.
     const outside = path.join(projectDir, "outside.md");
-    fs.writeFileSync(outside, "before");
+    fs.writeFileSync(outside, "untouched");
     const link = path.join(projectDir, "link.md");
     fs.symlinkSync(outside, link);
 
     atomicWriteFileSync(link, "written");
 
-    expect(fs.readFileSync(outside, "utf8")).toBe("written");
-    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(outside, "utf8")).toBe("untouched");
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(link, "utf8")).toBe("written");
   });
-
-  it("writes through a hard-linked target rather than breaking the link", () => {
-    const other = path.join(projectDir, "other.md");
-    fs.writeFileSync(docPath, "before");
-    fs.linkSync(docPath, other);
-
-    atomicWriteFileSync(docPath, "written");
-
-    expect(fs.readFileSync(other, "utf8")).toBe("written");
-    expect(fs.statSync(docPath).nlink).toBe(2);
-  });
-
-  it.skipIf(asRoot)(
-    "falls back to an in-place write when the directory forbids a temporary",
-    () => {
-      // A plain write to an already-writable file used to succeed here, and a
-      // save that worked before this store existed must not start failing.
-      const locked = path.join(projectDir, "locked");
-      fs.mkdirSync(locked);
-      const target = path.join(locked, "notes.md");
-      fs.writeFileSync(target, "before");
-      fs.chmodSync(locked, 0o555);
-
-      try {
-        atomicWriteFileSync(target, "written");
-        expect(fs.readFileSync(target, "utf8")).toBe("written");
-      } finally {
-        fs.chmodSync(locked, 0o700);
-      }
-    },
-  );
 
   it("leaves no temporary behind when the write fails", () => {
     fs.writeFileSync(docPath, "before");
