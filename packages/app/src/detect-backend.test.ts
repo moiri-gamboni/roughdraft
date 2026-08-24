@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiBackend } from "./api-backend";
-import { detectBackend } from "./detect-backend";
+import { BackendUnavailableError, detectBackend } from "./detect-backend";
 import { LocalStorageBackend } from "./local-storage-backend";
 import { RemoteBackend } from "./remote-backend";
 
@@ -71,8 +71,42 @@ describe("detectBackend", () => {
     expect(createRemoteBackend).not.toHaveBeenCalled();
   });
 
-  it("does not hide a broken remote session by falling back to local storage", async () => {
-    window.history.replaceState(null, "", "/?session=missing&token=bad");
+  it("uses local storage when no server is available", async () => {
+    global.fetch = vi.fn(async () => {
+      throw new Error("offline");
+    }) as unknown as typeof fetch;
+
+    const backend = await detectBackend();
+
+    expect(backend).toBeInstanceOf(LocalStorageBackend);
+  });
+
+  it("refuses to stand in for a real document when no server is available", async () => {
+    // Browser storage has nothing for this path, so falling back would show an
+    // empty page for a file that is fine on disk.
+    window.history.replaceState(null, "", "/?path=/work/plan.md");
+    global.fetch = vi.fn(async () => {
+      throw new Error("offline");
+    }) as unknown as typeof fetch;
+
+    await expect(detectBackend()).rejects.toBeInstanceOf(
+      BackendUnavailableError,
+    );
+  });
+
+  it("reports an unreachable server for a session URL too", async () => {
+    window.history.replaceState(null, "", "/?session=session-1");
+    global.fetch = vi.fn(async () => {
+      throw new Error("offline");
+    }) as unknown as typeof fetch;
+
+    await expect(detectBackend()).rejects.toBeInstanceOf(
+      BackendUnavailableError,
+    );
+  });
+
+  it("reports a session that cannot be reopened rather than falling back to local storage", async () => {
+    window.history.replaceState(null, "", "/?session=missing");
     global.fetch = vi.fn(
       async () =>
         new Response(
@@ -87,18 +121,12 @@ describe("detectBackend", () => {
       new Error("Could not load remote document session missing: 404"),
     );
 
-    await expect(detectBackend()).rejects.toThrow(
-      /Could not load remote document session/,
-    );
-  });
-
-  it("uses local storage when no server is available", async () => {
-    global.fetch = vi.fn(async () => {
-      throw new Error("offline");
-    }) as unknown as typeof fetch;
-
-    const backend = await detectBackend();
-
-    expect(backend).toBeInstanceOf(LocalStorageBackend);
+    // The boot retries on BackendUnavailableError and gives up on anything
+    // else, so the class matters as much as the message the reviewer reads.
+    const rejection = await detectBackend().catch((error: unknown) => error);
+    expect(rejection).toBeInstanceOf(BackendUnavailableError);
+    expect(rejection).toMatchObject({
+      message: expect.stringMatching(/Could not load remote document session/),
+    });
   });
 });

@@ -9,6 +9,7 @@ import {
 import {
   DocumentSaveStatusIndicator,
   DocumentWorkspace,
+  type DraftRestoreOffer,
   getReviewHandoffButtonLabel,
   isReviewHandoffDisabled,
   shouldLatchDocumentChangedSinceOpen,
@@ -17,9 +18,11 @@ import type { DocumentSaveState } from "../src/PageCard";
 import type {
   CompleteReviewOptions,
   CompleteReviewResult,
+  DocumentDiskChangeState,
   Page,
   StorageBackend,
 } from "../src/storage";
+import { setupDomMocks } from "./dom-mocks";
 
 function createBackend({
   watcherCount,
@@ -70,108 +73,6 @@ function createPage(content = "Hello world"): Page {
   };
 }
 
-function setupDomMocks() {
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-    x: 0,
-    y: 0,
-    left: 0,
-    top: 0,
-    width: 640,
-    height: 480,
-    right: 640,
-    bottom: 480,
-    toJSON() {
-      return this;
-    },
-  } as DOMRect);
-
-  if (!("ResizeObserver" in globalThis)) {
-    Object.defineProperty(globalThis, "ResizeObserver", {
-      configurable: true,
-      value: class ResizeObserver {
-        observe() {}
-        unobserve() {}
-        disconnect() {}
-      },
-    });
-  }
-
-  Object.defineProperty(document, "fonts", {
-    configurable: true,
-    value: { ready: Promise.resolve() },
-  });
-
-  Object.defineProperty(Range.prototype, "getBoundingClientRect", {
-    configurable: true,
-    value() {
-      return {
-        x: 0,
-        y: 0,
-        left: 0,
-        top: 0,
-        width: 80,
-        height: 20,
-        right: 80,
-        bottom: 20,
-        toJSON() {
-          return this;
-        },
-      } as DOMRect;
-    },
-  });
-
-  Object.defineProperty(Range.prototype, "getClientRects", {
-    configurable: true,
-    value() {
-      return [
-        {
-          x: 0,
-          y: 0,
-          left: 0,
-          top: 0,
-          width: 80,
-          height: 20,
-          right: 80,
-          bottom: 20,
-          toJSON() {
-            return this;
-          },
-        } as DOMRect,
-      ];
-    },
-  });
-
-  Object.defineProperty(HTMLElement.prototype, "getClientRects", {
-    configurable: true,
-    value() {
-      return [this.getBoundingClientRect()];
-    },
-  });
-
-  Object.defineProperty(Text.prototype, "getClientRects", {
-    configurable: true,
-    value() {
-      return [
-        {
-          x: 0,
-          y: 0,
-          left: 0,
-          top: 0,
-          width: 80,
-          height: 20,
-          right: 80,
-          bottom: 20,
-          toJSON() {
-            return this;
-          },
-        } as DOMRect,
-      ];
-    },
-  });
-
-  window.scrollBy = vi.fn();
-}
-
 async function click(element: Element) {
   await act(async () => {
     element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -207,6 +108,33 @@ function getByTestId<T extends Element = HTMLElement>(
   expect(element).not.toBeNull();
   return element as T;
 }
+
+/**
+ * Keyed by the union rather than listed, so adding a disk-change state without
+ * giving it a status label or deciding whether it blocks the handoff is a
+ * compile error rather than a silently untested state.
+ */
+const saveStatusLabelByDiskChangeState: Record<
+  DocumentDiskChangeState,
+  string
+> = {
+  clean: "Saved",
+  changed: "File changed on disk",
+  conflict: "Save conflict",
+  paused: "Autosave paused",
+  "draft-restore": "Unsent draft found",
+};
+
+const handoffDisabledByDiskChangeState: Record<
+  DocumentDiskChangeState,
+  boolean
+> = {
+  clean: false,
+  changed: true,
+  conflict: true,
+  paused: true,
+  "draft-restore": true,
+};
 
 describe("view mode toggle uses client-side state (issue 1 fix)", () => {
   afterEach(() => {
@@ -272,15 +200,18 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
   async function renderSaveStatus({
     saveState = "saved",
     documentDiskChangeState = "clean",
+    retryPending = false,
   }: {
     saveState?: DocumentSaveState;
-    documentDiskChangeState?: "clean" | "changed" | "conflict" | "paused";
+    documentDiskChangeState?: DocumentDiskChangeState;
+    retryPending?: boolean;
   } = {}) {
     await act(async () => {
       root.render(
         <DocumentSaveStatusIndicator
           saveState={saveState}
           diskChangeState={documentDiskChangeState}
+          retryPending={retryPending}
         />,
       );
       await Promise.resolve();
@@ -293,12 +224,18 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     documentCopyPath = "test.md",
     watcherCount = 0,
     onSaveDocument = async () => {},
+    draftRestoreOffer = {
+      mode: "local",
+      onRestore: () => {},
+      onDiscard: () => {},
+    },
   }: {
-    documentDiskChangeState?: "clean" | "changed" | "conflict" | "paused";
+    documentDiskChangeState?: DocumentDiskChangeState;
     documentContent?: string;
     documentCopyPath?: string | null;
     watcherCount?: number;
     onSaveDocument?: (id: string, content: string) => Promise<void>;
+    draftRestoreOffer?: DraftRestoreOffer | null;
   } = {}) {
     (
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -319,6 +256,7 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
           onDocumentLocalContentChange={() => {}}
           documentDiskChangeState={documentDiskChangeState}
           documentForceResetKey={null}
+          draftRestoreOffer={draftRestoreOffer}
           onReloadDocumentFromDisk={() => {}}
           onKeepEditingWithoutAutosave={() => {}}
           onOverwriteDocumentOnDisk={() => {}}
@@ -354,12 +292,22 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     }
   });
 
-  it.each([
-    ["changed", "File changed on disk"],
-    ["conflict", "Save conflict"],
-    ["paused", "Autosave paused"],
-  ] as const)("shows disk-blocked %s save status", async (state, label) => {
-    await renderSaveStatus({ documentDiskChangeState: state });
+  it("reassures rather than alarms while a failed save is being retried", async () => {
+    await renderSaveStatus({ saveState: "error", retryPending: true });
+
+    const status = getByTestId(container, "document-save-status");
+    expect(status.getAttribute("aria-label")).toBe(
+      "Changes saved in this browser, retrying",
+    );
+    expect(status.className).not.toContain("text-red");
+  });
+
+  it.each(
+    Object.entries(saveStatusLabelByDiskChangeState),
+  )("shows %s save status", async (state, label) => {
+    await renderSaveStatus({
+      documentDiskChangeState: state as DocumentDiskChangeState,
+    });
 
     const status = getByTestId(container, "document-save-status");
     expect(status.getAttribute("aria-label")).toBe(label);
@@ -657,6 +605,55 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     expect(container.textContent).toContain("Save conflict");
   });
 
+  it("offers the unsent draft as its own choice, not as a file conflict", async () => {
+    const onRestoreDraft = vi.fn();
+    const onDiscardDraft = vi.fn();
+    await renderWorkspace({
+      documentDiskChangeState: "draft-restore",
+      draftRestoreOffer: {
+        mode: "local",
+        onRestore: onRestoreDraft,
+        onDiscard: onDiscardDraft,
+      },
+    });
+
+    expect(queryByTestId(container, "file-conflict-notice")).toBeNull();
+    const notice = getByTestId(container, "draft-restore-notice");
+    expect(notice.getAttribute("aria-label")).toBe("Unsent draft found");
+
+    await click(getByTestId(container, "draft-restore-action-restore"));
+    expect(onRestoreDraft).toHaveBeenCalledTimes(1);
+
+    await click(getByTestId(container, "draft-restore-action-discard"));
+    expect(onDiscardDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no restore banner to a caller that offers no way to answer it", async () => {
+    // The banner's buttons are the only way out of the draft-restore state, so
+    // a caller with no handlers must not be shown a banner it cannot action.
+    await renderWorkspace({
+      documentDiskChangeState: "draft-restore",
+      draftRestoreOffer: null,
+    });
+
+    expect(queryByTestId(container, "draft-restore-notice")).toBeNull();
+  });
+
+  it("names the origin file when the unsent draft belongs to a remote session", async () => {
+    await renderWorkspace({
+      documentDiskChangeState: "draft-restore",
+      draftRestoreOffer: {
+        mode: "remote",
+        onRestore: () => {},
+        onDiscard: () => {},
+      },
+    });
+
+    expect(
+      getByTestId(container, "draft-restore-notice").textContent,
+    ).toContain("origin file");
+  });
+
   it("shows conflict status without replacing the existing conflict banner", async () => {
     await renderWorkspace({ documentDiskChangeState: "conflict" });
 
@@ -667,16 +664,24 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     ).toBe("Save conflict");
   });
 
-  it.each([
-    ["error", "clean"],
-    ["saved", "conflict"],
-  ] satisfies Array<
-    [DocumentSaveState, "clean" | "changed" | "conflict" | "paused"]
-  >)("keeps handoff disabled for save state %s and disk state %s", (saveState, documentDiskChangeState) => {
+  it.each(
+    Object.entries(handoffDisabledByDiskChangeState),
+  )("returns %s handoff-disabled for disk state %s", (documentDiskChangeState, expected) => {
     expect(
       isReviewHandoffDisabled({
-        saveState,
-        documentDiskChangeState,
+        saveState: "saved",
+        documentDiskChangeState:
+          documentDiskChangeState as DocumentDiskChangeState,
+        reviewHandoffState: "idle",
+      }),
+    ).toBe(expected);
+  });
+
+  it("keeps handoff disabled while a save has failed", () => {
+    expect(
+      isReviewHandoffDisabled({
+        saveState: "error",
+        documentDiskChangeState: "clean",
         reviewHandoffState: "idle",
       }),
     ).toBe(true);
