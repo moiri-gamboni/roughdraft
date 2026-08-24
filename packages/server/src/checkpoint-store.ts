@@ -52,7 +52,7 @@ export const HISTORY_DIR_NAME = ".roughdraft-history";
 const HISTORY_FORMAT_DIR_NAME = "v1";
 const SNAPSHOT_ID_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z--p(\d+)--(save|review|replaced|hook)$/;
-/** The canonical id is 44 characters at a 7-digit pid; the rest is slack. */
+/** The longest canonical id is 44 characters, at a 7-digit pid and `replaced`. */
 const MAX_SNAPSHOT_ID_LENGTH = 64;
 /**
  * Consecutive `save` snapshots inside this window fold into the first one.

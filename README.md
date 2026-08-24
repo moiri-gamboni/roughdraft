@@ -222,7 +222,9 @@ roughdraft doctor ./draft.md --json
 
 Usage errors return exit code `2`. Runtime failures return exit code `1`. `roughdraft status --json` returns exit code `0` even when the JSON says `"running": false`.
 
-`roughdraft history` reads the snapshots Roughdraft keeps beside a document, in `.roughdraft-history/v1/<document name>/`. It needs no running server, and works for a document that has been deleted. Snapshots are listed newest first with their id, trigger (`save`, `review`, `replaced`, `hook`), timestamp, and size. `--show` writes one snapshot to stdout, ending the output with a single newline whether or not the snapshot has one. `--restore` writes one back over the document, keeping the content it replaces as a new snapshot and printing the command that undoes it. A document renamed after a snapshot was taken keeps its history under its former name.
+A server started in the background writes its output to `server.log` beside its state file, truncated each time one starts. `roughdraft status` and `roughdraft doctor` print the path. That file is where a failed history capture reports itself.
+
+`roughdraft history` reads the snapshots Roughdraft keeps beside a document, in `.roughdraft-history/v1/<document name>/`. It needs no running server, and works for a document that has been deleted. Snapshots are listed newest first with their id, trigger, timestamp, and size. The four triggers are `save` (saved through Roughdraft), `review` (the state as a review was completed), `replaced` (overwritten — bytes found on disk that Roughdraft did not write), and `hook` (captured before an agent's write); the in-app history dialog shows the same four under those plainer names. `--show` writes one snapshot to stdout, ending the output with a single newline whether or not the snapshot has one. `--restore` writes one back over the document, keeping the content it replaces as a new snapshot and printing the command that undoes it. A snapshot id can change when a review pins it, so re-run `roughdraft history <path>` if an id you kept is rejected. A document renamed after a snapshot was taken keeps its history under its former name.
 
 Supported environment variables:
 
@@ -240,7 +242,7 @@ ROUGHDRAFT_STATE_FILE
   Exact path to the server state JSON file.
 
 ROUGHDRAFT_STATE_DIR
-  Directory containing server.json.
+  Directory containing server.json and server.log.
 ```
 
 Development-only environment variables:
