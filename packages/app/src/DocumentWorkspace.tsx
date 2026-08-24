@@ -59,8 +59,8 @@ import { RobotsHighFiveToy } from "./RobotsHighFiveToy";
 import type { DraftMode } from "./save-recovery";
 import type {
   CompleteReviewOptions,
+  ContentRestore,
   DocumentDiskChangeState,
-  DraftRestore,
   LocalContentOrigin,
   Page,
   StorageBackend,
@@ -448,7 +448,7 @@ interface DocumentWorkspaceProps {
   /** A failed save is still being retried, so the edits are not lost. */
   documentRetryPending?: boolean;
   documentForceResetKey: string | null;
-  draftRestore?: DraftRestore | null;
+  contentRestore?: ContentRestore | null;
   /**
    * The pending offer to restore unsent edits. Its buttons are the only way
    * out of the `draft-restore` disk state, so the copy and both answers travel
@@ -478,7 +478,7 @@ export function DocumentWorkspace({
   documentDiskChangeState,
   documentRetryPending = false,
   documentForceResetKey,
-  draftRestore = null,
+  contentRestore = null,
   draftRestoreOffer = null,
   onReloadDocumentFromDisk,
   onKeepEditingWithoutAutosave,
@@ -1322,7 +1322,7 @@ export function DocumentWorkspace({
               }}
               saveBlocked={documentDiskChangeState !== "clean"}
               forceResetKey={documentForceResetKey}
-              draftRestore={draftRestore}
+              contentRestore={contentRestore}
             />
           ) : null
         ) : (
