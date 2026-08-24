@@ -52,6 +52,10 @@ interface FakeBackend {
   setDiskContent(content: string, version: string): void;
   historyCalls: string[];
   snapshotCalls: string[];
+  /** Let parked snapshot reads answer newest-request-first, so the earliest
+   * request is the one that settles last. */
+  releaseHeldSnapshotsInReverse(): void;
+  heldSnapshotCount(): number;
 }
 
 const DEFAULT_HISTORY: DocumentHistory = {
@@ -83,16 +87,20 @@ function createFakeBackend({
   withHistorySupport = true,
   historyError,
   conflictOnFirstSaveWith,
+  holdSnapshots = false,
 }: {
   content?: string;
   history?: DocumentHistory;
   withHistorySupport?: boolean;
   historyError?: Error;
   conflictOnFirstSaveWith?: string;
+  /** Park every snapshot read so the test decides what answers, and when. */
+  holdSnapshots?: boolean;
 } = {}): FakeBackend {
   const saved: FakeBackend["saved"] = [];
   const historyCalls: string[] = [];
   const snapshotCalls: string[] = [];
+  const heldSnapshots: Array<() => void> = [];
   let conflictsLeft = conflictOnFirstSaveWith === undefined ? 0 : 1;
   let watcher: {
     path: string;
@@ -116,6 +124,11 @@ function createFakeBackend({
           snapshotCalls.push(id);
           const body = SNAPSHOT_BODIES[id];
           if (body === undefined) throw new Error(`No snapshot ${id}`);
+          if (holdSnapshots) {
+            await new Promise<void>((resolve) => {
+              heldSnapshots.push(resolve);
+            });
+          }
           return body;
         },
       }
@@ -125,6 +138,11 @@ function createFakeBackend({
     saved,
     historyCalls,
     snapshotCalls,
+    heldSnapshotCount: () => heldSnapshots.length,
+    releaseHeldSnapshotsInReverse() {
+      const waiting = heldSnapshots.splice(0, heldSnapshots.length).reverse();
+      for (const resolve of waiting) resolve();
+    },
     isWatched: () => watcher !== null,
     setDiskContent(nextContent, version) {
       page.content = nextContent;
@@ -228,7 +246,13 @@ async function click(element: Element | null) {
   });
 }
 
-async function waitFor(condition: () => boolean, timeoutMs = 3_000) {
+/**
+ * Waits on the outcome, not on a duration. The budget is generous because
+ * these cases boot the real `App` and mount CodeMirror inside a portal; under
+ * a loaded machine and a parallel suite that is comfortably slower than the
+ * 3s the lighter harnesses use, and a timeout here says "slow", not "broken".
+ */
+async function waitFor(condition: () => boolean, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
   while (!condition()) {
     if (Date.now() > deadline) {
@@ -308,8 +332,8 @@ describe("browsing document history", () => {
     expect(
       entries.map((entry) => entry.getAttribute("data-snapshot-id")),
     ).toEqual([NEWER_ID, OLDER_ID]);
-    expect(entries[0]?.textContent).toContain("save");
-    expect(entries[1]?.textContent).toContain("review");
+    expect(entries[0]?.textContent).toContain("saved");
+    expect(entries[1]?.textContent).toContain("reviewed");
     // The size is what tells a reviewer an empty clobber apart from real text.
     expect(entries[0]?.textContent).toContain("24 B");
   });
@@ -439,6 +463,39 @@ describe("restoring a snapshot", () => {
     await waitFor(() => fake.saved.length > 1);
 
     expect(fake.saved[1]?.content).toBe(SNAPSHOT_BODIES[NEWER_ID]);
+  });
+});
+
+describe("choosing versions faster than they load", () => {
+  it("shows the version last clicked, not the read that answers last", async () => {
+    // Two reads in flight at once. The first one clicked answers last, so a
+    // viewer that simply takes whatever arrives would settle on the version
+    // the reviewer has already moved off — and then Restore would send those
+    // bytes, which is a wrong-version restore, not just a display glitch.
+    const fake = createFakeBackend({ holdSnapshots: true });
+    detectBackendMock.mockResolvedValue(fake.backend);
+
+    await renderApp();
+    await openHistory();
+    await waitFor(() => queryAllByTestId("document-history-entry").length > 0);
+
+    const entries = queryAllByTestId("document-history-entry");
+    await click(entries[1] ?? null); // older, resolves first once released
+    await click(entries[0] ?? null); // newer, the reviewer's actual choice
+    await waitFor(() => fake.heldSnapshotCount() === 2);
+
+    await act(async () => {
+      fake.releaseHeldSnapshotsInReverse();
+      await Promise.resolve();
+    });
+    await waitFor(() => queryByTestId("document-history-viewer") !== null);
+
+    expect(queryByTestId("document-history-viewer")?.textContent).toContain(
+      "The saved body.",
+    );
+    expect(queryByTestId("document-history-viewer")?.textContent).not.toContain(
+      "{==Reviewed==}",
+    );
   });
 });
 

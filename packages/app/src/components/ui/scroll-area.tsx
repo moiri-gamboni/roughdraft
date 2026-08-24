@@ -5,13 +5,8 @@ import { cn } from "@/lib/utils";
 function ScrollArea({
   className,
   children,
-  viewportClassName,
-  viewportProps,
   ...props
-}: ScrollAreaPrimitive.Root.Props & {
-  viewportClassName?: string;
-  viewportProps?: ScrollAreaPrimitive.Viewport.Props;
-}) {
+}: ScrollAreaPrimitive.Root.Props) {
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
@@ -20,11 +15,7 @@ function ScrollArea({
     >
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className={cn(
-          "size-full overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          viewportClassName,
-        )}
-        {...viewportProps}
+        className="size-full overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
@@ -60,4 +51,4 @@ function ScrollAreaScrollbar({
   );
 }
 
-export { ScrollArea, ScrollAreaScrollbar };
+export { ScrollArea };

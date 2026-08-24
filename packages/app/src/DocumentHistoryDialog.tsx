@@ -1,5 +1,5 @@
 import { AlertTriangle, History, Undo2, Upload } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "./components/ui/button";
 import {
   Dialog,
@@ -11,7 +11,7 @@ import {
 import { ScrollArea } from "./components/ui/scroll-area";
 import { cn } from "./lib/utils";
 import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
-import { diffSnapshot } from "./snapshot-diff";
+import { type DiffLineKind, diffSnapshot } from "./snapshot-diff";
 import type {
   DocumentHistory,
   SnapshotSummary,
@@ -49,11 +49,16 @@ const restoreBlockedCopy: Record<
     "This file changed on disk, so restoring cannot save over it. Overwrite instead — Roughdraft records a version of what it replaces, so you can undo this.",
 };
 
+/**
+ * What the reviewer is told about a version's provenance. Deliberately not the
+ * wire values: "replaced" and "hook" name the store's mechanics, and the badge
+ * has to say what happened to the document instead.
+ */
 const triggerLabels: Record<SnapshotSummary["trigger"], string> = {
-  save: "save",
-  review: "review",
-  replaced: "replaced",
-  hook: "hook",
+  save: "saved",
+  review: "reviewed",
+  replaced: "overwritten",
+  hook: "before agent write",
 };
 
 export function formatSnapshotBytes(bytes: number): string {
@@ -85,14 +90,14 @@ const paneOptions = [
   { value: "diff", label: "Changes" },
 ] satisfies { value: "snapshot" | "diff"; label: string }[];
 
-const diffLineStyles: Record<"added" | "removed" | "context", string> = {
+const diffLineStyles: Record<DiffLineKind, string> = {
   added:
     "bg-emerald-50 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200",
   removed: "bg-red-50 text-red-900 dark:bg-red-950/60 dark:text-red-200",
   context: "text-stone-600 dark:text-slate-400",
 };
 
-const diffLineMarkers: Record<"added" | "removed" | "context", string> = {
+const diffLineMarkers: Record<DiffLineKind, string> = {
   added: "+",
   removed: "-",
   context: " ",
@@ -199,6 +204,8 @@ export function DocumentHistoryDialog({
   const [listing, setListing] = useState<Listing>({ status: "loading" });
   const [viewing, setViewing] = useState<Viewing | null>(null);
   const [pane, setPane] = useState<"snapshot" | "diff">("snapshot");
+  /** The version whose read is allowed to land; later clicks supersede it. */
+  const requestedIdRef = useRef<string | null>(null);
 
   // Lazily, and again on every open: the history grows with every save, so a
   // list fetched once would go stale in the background.
@@ -209,6 +216,7 @@ export function DocumentHistoryDialog({
     setListing({ status: "loading" });
     setViewing(null);
     setPane("snapshot");
+    requestedIdRef.current = null;
     logHistoryEvent("opened", { path: documentPath });
 
     void (async () => {
@@ -234,25 +242,25 @@ export function DocumentHistoryDialog({
 
   const selectSnapshot = useCallback(
     (id: string) => {
-      let cancelled = false;
+      requestedIdRef.current = id;
       setViewing({ status: "loading", id });
 
       void (async () => {
         try {
           const content = await backend.getSnapshot?.(documentPath, id);
-          if (cancelled || content === undefined) return;
+          // Reads can overtake each other. A version the reviewer has already
+          // clicked away from must not replace the one they are looking at —
+          // Restore sends what the viewer holds, so this would send the wrong
+          // bytes, not merely show the wrong text.
+          if (requestedIdRef.current !== id || content === undefined) return;
           setViewing({ status: "ready", id, content });
           logHistoryEvent("viewed", { id });
         } catch (error) {
-          if (cancelled) return;
+          if (requestedIdRef.current !== id) return;
           setViewing({ status: "error", id });
           logHistoryEvent("view-failed", { id, reason: String(error) });
         }
       })();
-
-      return () => {
-        cancelled = true;
-      };
     },
     [backend, documentPath],
   );
