@@ -55,6 +55,7 @@ interface FakeBackend {
   /** Let parked snapshot reads answer newest-request-first, so the earliest
    * request is the one that settles last. */
   releaseHeldSnapshotsInReverse(): void;
+  setSavesFail(fail: boolean): void;
   heldSnapshotCount(): number;
 }
 
@@ -97,6 +98,8 @@ function createFakeBackend({
   /** Park every snapshot read so the test decides what answers, and when. */
   holdSnapshots?: boolean;
 } = {}): FakeBackend {
+  /** Not a conflict: the destination is simply not answering. */
+  let savesFail = false;
   const saved: FakeBackend["saved"] = [];
   const historyCalls: string[] = [];
   const snapshotCalls: string[] = [];
@@ -139,6 +142,9 @@ function createFakeBackend({
     historyCalls,
     snapshotCalls,
     heldSnapshotCount: () => heldSnapshots.length,
+    setSavesFail(fail) {
+      savesFail = fail;
+    },
     releaseHeldSnapshotsInReverse() {
       const waiting = heldSnapshots.splice(0, heldSnapshots.length).reverse();
       for (const resolve of waiting) resolve();
@@ -171,6 +177,9 @@ function createFakeBackend({
       },
       async saveMarkdownFile(_path, nextContent, expectedVersion) {
         saved.push({ content: nextContent, expectedVersion });
+        if (savesFail) {
+          throw new Error("The destination is unreachable");
+        }
         if (conflictsLeft > 0 && conflictOnFirstSaveWith !== undefined) {
           conflictsLeft -= 1;
           throw new MarkdownFileConflictError({
@@ -620,6 +629,74 @@ describe("restoring when the destination will not take a plain save", () => {
     });
 
     await waitFor(() => queryByTestId("external-change-notice") !== null);
+  });
+});
+
+describe("when a restore cannot be delivered", () => {
+  /** Get into a non-clean state, then make the destination unreachable. */
+  async function bootIntoConflictWithDeadSaves() {
+    const fake = createFakeBackend({
+      conflictOnFirstSaveWith: "# Plan\n\nSomeone else.\n",
+    });
+    detectBackendMock.mockResolvedValue(fake.backend);
+    writeDraftRecord({
+      content: "# Plan\n\nUnsent body.\n",
+      baseContent: ON_DISK,
+    });
+
+    await renderApp();
+    await waitFor(() => queryByTestId("file-conflict-notice") !== null);
+    fake.setSavesFail(true);
+    return fake;
+  }
+
+  it("keeps hearing the file when the overwrite never lands", async () => {
+    // The watcher stands down while a restore is in flight. If the write that
+    // was going to end the restore throws instead, nothing else lifts that —
+    // and the tab goes deaf for the rest of the session, which is the very
+    // failure the restore channel's conflict path was fixed for.
+    //
+    // The conflict notice is already up here, so its mere presence proves
+    // nothing: the assertion is that a later external write still moves it.
+    const conflictNoticeSays = (text: string) =>
+      queryByTestId("file-conflict-notice")?.textContent?.includes(text) ??
+      false;
+
+    const fake = await bootIntoConflictWithDeadSaves();
+    const savedBefore = fake.saved.length;
+    await waitFor(() => conflictNoticeSays("Save conflict"));
+
+    await openHistoryAndSelectNewest();
+    await click(queryByTestId("document-history-restore-overwrite"));
+    await waitFor(() => fake.saved.length > savedBefore);
+
+    fake.setSavesFail(false);
+    await act(async () => {
+      fake.emitDiskChange("v-someone-else");
+      await Promise.resolve();
+    });
+
+    await waitFor(() => conflictNoticeSays("File changed on disk"));
+  });
+
+  it("lets the reviewer try the same version again after a failed restore", async () => {
+    // A failed restore must not wedge the button: the second attempt at the
+    // same version still has to reach the file once saves work again.
+    const fake = await bootIntoConflictWithDeadSaves();
+
+    await openHistoryAndSelectNewest();
+    await click(queryByTestId("document-history-restore-overwrite"));
+    await waitFor(() => fake.saved.length >= 2);
+
+    const savedAfterFirst = fake.saved.length;
+    fake.setSavesFail(false);
+    await openHistoryAndSelectNewest();
+    await click(queryByTestId("document-history-restore-overwrite"));
+
+    await waitFor(() => fake.saved.length > savedAfterFirst);
+    expect(fake.saved[fake.saved.length - 1]?.content).toBe(
+      SNAPSHOT_BODIES[NEWER_ID],
+    );
   });
 });
 

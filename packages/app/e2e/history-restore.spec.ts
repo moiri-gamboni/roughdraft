@@ -155,6 +155,77 @@ test.describe("recovering a clobbered review from history", () => {
     logE2eEvent("history-restore.diff-pane", { file: "diff.md" });
   });
 
+  test("diffs against the editor's unsaved text, not the last saved copy", async ({
+    page,
+  }) => {
+    // The diff is the evidence a reviewer uses to decide whether to overwrite,
+    // and the states where the overwrite escape appears are exactly the states
+    // where unsaved work has been piling up. Comparing against the last landed
+    // save there would show "nothing changed" while the editor holds text the
+    // overwrite is about to destroy.
+    const filePath = writeProjectFile(projectDir, "livediff.md", REVIEWED);
+    await openMarkdownFile(page, filePath, "code");
+    await appendInCodeEditor(page, "\nReviewer note.\n");
+    await expect(documentSaveStatus(page)).toHaveAttribute(
+      "aria-label",
+      "Saved",
+    );
+
+    await blockSaves(page);
+    await appendInCodeEditor(page, "\nNever reached the file.\n");
+    await expect(documentSaveStatus(page)).toHaveAttribute(
+      "aria-label",
+      RETRYING_LABEL,
+    );
+
+    await openHistoryAndSelectNewest(page);
+    await page.getByTestId("document-history-view-diff").click();
+    await expect(page.getByTestId("document-history-diff")).toContainText(
+      "Never reached the file.",
+    );
+
+    logE2eEvent("history-restore.diff-uses-live-editor-text", {
+      file: "livediff.md",
+    });
+  });
+
+  test("will not restore over edits that never reached the file", async ({
+    page,
+  }) => {
+    // The disk is clean here, so nothing warns and nothing is paused — but the
+    // editor is holding work that no version anywhere contains. Restoring over
+    // it would be the one unrecoverable loss this whole feature exists to stop.
+    const filePath = writeProjectFile(projectDir, "unsent.md", REVIEWED);
+    await openMarkdownFile(page, filePath, "code");
+    await appendInCodeEditor(page, "\nReviewer note.\n");
+    await expect(documentSaveStatus(page)).toHaveAttribute(
+      "aria-label",
+      "Saved",
+    );
+
+    await blockSaves(page);
+    await appendInCodeEditor(page, "\nOnly in this tab.\n");
+    await expect(documentSaveStatus(page)).toHaveAttribute(
+      "aria-label",
+      RETRYING_LABEL,
+    );
+    await expect(fileConflictNotice(page)).toBeHidden();
+
+    await openHistoryAndSelectNewest(page);
+    await expect(page.getByTestId("document-history-restore")).toBeDisabled();
+    await expect(
+      page.getByTestId("document-history-restore-blocked"),
+    ).toContainText("have not reached the file");
+    // No escape here: overwriting would destroy those edits just as thoroughly.
+    await expect(
+      page.getByTestId("document-history-restore-overwrite"),
+    ).toBeHidden();
+
+    logE2eEvent("history-restore.blocked-by-unsent-edits", {
+      file: "unsent.md",
+    });
+  });
+
   test("adds the history control without resizing the sticky header", async ({
     page,
   }) => {
@@ -333,8 +404,10 @@ test.describe("recovering a clobbered review from history", () => {
     await expect(fileConflictNotice(page)).toBeVisible();
 
     await page.reload();
-    // A `page.route` block outlives the navigation, so the offer below would
-    // otherwise be saved away before it could be asserted.
+    // Re-applied rather than relied upon: a `page.route` block does survive
+    // `page.reload()`, so this is belt-and-braces, not the thing keeping the
+    // offer on screen. Without the block at all the restore would simply save
+    // on the way back up and there would be no offer to assert.
     await blockSaves(page);
 
     await expect(page.getByTestId("draft-restore-notice")).toBeVisible();
