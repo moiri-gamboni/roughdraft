@@ -582,6 +582,34 @@ describe("createApp", () => {
       ).toBe("# Saved\n");
     });
 
+    it("refuses a history segment whose case has been changed", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      // The file really exists, so a 404 can only come from the guard and not
+      // from the existence check.
+      const shouted = path.join(
+        projectDir,
+        ".Roughdraft-History",
+        "v1",
+        "draft",
+      );
+      fs.mkdirSync(shouted, { recursive: true });
+      fs.writeFileSync(path.join(shouted, "x.md"), "# Snapshot\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      // On a case-insensitive filesystem this path reaches the real sidecar,
+      // so matching the segment case-sensitively would hand back snapshot
+      // bytes to anyone who shifts the case.
+      const response = await request(app)
+        .get("/api/markdown-file")
+        .query({
+          projectPath: projectDir,
+          path: path.join(".Roughdraft-History", "v1", "draft", "x.md"),
+        });
+
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({ error: "Markdown file not found" });
+    });
+
     it("refuses to build a history of a history", async () => {
       fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
       const { app } = createApp({ homeDir, staticDirPath: projectDir });
