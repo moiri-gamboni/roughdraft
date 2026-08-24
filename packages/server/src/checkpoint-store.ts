@@ -13,6 +13,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+/**
+ * Part of the frozen format, so adding a value is a format change. Declared
+ * three times over: here, as `SnapshotTrigger` in `packages/app/src/storage.ts`
+ * (the app cannot import this package), and as the trigger table in
+ * `docs/spec/history-sidecar.md`, which the bash hook is written against.
+ */
 export type SnapshotTrigger = "save" | "review" | "replaced" | "hook";
 
 export interface SnapshotSummary {

@@ -1628,6 +1628,17 @@ export function App() {
   // the watcher can report our own write before then. Why the whole list and
   // not just the newest: `resolveDiskChange`.
   const savedVersionsRef = useRef<string[]>([]);
+  /**
+   * Every path that writes the document must record what it wrote, or the
+   * watcher's echo of that write reads as someone else's and the reviewer gets
+   * a clobber alarm over their own save.
+   */
+  const noteSavedVersion = useCallback((version: string | undefined) => {
+    if (!version) return;
+    savedVersionsRef.current = [...savedVersionsRef.current, version].slice(
+      -SAVED_VERSION_MEMORY,
+    );
+  }, []);
   const bootRetryTimerRef = useRef<number | null>(null);
   // The reset key must be monotonic: PageCard compares it by identity, so a
   // repeat of the same reset would otherwise be a silent no-op.
@@ -1914,12 +1925,7 @@ export function App() {
       }
 
       const settleSaved = (savedDocument: Page) => {
-        if (savedDocument.version) {
-          savedVersionsRef.current = [
-            ...savedVersionsRef.current,
-            savedDocument.version,
-          ].slice(-SAVED_VERSION_MEMORY);
-        }
+        noteSavedVersion(savedDocument.version);
         applyDocumentPage(savedDocument);
         documentDirtyRef.current = false;
         draftPersistence.noteSaveSuccess(content);
@@ -1970,7 +1976,7 @@ export function App() {
         throw error;
       }
     },
-    [applyDocumentPage, draftPersistence],
+    [applyDocumentPage, draftPersistence, noteSavedVersion],
   );
 
   const saveDocumentContent = useCallback(
@@ -2139,6 +2145,7 @@ export function App() {
         throw error;
       }
 
+      noteSavedVersion(savedDocument?.version);
       applyDocumentPage(
         savedDocument ??
           pageFromSavedContent(
@@ -2161,6 +2168,7 @@ export function App() {
       draftPersistence,
       handleDocumentSaveStateChange,
       nextForceResetKey,
+      noteSavedVersion,
       runExclusively,
     ],
   );
@@ -2306,6 +2314,12 @@ export function App() {
             setExternalChangeSeen(true);
             logHistoryEvent("external-change-reloaded");
           } catch (error) {
+            if (disposed) return;
+            // The file moved and we could not follow it, so the editor is now
+            // showing bytes that are not on disk with autosave still running.
+            // Flagging it puts up the banner the reviewer would otherwise meet
+            // later as a conflict they cannot account for.
+            setDocumentDiskChangeState("changed");
             console.error("Failed to reload changed markdown file:", error);
           }
         })();
