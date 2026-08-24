@@ -112,7 +112,7 @@ function createFakeBackend({
           if (historyError) throw historyError;
           return history;
         },
-        async getSnapshot(relativePath: string, id: string): Promise<string> {
+        async getSnapshot(_relativePath: string, id: string): Promise<string> {
           snapshotCalls.push(id);
           const body = SNAPSHOT_BODIES[id];
           if (body === undefined) throw new Error(`No snapshot ${id}`);
@@ -439,6 +439,70 @@ describe("restoring a snapshot", () => {
     await waitFor(() => fake.saved.length > 1);
 
     expect(fake.saved[1]?.content).toBe(SNAPSHOT_BODIES[NEWER_ID]);
+  });
+});
+
+describe("seeing what changed", () => {
+  it("shows the snapshot itself before it shows a diff", async () => {
+    const fake = createFakeBackend();
+    detectBackendMock.mockResolvedValue(fake.backend);
+
+    await renderApp();
+    await openHistoryAndSelectNewest();
+
+    expect(queryByTestId("document-history-viewer")).not.toBeNull();
+    expect(queryByTestId("document-history-diff")).toBeNull();
+  });
+
+  it("lists what the open document added and removed against that version", async () => {
+    const fake = createFakeBackend();
+    detectBackendMock.mockResolvedValue(fake.backend);
+
+    await renderApp();
+    await openHistoryAndSelectNewest();
+    await click(queryByTestId("document-history-view-diff"));
+    await waitFor(() => queryByTestId("document-history-diff") !== null);
+
+    const diff = queryByTestId("document-history-diff");
+    // The snapshot holds "The saved body."; the open document holds "On disk."
+    expect(diff?.textContent).toContain("The saved body.");
+    expect(diff?.textContent).toContain("On disk.");
+    expect(
+      queryAllByTestId("document-history-diff-line-removed").length,
+    ).toBeGreaterThan(0);
+    expect(
+      queryAllByTestId("document-history-diff-line-added").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("says so plainly when the version matches the open document", async () => {
+    // The snapshot and the file hold the same bytes, so a diff pane full of
+    // context lines would make the reviewer hunt for a change that is not there.
+    const fake = createFakeBackend({ content: SNAPSHOT_BODIES[NEWER_ID] });
+    detectBackendMock.mockResolvedValue(fake.backend);
+
+    await renderApp();
+    await openHistoryAndSelectNewest();
+    await click(queryByTestId("document-history-view-diff"));
+    await waitFor(
+      () => queryByTestId("document-history-diff-unchanged") !== null,
+    );
+
+    expect(queryByTestId("document-history-diff")).toBeNull();
+  });
+
+  it("goes back to the snapshot when the reviewer switches back", async () => {
+    const fake = createFakeBackend();
+    detectBackendMock.mockResolvedValue(fake.backend);
+
+    await renderApp();
+    await openHistoryAndSelectNewest();
+    await click(queryByTestId("document-history-view-diff"));
+    await waitFor(() => queryByTestId("document-history-diff") !== null);
+    await click(queryByTestId("document-history-view-snapshot"));
+
+    await waitFor(() => queryByTestId("document-history-viewer") !== null);
+    expect(queryByTestId("document-history-diff")).toBeNull();
   });
 });
 

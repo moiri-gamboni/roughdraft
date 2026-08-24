@@ -11,6 +11,7 @@ import {
 import { ScrollArea } from "./components/ui/scroll-area";
 import { cn } from "./lib/utils";
 import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
+import { diffSnapshot } from "./snapshot-diff";
 import type {
   DocumentHistory,
   SnapshotSummary,
@@ -79,6 +80,80 @@ function formatSnapshotTimestamp(createdAt: string): string {
   return date.toLocaleString();
 }
 
+const paneOptions = [
+  { value: "snapshot", label: "Version" },
+  { value: "diff", label: "Changes" },
+] satisfies { value: "snapshot" | "diff"; label: string }[];
+
+const diffLineStyles: Record<"added" | "removed" | "context", string> = {
+  added:
+    "bg-emerald-50 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200",
+  removed: "bg-red-50 text-red-900 dark:bg-red-950/60 dark:text-red-200",
+  context: "text-stone-600 dark:text-slate-400",
+};
+
+const diffLineMarkers: Record<"added" | "removed" | "context", string> = {
+  added: "+",
+  removed: "-",
+  context: " ",
+};
+
+function SnapshotDiffPane({
+  before,
+  after,
+}: {
+  before: string;
+  after: string;
+}) {
+  const diff = diffSnapshot(before, after);
+
+  if (!diff.changed) {
+    return (
+      <p
+        data-testid="document-history-diff-unchanged"
+        className="text-xs text-stone-500 dark:text-slate-400"
+      >
+        This version is identical to the open document.
+      </p>
+    );
+  }
+
+  return (
+    <div
+      data-testid="document-history-diff"
+      className="font-mono text-[0.72rem] leading-5"
+    >
+      {diff.lines.map((line, index) =>
+        line.kind === "elided" ? (
+          <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: a diff is a positional list, rebuilt whole rather than reordered, and two lines can hold identical text — position is the only identity there is.
+            key={`elided-${index}`}
+            data-testid="document-history-diff-elided"
+            className="px-1 py-0.5 text-stone-400 italic dark:text-slate-500"
+          >
+            … {line.count} more line{line.count === 1 ? "" : "s"}
+          </div>
+        ) : (
+          <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: as above, the line text is not unique so position is the identity.
+            key={`${line.kind}-${index}`}
+            data-testid={`document-history-diff-line-${line.kind}`}
+            className={cn(
+              "whitespace-pre-wrap px-1",
+              diffLineStyles[line.kind],
+            )}
+          >
+            <span aria-hidden="true" className="select-none opacity-60">
+              {diffLineMarkers[line.kind]}{" "}
+            </span>
+            {line.text}
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
 type Listing =
   | { status: "loading" }
   | { status: "ready"; history: DocumentHistory }
@@ -95,6 +170,8 @@ interface DocumentHistoryDialogProps {
   backend: StorageBackend;
   documentPath: string;
   documentFilenameLabel: string;
+  /** The open document, as the other side of the diff. */
+  documentContent: string;
   restoreAvailability: RestoreAvailability;
   onRestore: (restore: SnapshotRestore) => void | Promise<void>;
 }
@@ -115,11 +192,13 @@ export function DocumentHistoryDialog({
   backend,
   documentPath,
   documentFilenameLabel,
+  documentContent,
   restoreAvailability,
   onRestore,
 }: DocumentHistoryDialogProps) {
   const [listing, setListing] = useState<Listing>({ status: "loading" });
   const [viewing, setViewing] = useState<Viewing | null>(null);
+  const [pane, setPane] = useState<"snapshot" | "diff">("snapshot");
 
   // Lazily, and again on every open: the history grows with every save, so a
   // list fetched once would go stale in the background.
@@ -129,6 +208,7 @@ export function DocumentHistoryDialog({
     let cancelled = false;
     setListing({ status: "loading" });
     setViewing(null);
+    setPane("snapshot");
     logHistoryEvent("opened", { path: documentPath });
 
     void (async () => {
@@ -286,6 +366,35 @@ export function DocumentHistoryDialog({
           </div>
 
           <div className="flex min-h-0 flex-col gap-2">
+            {viewedContent ? (
+              <div
+                data-testid="document-history-view-toggle"
+                className="flex items-center gap-1 text-[0.7rem]"
+              >
+                {paneOptions.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    data-testid={`document-history-view-${value}`}
+                    aria-pressed={pane === value}
+                    onClick={() => setPane(value)}
+                    className={cn(
+                      "rounded-full px-2 py-0.5 font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-stone-300/70",
+                      pane === value
+                        ? "bg-[#EEE9E1] text-stone-800 dark:bg-slate-700 dark:text-slate-100"
+                        : "text-stone-500 hover:text-stone-700 dark:text-slate-400 dark:hover:text-slate-200",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+                {pane === "diff" ? (
+                  <span className="ml-1 text-[0.66rem] text-stone-500 dark:text-slate-400">
+                    this version → the open document
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             <div className="min-h-0 flex-1 overflow-auto rounded-[7px] border border-[#DCD6CC] p-3 dark:border-slate-700">
               {viewing === null ? (
                 <p
@@ -308,7 +417,13 @@ export function DocumentHistoryDialog({
                   Roughdraft could not read that version.
                 </p>
               ) : null}
-              {viewedContent ? (
+              {viewedContent && pane === "diff" ? (
+                <SnapshotDiffPane
+                  before={viewedContent.content}
+                  after={documentContent}
+                />
+              ) : null}
+              {viewedContent && pane === "snapshot" ? (
                 <MarkdownCodeEditor
                   key={viewedContent.id}
                   value={viewedContent.content}
