@@ -346,10 +346,23 @@ describe("createApp", () => {
 
       expect((await save(app, "# Saved\n")).status).toBe(200);
 
-      const snapshots = snapshotsOfDraft();
-      expect(snapshots).toHaveLength(1);
-      expect(snapshots[0].trigger).toBe("save");
-      expect(snapshotContent(snapshots[0].id)).toBe("# Saved\n");
+      const newest = snapshotsOfDraft()[0];
+      expect(newest.trigger).toBe("save");
+      expect(snapshotContent(newest.id)).toBe("# Saved\n");
+    });
+
+    it("keeps the bytes a document held before it was ever saved", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      await save(app, "# Saved\n");
+
+      // Nothing records the original state until the first save replaces it,
+      // so that save has to preserve it or it is gone for good.
+      const contents = snapshotsOfDraft().map((snapshot) =>
+        snapshotContent(snapshot.id),
+      );
+      expect(contents).toContain("# Original\n");
     });
 
     it("does not snapshot a save that changes nothing", async () => {
@@ -357,9 +370,13 @@ describe("createApp", () => {
       const { app } = createApp({ homeDir, staticDirPath: projectDir });
 
       await save(app, "# Saved\n");
+      const afterFirstSave = snapshotsOfDraft().map((snapshot) => snapshot.id);
+
       await save(app, "# Saved\n");
 
-      expect(snapshotsOfDraft()).toHaveLength(1);
+      expect(snapshotsOfDraft().map((snapshot) => snapshot.id)).toEqual(
+        afterFirstSave,
+      );
     });
 
     it("preserves the replaced bytes when a save carries no expected version", async () => {
@@ -426,7 +443,8 @@ describe("createApp", () => {
         .query({ projectPath: projectDir, path: "draft.md" });
 
       expect(response.status).toBe(200);
-      expect(response.body.snapshots).toHaveLength(1);
+      // The document is gone; the history the route serves is the only way
+      // back to what it said.
       expect(response.body.snapshots[0]).toMatchObject({
         trigger: "save",
         bytes: Buffer.byteLength("# Saved\n"),
