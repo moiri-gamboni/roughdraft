@@ -44,6 +44,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./components/ui/dialog";
+import { logHistoryEvent, type SnapshotRestore } from "./DocumentHistoryDialog";
 import { DocumentWorkspace, type DraftRestoreOffer } from "./DocumentWorkspace";
 import { BackendUnavailableError, detectBackend } from "./detect-backend";
 import { logDraftEvent } from "./draft-store";
@@ -1598,6 +1599,9 @@ export function App() {
   const [contentRestore, setContentRestore] = useState<ContentRestore | null>(
     null,
   );
+  // An external write the watcher already reloaded. Not a disk-change state:
+  // nothing is blocked, so it must not pause autosave or gate the handoff.
+  const [externalChangeSeen, setExternalChangeSeen] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [documentEditorViewMode, setDocumentEditorViewMode] = useState(() =>
     getDocumentEditorViewModeFromLocation("rich-text"),
@@ -1754,6 +1758,7 @@ export function App() {
       // or accepted restore would replay stale content over the fresh load.
       setContentRestore(null);
       setOfferedDraftContent(null);
+      setExternalChangeSeen(false);
 
       try {
         const detectedBackend = await detectBackend();
@@ -2101,42 +2106,83 @@ export function App() {
     setDocumentDiskChangeState("paused");
   }, []);
 
+  /**
+   * Write `content` over whatever the file now holds, version-check and all
+   * skipped. Takes the bytes explicitly because the two callers disagree about
+   * them: the conflict banner sends the editor's draft, a history restore sends
+   * the snapshot, and the editor has not adopted the snapshot yet at that point.
+   */
+  const overwriteDocumentWith = useCallback(
+    async (content: string) => {
+      const currentBackend = backendRef.current;
+      const currentPath = activeDocumentPathRef.current;
+      const currentDocument = documentPageRef.current;
+      if (!currentBackend || !currentPath || !currentDocument) return;
+
+      // Through the same latch as the autosave and the retry: this deliberately
+      // sends no expectedVersion, so it must not overlap a save that does.
+      const savedDocument = await runExclusively(async () =>
+        currentBackend.saveMarkdownFile(currentPath, content),
+      );
+
+      applyDocumentPage(
+        savedDocument ??
+          pageFromSavedContent(
+            currentDocument.id,
+            content,
+            currentDocument.version,
+          ),
+      );
+      documentDirtyRef.current = false;
+      draftPersistence.noteSaveSuccess(content);
+      // Whatever was being restored is now what the file holds, so the watcher
+      // has no reason left to stand down.
+      setContentRestore(null);
+      handleDocumentSaveStateChange("saved");
+      setDocumentDiskChangeState("clean");
+      setDocumentForceResetKey(nextForceResetKey(currentPath));
+    },
+    [
+      applyDocumentPage,
+      draftPersistence,
+      handleDocumentSaveStateChange,
+      nextForceResetKey,
+      runExclusively,
+    ],
+  );
+
   const handleOverwriteDocumentOnDisk = useCallback(async () => {
-    const currentBackend = backendRef.current;
-    const currentPath = activeDocumentPathRef.current;
     const currentDocument = documentPageRef.current;
-    if (!currentBackend || !currentPath || !currentDocument) return;
+    if (!currentDocument) return;
 
-    const content = documentDraftContentRef.current ?? currentDocument.content;
-    // Through the same latch as the autosave and the retry: this deliberately
-    // sends no expectedVersion, so it must not overlap a save that does.
-    const savedDocument = await runExclusively(async () =>
-      currentBackend.saveMarkdownFile(currentPath, content),
+    await overwriteDocumentWith(
+      documentDraftContentRef.current ?? currentDocument.content,
     );
+  }, [overwriteDocumentWith]);
 
-    applyDocumentPage(
-      savedDocument ??
-        pageFromSavedContent(
-          currentDocument.id,
-          content,
-          currentDocument.version,
-        ),
-    );
-    documentDirtyRef.current = false;
-    draftPersistence.noteSaveSuccess(content);
-    // Whatever was being restored is now what the file holds, so the watcher
-    // has no reason left to stand down.
-    setContentRestore(null);
-    handleDocumentSaveStateChange("saved");
-    setDocumentDiskChangeState("clean");
-    setDocumentForceResetKey(nextForceResetKey(currentPath));
-  }, [
-    applyDocumentPage,
-    draftPersistence,
-    handleDocumentSaveStateChange,
-    nextForceResetKey,
-    runExclusively,
-  ]);
+  /**
+   * Restoring is a forward save, not a rewind: the snapshot goes back into the
+   * editor as unsaved work and is delivered like any other edit, so it lands in
+   * history too and the reviewer can undo it the same way.
+   */
+  const handleRestoreSnapshot = useCallback(
+    async ({ content, id, overwrite }: SnapshotRestore) => {
+      // A fresh object every time: the adoption effect keys on identity, so
+      // restoring the same bytes twice has to read as a second request.
+      setContentRestore({ content, source: "snapshot" });
+      setExternalChangeSeen(false);
+      logHistoryEvent("restored", { id, overwrite });
+
+      if (overwrite) {
+        await overwriteDocumentWith(content);
+      }
+    },
+    [overwriteDocumentWith],
+  );
+
+  const dismissExternalChangeNotice = useCallback(() => {
+    setExternalChangeSeen(false);
+  }, []);
 
   const handleCompleteReview = useCallback(
     async (options?: CompleteReviewOptions) => {
@@ -2218,6 +2264,10 @@ export function App() {
             if (disposed) return;
             applyDocumentPage(nextDocument);
             setDocumentDiskChangeState("clean");
+            // The reload is silent by design, but the text just changed under
+            // the reviewer. Say so, and point at where the old bytes went.
+            setExternalChangeSeen(true);
+            logHistoryEvent("external-change-reloaded");
           } catch (error) {
             console.error("Failed to reload changed markdown file:", error);
           }
@@ -2327,6 +2377,10 @@ export function App() {
         documentForceResetKey={documentForceResetKey}
         contentRestore={contentRestore}
         draftRestoreOffer={draftRestoreOffer}
+        externalChangeNotice={
+          externalChangeSeen ? { onDismiss: dismissExternalChangeNotice } : null
+        }
+        onRestoreSnapshot={handleRestoreSnapshot}
         onReloadDocumentFromDisk={handleReloadDocumentFromDisk}
         onKeepEditingWithoutAutosave={handleKeepEditingWithoutAutosave}
         onOverwriteDocumentOnDisk={handleOverwriteDocumentOnDisk}

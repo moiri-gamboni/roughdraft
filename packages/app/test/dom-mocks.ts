@@ -30,6 +30,16 @@ export function setupDomMocks() {
     });
   }
 
+  // Base UI's scroll-area viewport asks whether it is mid-animation before it
+  // measures. jsdom implements no Web Animations API at all, so the call throws
+  // from a timer, outside any test's stack.
+  if (!("getAnimations" in Element.prototype)) {
+    Object.defineProperty(Element.prototype, "getAnimations", {
+      configurable: true,
+      value: () => [],
+    });
+  }
+
   Object.defineProperty(document, "fonts", {
     configurable: true,
     value: { ready: Promise.resolve() },
