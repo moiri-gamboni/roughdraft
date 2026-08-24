@@ -796,18 +796,18 @@ describe("interaction mode preserved across view toggle (issue 3 fix)", () => {
       });
     };
 
-    // Mount with rich-text -> mode is "Suggesting" by default
+    // Mount with rich-text -> mode is "Editing" by default
     await renderWorkspace("rich-text");
     expect(
       getByTestId(container, "document-mode-trigger").textContent,
-    ).toContain("Suggesting");
+    ).toContain("Editing");
 
     // Rerender with code view (same component instance, no remount) ->
-    // mode stays "Suggesting" because the component is not destroyed.
+    // mode stays "Editing" because the component is not destroyed.
     await renderWorkspace("code");
     expect(
       getByTestId(container, "document-mode-trigger").textContent,
-    ).toContain("Suggesting");
+    ).toContain("Editing");
   });
 });
 

@@ -487,7 +487,7 @@ export function DocumentWorkspace({
   backend,
 }: DocumentWorkspaceProps) {
   const [documentInteractionMode, setDocumentInteractionMode] =
-    useState<DocumentInteractionMode>("suggesting");
+    useState<DocumentInteractionMode>("editing");
   const [saveState, setSaveState] = useState<DocumentSaveState>("saved");
   const [reviewHandoffState, setReviewHandoffState] =
     useState<ReviewHandoffState>("idle");
