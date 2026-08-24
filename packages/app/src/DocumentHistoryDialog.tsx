@@ -283,7 +283,10 @@ export function DocumentHistoryDialog({
           // `undefined`, which must not read as a version still loading.
           if (content === undefined) {
             setViewing({ status: "error", id });
-            logHistoryEvent("view-failed", { id, reason: "no content returned" });
+            logHistoryEvent("view-failed", {
+              id,
+              reason: "no content returned",
+            });
             return;
           }
           setViewing({ status: "ready", id, content });

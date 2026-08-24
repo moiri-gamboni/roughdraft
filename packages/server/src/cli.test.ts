@@ -3173,7 +3173,9 @@ describe("readOriginContent", () => {
         const result = readOriginContent(filePath);
 
         expect(result.status).toBe("unreadable");
-        expect(result).toMatchObject({ reason: expect.stringContaining("EACCES") });
+        expect(result).toMatchObject({
+          reason: expect.stringContaining("EACCES"),
+        });
       } finally {
         fs.chmodSync(filePath, 0o600);
       }

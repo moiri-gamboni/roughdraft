@@ -1393,10 +1393,13 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
         return;
       }
       console.warn(`[roughdraft] request failed: ${error.message}`);
-      const status = error instanceof URIError ? 400 : 500;
-      res
-        .status(status)
-        .json({ error: status === 400 ? "Bad request" : "Internal server error" });
+      // A URIError is the router failing to decode a param, which is the
+      // caller's malformed request rather than anything wrong here.
+      if (error instanceof URIError) {
+        res.status(400).json({ error: "Bad request" });
+        return;
+      }
+      res.status(500).json({ error: "Internal server error" });
     },
   );
 

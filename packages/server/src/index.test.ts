@@ -165,7 +165,14 @@ describe("createApp", () => {
     // the comparison and the decoded string for the reply makes every
     // version-quoting save 409 against the version it was just handed.
     const filePath = path.join(projectDir, "latin.md");
-    fs.writeFileSync(filePath, Buffer.from("23 20 43 61 66 e9 0a".split(" ").map((byte) => Number.parseInt(byte, 16))));
+    fs.writeFileSync(
+      filePath,
+      Buffer.from(
+        "23 20 43 61 66 e9 0a"
+          .split(" ")
+          .map((byte) => Number.parseInt(byte, 16)),
+      ),
+    );
     const { app } = createApp({ homeDir, staticDirPath: projectDir });
 
     const read = await request(app)
