@@ -591,6 +591,26 @@ describe("readSnapshot", () => {
     expect(readSnapshot(docPath, planted)).toBeNull();
     expect(ids(docPath)).toEqual([]);
   });
+
+  it("refuses to list through a symlinked history leaf directory", () => {
+    // The write path refuses a symlinked leaf; a listing that followed one
+    // would let a planted link serve chosen content as this document's history.
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "rd-elsewhere-"));
+    try {
+      fs.writeFileSync(
+        path.join(elsewhere, "2026-08-24T10-11-12-345Z--p1--save.md"),
+        "planted",
+      );
+      const sidecar = path.join(projectDir, ".roughdraft-history", "v1");
+      fs.mkdirSync(sidecar, { recursive: true });
+      fs.symlinkSync(elsewhere, historyDirFor(docPath));
+
+      const listing = listSnapshots(docPath);
+      expect(listing.status).toBe("error");
+    } finally {
+      fs.rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("commitDocumentWrite", () => {

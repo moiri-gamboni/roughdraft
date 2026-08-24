@@ -96,6 +96,12 @@ export function parseSnapshotId(
  */
 export function listSnapshots(documentPath: string): SnapshotListing {
   const directory = historyDirFor(documentPath);
+  // The write path refuses to descend through a symlinked sidecar; a listing
+  // read through one would make a planted link serve chosen "snapshots".
+  const directoryStat = lstatOrNull(directory);
+  if (directoryStat && !directoryStat.isDirectory()) {
+    return { status: "error", reason: "history path is not a directory" };
+  }
   let entries: string[];
   try {
     entries = fs.readdirSync(directory);
