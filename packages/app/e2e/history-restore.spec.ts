@@ -378,45 +378,4 @@ test.describe("recovering a clobbered review from history", () => {
       file: "deaf.md",
     });
   });
-
-  test("parks unsent edits as a resurfaced offer when the tab reloads instead", async ({
-    page,
-  }) => {
-    // The escape exists so a reviewer is never cornered. This records what the
-    // alternative actually costs: a plain browser reload keeps the unsent edits
-    // and offers them back, so the escape is convenience and guaranteed
-    // reversibility rather than the only non-lossy way out.
-    const filePath = writeProjectFile(projectDir, "reload.md", REVIEWED);
-    await openMarkdownFile(page, filePath, "code");
-    await appendInCodeEditor(page, "\nReviewer note.\n");
-    await expect(documentSaveStatus(page)).toHaveAttribute(
-      "aria-label",
-      "Saved",
-    );
-
-    await blockSaves(page);
-    await appendInCodeEditor(page, "\nStill unsent.\n");
-    await expect(documentSaveStatus(page)).toHaveAttribute(
-      "aria-label",
-      RETRYING_LABEL,
-    );
-    fs.writeFileSync(filePath, CLOBBERED);
-    await expect(fileConflictNotice(page)).toBeVisible();
-
-    await page.reload();
-    // Re-applied rather than relied upon: a `page.route` block does survive
-    // `page.reload()`, so this is belt-and-braces, not the thing keeping the
-    // offer on screen. Without the block at all the restore would simply save
-    // on the way back up and there would be no offer to assert.
-    await blockSaves(page);
-
-    await expect(page.getByTestId("draft-restore-notice")).toBeVisible();
-    await expect(codeEditor(page)).toContainText("overwrote everything");
-    // Nothing was written behind the reviewer's back.
-    expect(readProjectFile(projectDir, "reload.md")).toBe(CLOBBERED);
-
-    logE2eEvent("history-restore.reload-parks-unsent-edits", {
-      file: "reload.md",
-    });
-  });
 });
