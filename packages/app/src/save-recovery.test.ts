@@ -159,7 +159,7 @@ describe("resolveDiskChange", () => {
     savedVersions: [],
     dirty: false,
     diskChangeState: "clean",
-    draftRestorePending: false,
+    contentRestorePending: false,
   } satisfies Parameters<typeof resolveDiskChange>[0];
 
   it("ignores the version the open document already holds", () => {
@@ -243,7 +243,7 @@ describe("resolveDiskChange", () => {
     expect(
       resolveDiskChange({
         ...externalChange,
-        draftRestorePending: true,
+        contentRestorePending: true,
         dirty: true,
       }),
     ).toBe("ignore");

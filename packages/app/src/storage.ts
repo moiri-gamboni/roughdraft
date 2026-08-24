@@ -44,14 +44,17 @@ export type DocumentDiskChangeState =
 export type LocalContentOrigin = "edit" | "adopt";
 
 /**
- * An unsent draft the app wants put back into the editor.
+ * Content the app wants put back into the editor as unsaved work — an unsent
+ * local draft, or a snapshot the reviewer restored from history. `source` says
+ * which, so a reader never has to guess where the bytes came from.
  *
  * Each offer is a distinct object, and that identity is the signal: restoring
  * the same bytes twice is a real request, not a repeat, so the value must come
  * from state rather than be built inline while rendering.
  */
-export interface DraftRestore {
+export interface ContentRestore {
   content: string;
+  source: "draft" | "snapshot";
 }
 
 export interface StoredAsset {

@@ -67,8 +67,8 @@ import {
 } from "./save-recovery";
 import {
   type CompleteReviewOptions,
+  type ContentRestore,
   type DocumentDiskChangeState,
-  type DraftRestore,
   type LocalContentOrigin,
   MarkdownFileConflictError,
   type Page,
@@ -1595,7 +1595,9 @@ export function App() {
   const [offeredDraftContent, setOfferedDraftContent] = useState<string | null>(
     null,
   );
-  const [draftRestore, setDraftRestore] = useState<DraftRestore | null>(null);
+  const [contentRestore, setContentRestore] = useState<ContentRestore | null>(
+    null,
+  );
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [documentEditorViewMode, setDocumentEditorViewMode] = useState(() =>
     getDocumentEditorViewModeFromLocation("rich-text"),
@@ -1612,7 +1614,7 @@ export function App() {
     async () => {},
   );
   const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
-  const draftRestoreRef = useRef<DraftRestore | null>(null);
+  const contentRestoreRef = useRef<ContentRestore | null>(null);
   // Every version this session has written, newest last. Set synchronously on
   // save, unlike `documentPageRef`, which only catches up on the next commit —
   // the watcher can report our own write before then. Why the whole list and
@@ -1633,7 +1635,7 @@ export function App() {
   activeDocumentPathRef.current = activeDocumentPath;
   documentSaveStateRef.current = documentSaveState;
   documentDiskChangeStateRef.current = documentDiskChangeState;
-  draftRestoreRef.current = draftRestore;
+  contentRestoreRef.current = contentRestore;
 
   const applyDocumentPage = useCallback((nextDocument: Page) => {
     setDocumentPage(nextDocument);
@@ -1648,7 +1650,7 @@ export function App() {
   const restoreDraftContent = useCallback((content: string) => {
     setOfferedDraftContent(null);
     setDocumentDiskChangeState("clean");
-    setDraftRestore({ content });
+    setContentRestore({ content, source: "draft" });
     logDraftEvent("restored");
   }, []);
 
@@ -1750,7 +1752,7 @@ export function App() {
       // A boot resolves the restore question against the document it loads, so
       // a retry must not inherit the previous boot's answer: a leftover offer
       // or accepted restore would replay stale content over the fresh load.
-      setDraftRestore(null);
+      setContentRestore(null);
       setOfferedDraftContent(null);
 
       try {
@@ -1913,7 +1915,7 @@ export function App() {
         documentDirtyRef.current = false;
         draftPersistence.noteSaveSuccess(content);
         // Whatever was owed has landed, so no restore is in flight any more.
-        setDraftRestore(null);
+        setContentRestore(null);
       };
 
       try {
@@ -1951,6 +1953,10 @@ export function App() {
           return;
         }
 
+        // The restore is over, lost rather than landed. Leaving it marked as
+        // in flight would keep the watcher standing down for the rest of the
+        // session, so every later write to this file would go unreported.
+        setContentRestore(null);
         setDocumentDiskChangeState("conflict");
         throw error;
       }
@@ -2086,7 +2092,7 @@ export function App() {
     // Taking the file's version is a decision to drop the local edits, so the
     // record must go too or the next boot would offer them back.
     draftPersistence.discard();
-    setDraftRestore(null);
+    setContentRestore(null);
     setDocumentDiskChangeState("clean");
     setDocumentForceResetKey(nextForceResetKey(currentPath));
   }, [applyDocumentPage, draftPersistence, nextForceResetKey]);
@@ -2118,6 +2124,9 @@ export function App() {
     );
     documentDirtyRef.current = false;
     draftPersistence.noteSaveSuccess(content);
+    // Whatever was being restored is now what the file holds, so the watcher
+    // has no reason left to stand down.
+    setContentRestore(null);
     handleDocumentSaveStateChange("saved");
     setDocumentDiskChangeState("clean");
     setDocumentForceResetKey(nextForceResetKey(currentPath));
@@ -2190,7 +2199,7 @@ export function App() {
             savedVersions: savedVersionsRef.current,
             dirty: documentDirtyRef.current,
             diskChangeState: documentDiskChangeStateRef.current,
-            draftRestorePending: draftRestoreRef.current !== null,
+            contentRestorePending: contentRestoreRef.current !== null,
           });
 
           if (decision === "ignore") return;
@@ -2316,7 +2325,7 @@ export function App() {
         documentDiskChangeState={documentDiskChangeState}
         documentRetryPending={documentRetryPending}
         documentForceResetKey={documentForceResetKey}
-        draftRestore={draftRestore}
+        contentRestore={contentRestore}
         draftRestoreOffer={draftRestoreOffer}
         onReloadDocumentFromDisk={handleReloadDocumentFromDisk}
         onKeepEditingWithoutAutosave={handleKeepEditingWithoutAutosave}
