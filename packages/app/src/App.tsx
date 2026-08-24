@@ -62,6 +62,7 @@ import {
   type DraftMode,
   nextRetryDelayMs,
   resolveConflict,
+  resolveDiskChange,
   resolveRestore,
 } from "./save-recovery";
 import {
@@ -119,6 +120,12 @@ export function shouldWarnBeforeUnload({
 
 const AGENT_SETUP_PROMPT =
   "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.md/setup.md and set yourself up to use it.";
+/**
+ * How many of our own file versions to recognise when the watcher echoes them
+ * back. One poll interval can hide several saves, so the newest alone is not
+ * enough, and nothing older than a handful of writes is ever reported.
+ */
+const SAVED_VERSION_MEMORY = 8;
 const PREVIEW_DOCUMENT_PATH = "preview.md";
 const PREVIEW_INITIAL_MARKDOWN = [
   "# Live Preview",
@@ -1606,9 +1613,11 @@ export function App() {
   );
   const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
   const draftRestoreRef = useRef<DraftRestore | null>(null);
-  // Set synchronously on save, unlike `documentPageRef`, which only catches up
-  // on the next commit — the watcher can report our own write before then.
-  const lastSavedVersionRef = useRef<string | null>(null);
+  // Every version this session has written, newest last. Set synchronously on
+  // save, unlike `documentPageRef`, which only catches up on the next commit —
+  // the watcher can report our own write before then. Why the whole list and
+  // not just the newest: `resolveDiskChange`.
+  const savedVersionsRef = useRef<string[]>([]);
   const bootRetryTimerRef = useRef<number | null>(null);
   // The reset key must be monotonic: PageCard compares it by identity, so a
   // repeat of the same reset would otherwise be a silent no-op.
@@ -1894,7 +1903,12 @@ export function App() {
       }
 
       const settleSaved = (savedDocument: Page) => {
-        lastSavedVersionRef.current = savedDocument.version ?? null;
+        if (savedDocument.version) {
+          savedVersionsRef.current = [
+            ...savedVersionsRef.current,
+            savedDocument.version,
+          ].slice(-SAVED_VERSION_MEMORY);
+        }
         applyDocumentPage(savedDocument);
         documentDirtyRef.current = false;
         draftPersistence.noteSaveSuccess(content);
@@ -2159,44 +2173,35 @@ export function App() {
       (event) => {
         if (disposed || event.path !== activeDocumentPath) return;
 
-        const currentDocument = documentPageRef.current;
-        if (
-          event.version &&
-          (currentDocument?.version === event.version ||
-            lastSavedVersionRef.current === event.version)
-        ) {
-          return;
-        }
-
-        const diskChangeState = documentDiskChangeStateRef.current;
-        // An unsent draft is waiting on the reviewer; neither reloading over it
-        // nor relabelling the banner would help them decide.
-        if (diskChangeState === "draft-restore") return;
-
-        // A restore in flight looks exactly like unsaved local work, and
-        // pausing autosave over it would strand the very edits being restored.
-        // The save carries the loaded version, so a genuinely changed file
-        // still comes back as a conflict.
-        if (draftRestoreRef.current) return;
-
-        if (!event.exists) {
-          setDocumentDiskChangeState("changed");
-          return;
-        }
-
-        if (diskChangeState === "paused") {
-          return;
-        }
-
-        if (documentDirtyRef.current) {
-          setDocumentDiskChangeState("changed");
-          return;
-        }
+        // A write of ours reaches the watcher before the save that caused it
+        // reports its version, so an echo arriving mid-save would read as
+        // somebody else's edit and pause autosave over our own work. Waiting
+        // for the writes already in flight is what makes the versions below
+        // knowable.
+        const savesInFlight = saveChainRef.current;
 
         void (async () => {
+          await savesInFlight;
+          if (disposed) return;
+
+          const decision = resolveDiskChange({
+            event,
+            documentVersion: documentPageRef.current?.version ?? null,
+            savedVersions: savedVersionsRef.current,
+            dirty: documentDirtyRef.current,
+            diskChangeState: documentDiskChangeStateRef.current,
+            draftRestorePending: draftRestoreRef.current !== null,
+          });
+
+          if (decision === "ignore") return;
+          if (decision === "flag-changed") {
+            setDocumentDiskChangeState("changed");
+            return;
+          }
+
           const currentBackend = backendRef.current;
           const currentPath = activeDocumentPathRef.current;
-          if (!currentBackend || !currentPath || disposed) return;
+          if (!currentBackend || !currentPath) return;
 
           try {
             const nextDocument =
