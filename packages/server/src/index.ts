@@ -846,21 +846,6 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     });
   });
 
-  app.put("/api/pages/:id", (req, res) => {
-    const projectDir = projectDirFromRequest(req, res);
-    if (!projectDir) return;
-
-    const id = req.params.id;
-    const filePath = pageFilePathFromId(projectDir, id);
-    if (!filePath || !fs.existsSync(filePath)) {
-      res.status(404).json({ error: "Page not found" });
-      return;
-    }
-    const { content } = req.body as { content: string };
-    fs.writeFileSync(filePath, content);
-    res.json({ id, title: titleFromContent(content, id), content });
-  });
-
   app.put("/api/markdown-file", (req, res) => {
     const target = markdownPathFromRequest(req, res);
     if (!target) return;
@@ -904,6 +889,8 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     const id = nextUntitledId(projectDir);
     const content = bodyContent || `# ${title || "Untitled"}\n`;
     const filePath = path.join(projectDir, `${id}.md`);
+    // create-only: name always free, so this write replaces nothing and has no
+    // history to preserve.
     fs.writeFileSync(filePath, content);
 
     res.status(201).json(markdownPageFromFile(`${id}.md`, filePath));
