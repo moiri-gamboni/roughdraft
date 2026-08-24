@@ -155,6 +155,40 @@ test.describe("recovering a clobbered review from history", () => {
     logE2eEvent("history-restore.diff-pane", { file: "diff.md" });
   });
 
+  test("adds the history control without resizing the sticky header", async ({
+    page,
+  }) => {
+    // The header participates in a FLIP layout-shift animation, which a
+    // control that changed the row's geometry would disturb. Measure with the
+    // control and without it rather than trusting that the box classes match.
+    const filePath = writeProjectFile(projectDir, "geometry.md", REVIEWED);
+    await openMarkdownFile(page, filePath, "code");
+    await expect(codeEditor(page)).toContainText("Reviewed line");
+    await expect(page.getByTestId("document-history-trigger")).toBeVisible();
+
+    const [withControl, withoutControl] = await page.evaluate(() => {
+      const header = document.querySelector(
+        '[data-testid="document-page-header"]',
+      );
+      const trigger = document.querySelector(
+        '[data-testid="document-history-trigger"]',
+      );
+      if (!header || !trigger) return [0, -1];
+
+      const before = header.getBoundingClientRect().height;
+      trigger.remove();
+      return [before, header.getBoundingClientRect().height];
+    });
+
+    expect(withControl).toBeGreaterThan(0);
+    expect(withControl).toBe(withoutControl);
+
+    logE2eEvent("history-restore.header-geometry-unchanged", {
+      file: "geometry.md",
+      headerHeight: withControl,
+    });
+  });
+
   test("opens above the sticky document header rather than under it", async ({
     page,
   }) => {
