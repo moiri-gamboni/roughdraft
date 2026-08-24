@@ -27,6 +27,7 @@ import {
   getPreferredCommentId,
   getRootThreadIdForCommentId,
   normalizeCommentMeasurement,
+  pickNearestRailKey,
   resolveAnchoredRailLayouts,
 } from "./document-comments";
 import { SUGGESTED_PARAGRAPH_SENTINEL } from "./editor-extensions";
@@ -78,6 +79,8 @@ interface DocumentReviewRailProps {
   onApplyDraftSuggestion?: () => void;
   onCancelDraftSuggestion?: () => void;
   editor?: Editor | null;
+  /** Caret top in editor-anchor space; aligns the rail when nothing is selected. */
+  caretTop?: number | null;
 }
 
 function railLayoutItemClass(layout: "anchored" | "flow") {
@@ -214,6 +217,7 @@ export function DocumentReviewRail({
   onApplyDraftSuggestion,
   onCancelDraftSuggestion,
   editor = null,
+  caretTop = null,
 }: DocumentReviewRailProps) {
   const draftTextareaRef = useRef<HTMLTextAreaElement>(null);
   const itemRefs = useRef(new Map<string, HTMLDivElement>());
@@ -364,14 +368,24 @@ export function DocumentReviewRail({
         anchorTop: entry.anchorTop + anchorOffset,
         anchorBottom: entry.anchorBottom + anchorOffset,
       }));
+    // With nothing selected, align the rail around the caret: the entry
+    // nearest the cursor pins to its anchor so the cards track where the
+    // user is, even in uncommented text. Layout pivot only — no selection
+    // styling.
+    const caretKey =
+      caretTop == null
+        ? null
+        : pickNearestRailKey(entries, caretTop + anchorOffset);
     const activeKey =
       draftEntry?.key ??
       selectedChangeId ??
       activeSuggestionIdForComment ??
-      activeRootThreadId;
+      activeRootThreadId ??
+      caretKey;
 
     return resolveAnchoredRailLayouts(entries, itemHeights, activeKey);
   }, [
+    caretTop,
     activeRootThreadId,
     activeSuggestionIdForComment,
     anchorOffset,

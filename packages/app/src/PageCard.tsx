@@ -1318,6 +1318,32 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
   const { commentGroups, contentHeight, measureLayout } =
     useCommentAnchorLayout(editor, comments.size > 0);
 
+  // Caret top in the same editor-relative space as the comment anchors, so
+  // the rail can align around the cursor even in uncommented text.
+  const [caretTop, setCaretTop] = useState<number | null>(null);
+  useEffect(() => {
+    if (!editor) return;
+
+    const updateCaretTop = () => {
+      try {
+        const editorRect = (
+          editor.view.dom as HTMLElement
+        ).getBoundingClientRect();
+        const coords = editor.view.coordsAtPos(editor.state.selection.from);
+        const next = Math.round(coords.top - editorRect.top);
+        setCaretTop((current) => (current === next ? current : next));
+      } catch {
+        // coordsAtPos can throw while the view catches up with the doc.
+      }
+    };
+
+    updateCaretTop();
+    editor.on("selectionUpdate", updateCaretTop);
+    return () => {
+      editor.off("selectionUpdate", updateCaretTop);
+    };
+  }, [editor]);
+
   useEffect(() => {
     onEditorReady?.(editor);
 
@@ -2116,6 +2142,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
           onHoverSuggestion={setHoveredChangeId}
           pendingFocusCommentId={pendingFocusCommentId}
           newCommentDraftIds={newCommentDraftIds}
+          caretTop={caretTop}
           onAutoFocusComment={(commentId) => {
             setPendingFocusCommentId((current) =>
               current === commentId ? null : current,
