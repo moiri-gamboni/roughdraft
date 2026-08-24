@@ -7,6 +7,11 @@ import type { Response } from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  listSnapshots,
+  readSnapshot,
+  type SnapshotSummary,
+} from "./checkpoint-store";
+import {
   createApp,
   fileVersionIfPresent,
   REMOTE_SESSION_TTL_MS,
@@ -319,6 +324,235 @@ describe("createApp", () => {
       },
     });
     expect(fs.readFileSync(filePath, "utf-8")).toBe("# External\n");
+  });
+
+  describe("document history", () => {
+    /** The snapshots of `draft.md`, newest first. */
+    function snapshotsOfDraft(): SnapshotSummary[] {
+      const listing = listSnapshots(path.join(projectDir, "draft.md"));
+      if (listing.status !== "ok") {
+        throw new Error(`Expected a readable history, got ${listing.status}`);
+      }
+      return listing.snapshots;
+    }
+
+    function snapshotContent(id: string): string | null {
+      return readSnapshot(path.join(projectDir, "draft.md"), id);
+    }
+
+    /** Saves `content`, quoting the version on disk so no `replaced` capture fires. */
+    async function save(
+      app: ReturnType<typeof createApp>["app"],
+      content: string,
+    ) {
+      const read = await request(app)
+        .get("/api/markdown-file")
+        .query({ projectPath: projectDir, path: "draft.md" });
+      return request(app)
+        .put("/api/markdown-file")
+        .query({ projectPath: projectDir, path: "draft.md" })
+        .send({ content, expectedVersion: read.body.version });
+    }
+
+    it("snapshots the state a save puts on disk", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      expect((await save(app, "# Saved\n")).status).toBe(200);
+
+      const snapshots = snapshotsOfDraft();
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0].trigger).toBe("save");
+      expect(snapshotContent(snapshots[0].id)).toBe("# Saved\n");
+    });
+
+    it("does not snapshot a save that changes nothing", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      await save(app, "# Saved\n");
+      await save(app, "# Saved\n");
+
+      expect(snapshotsOfDraft()).toHaveLength(1);
+    });
+
+    it("preserves the replaced bytes when a save carries no expected version", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .put("/api/markdown-file")
+        .query({ projectPath: projectDir, path: "draft.md" })
+        .send({ content: "# Overwritten\n" });
+      expect(response.status).toBe(200);
+
+      const replaced = snapshotsOfDraft().filter(
+        (snapshot) => snapshot.trigger === "replaced",
+      );
+      expect(replaced).toHaveLength(1);
+      expect(snapshotContent(replaced[0].id)).toBe("# Original\n");
+    });
+
+    it("leaves the reviewed state as the newest snapshot", async () => {
+      const reviewed =
+        "# Draft\n\nNeeds {==support==}{>>Add a source<<}{#c1}.\n";
+      fs.writeFileSync(path.join(projectDir, "draft.md"), reviewed);
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .post("/api/review-events")
+        .send({ projectPath: projectDir, path: "draft.md" });
+      expect(response.status).toBe(201);
+
+      const newest = snapshotsOfDraft()[0];
+      expect(newest.trigger).toBe("review");
+      expect(snapshotContent(newest.id)).toBe(reviewed);
+    });
+
+    it("snapshots the comment a review event appends to the document", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Draft\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      await request(app).post("/api/review-events").send({
+        projectPath: projectDir,
+        path: "draft.md",
+        overallComment: "Please address the risk section.",
+      });
+
+      const onDisk = fs.readFileSync(
+        path.join(projectDir, "draft.md"),
+        "utf-8",
+      );
+      const newest = snapshotsOfDraft()[0];
+      expect(newest.trigger).toBe("review");
+      expect(snapshotContent(newest.id)).toBe(onDisk);
+      expect(onDisk).toContain("Please address the risk section.");
+    });
+
+    it("lists snapshots for a document that has since been deleted", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+      await save(app, "# Saved\n");
+      fs.rmSync(path.join(projectDir, "draft.md"));
+
+      const response = await request(app)
+        .get("/api/markdown-file/history")
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(200);
+      expect(response.body.snapshots).toHaveLength(1);
+      expect(response.body.snapshots[0]).toMatchObject({
+        trigger: "save",
+        bytes: Buffer.byteLength("# Saved\n"),
+      });
+    });
+
+    it("serves an empty history for a document that has never been saved", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .get("/api/markdown-file/history")
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        path: "draft.md",
+        snapshots: [],
+        unreadable: 0,
+      });
+    });
+
+    it("serves the content of one snapshot", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+      await save(app, "# Saved\n");
+
+      const list = await request(app)
+        .get("/api/markdown-file/history")
+        .query({ projectPath: projectDir, path: "draft.md" });
+      const { id, createdAt, trigger, bytes } = list.body.snapshots[0];
+      expect(createdAt).toBe(new Date(createdAt).toISOString());
+      expect(trigger).toBe("save");
+      expect(bytes).toBe(Buffer.byteLength("# Saved\n"));
+
+      const response = await request(app)
+        .get(`/api/markdown-file/history/${id}`)
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ id, content: "# Saved\n" });
+    });
+
+    it("rejects a snapshot id that is shaped like a traversal", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      fs.writeFileSync(path.join(projectDir, "secret.md"), "# Secret\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .get(
+          `/api/markdown-file/history/${encodeURIComponent("../../../secret")}`,
+        )
+        .query({ projectPath: projectDir, path: "draft.md" });
+
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({ error: "Snapshot not found" });
+    });
+
+    it("refuses to treat a snapshot as a document", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+      await save(app, "# Saved\n");
+
+      const snapshotPath = path.join(
+        ".roughdraft-history",
+        "v1",
+        "draft",
+        `${snapshotsOfDraft()[0].id}.md`,
+      );
+      expect(fs.existsSync(path.join(projectDir, snapshotPath))).toBe(true);
+
+      const read = await request(app)
+        .get("/api/markdown-file")
+        .query({ projectPath: projectDir, path: snapshotPath });
+      expect(read.status).toBe(404);
+
+      const write = await request(app)
+        .put("/api/markdown-file")
+        .query({ projectPath: projectDir, path: snapshotPath })
+        .send({ content: "# Rewritten\n" });
+      expect(write.status).toBe(404);
+
+      const review = await request(app)
+        .post("/api/review-events")
+        .send({ projectPath: projectDir, path: snapshotPath });
+      expect(review.status).toBe(404);
+
+      // The refusal is a refusal, not a write that happened to 404.
+      expect(
+        fs.readFileSync(path.join(projectDir, snapshotPath), "utf-8"),
+      ).toBe("# Saved\n");
+    });
+
+    it("refuses to build a history of a history", async () => {
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+      await save(app, "# Saved\n");
+
+      const response = await request(app)
+        .get("/api/markdown-file/history")
+        .query({
+          projectPath: projectDir,
+          path: path.join(
+            ".roughdraft-history",
+            "v1",
+            "draft",
+            `${snapshotsOfDraft()[0].id}.md`,
+          ),
+        });
+
+      expect(response.status).toBe(404);
+    });
   });
 
   it("rejects markdown-file reads outside the project directory", async () => {

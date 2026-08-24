@@ -41,7 +41,8 @@ export interface CommitDocumentWriteResult {
 
 export const MAX_SNAPSHOTS_PER_DOCUMENT = 50;
 
-const HISTORY_DIR_NAME = ".roughdraft-history";
+/** The sidecar directory name, and so the path segment routes must refuse. */
+export const HISTORY_DIR_NAME = ".roughdraft-history";
 const HISTORY_FORMAT_DIR_NAME = "v1";
 const SNAPSHOT_ID_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z--p(\d+)--(save|review|replaced|hook)$/;
