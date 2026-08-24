@@ -7,6 +7,7 @@ import {
 import {
   buildCommentThreadRailItems,
   type CommentGroupAnchor,
+  pickNearestRailKey,
   reconcileCommentsWithDoc,
 } from "./document-comments";
 
@@ -205,5 +206,27 @@ describe("reconcileCommentsWithDoc", () => {
     );
 
     expect(everAnchored.has("c1")).toBe(true);
+  });
+});
+
+describe("pickNearestRailKey", () => {
+  const items = [
+    { key: "a", anchorTop: 100, anchorBottom: 120 },
+    { key: "b", anchorTop: 400, anchorBottom: 430 },
+    { key: "c", anchorTop: 900, anchorBottom: 920 },
+  ];
+
+  it("returns the item containing the position", () => {
+    expect(pickNearestRailKey(items, 410)).toBe("b");
+  });
+
+  it("measures distance from anchor edges, not centers", () => {
+    // 340 is 220 below a's bottom but only 60 above b's top.
+    expect(pickNearestRailKey(items, 340)).toBe("b");
+    expect(pickNearestRailKey(items, 150)).toBe("a");
+  });
+
+  it("returns null with no items", () => {
+    expect(pickNearestRailKey([], 100)).toBeNull();
   });
 });
