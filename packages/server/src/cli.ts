@@ -105,6 +105,8 @@ export interface CliDependencies {
   spawnServerProcess: (options: {
     port: number;
     projectDir: string;
+    /** Where the detached child's stdout and stderr go. */
+    logPath: string;
   }) => Promise<SpawnedServer> | SpawnedServer;
   isProcessRunning: (pid: number) => boolean;
   stopProcess: (pid: number) => Promise<void>;
@@ -862,8 +864,15 @@ async function defaultStopProcess(pid: number): Promise<void> {
 function defaultSpawnServerProcess(options: {
   port: number;
   projectDir: string;
+  logPath: string;
 }): SpawnedServer {
   const serverEntryPath = fileURLToPath(new URL("./child.js", import.meta.url));
+  // Detached with `stdio: "ignore"` there was no destination at all: the
+  // server's startup errors and every warning the history store emits went to
+  // a closed descriptor. Truncating on spawn keeps this to one run's worth,
+  // which is what anyone diagnosing a live server wants to read.
+  fs.mkdirSync(path.dirname(options.logPath), { recursive: true });
+  const logFd = fs.openSync(options.logPath, "w");
   const child = spawn(
     process.execPath,
     [
@@ -876,11 +885,12 @@ function defaultSpawnServerProcess(options: {
     {
       cwd: options.projectDir,
       detached: true,
-      stdio: "ignore",
+      stdio: ["ignore", logFd, logFd],
       windowsHide: true,
       env: process.env,
     },
   );
+  fs.closeSync(logFd);
 
   child.unref();
 
@@ -941,7 +951,7 @@ function printHelp(log: (message: string) => void) {
   log("  status             Show server status");
   log("  stop               Stop the managed background server");
   log("  watch <path>       Wait for a Done Reviewing event");
-  log("  history <path>     List, print, and restore past versions of a file");
+  log("  history <path>     List, print, and restore a file's snapshots");
   log("  mcp                Start the experimental stdio MCP server");
   log("  doctor [path]      Diagnose setup or validate Markdown");
   log("  help agent         Print the agent setup prompt");
@@ -1096,7 +1106,7 @@ function printCommandHelp(
     log("Usage:");
     log("  roughdraft history <path> [--json] [--show <id>] [--restore <id>]");
     log("");
-    log("Lists, prints, and restores past versions of one Markdown file.");
+    log("Lists, prints, and restores the snapshots of one Markdown file.");
     log(
       "History is stored beside the file, so this works with no server running.",
     );
@@ -1109,6 +1119,10 @@ function printCommandHelp(
     log(
       "A restore keeps the content it replaces as a snapshot, so it can be undone.",
     );
+    log(
+      "A snapshot id can change when a review pins it; re-run `roughdraft history",
+    );
+    log("<path>` if an id is rejected.");
     return;
   }
 
@@ -1382,15 +1396,6 @@ async function runRemoteOpen(
   // copy of the document goes over it.
   let lastWrittenContent: string | null = null;
 
-  /** Null when the document is not there to read — itself a change. */
-  function readOriginContent(): string | null {
-    try {
-      return fs.readFileSync(options.openPath, "utf-8");
-    } catch {
-      return null;
-    }
-  }
-
   function warnForeignChange(captured: SnapshotSummary | null): void {
     const kept = captured ? ` (kept as ${captured.id})` : "";
     deps.error(
@@ -1650,9 +1655,17 @@ async function runRemoteOpen(
             // The store also pre-captures a document whose history is empty,
             // so a snapshot appearing does not mean someone else wrote the
             // file. Only disk disagreeing with what we put there does.
+            const origin = readOriginContent(options.openPath);
+            if (origin.status === "unreadable") {
+              deps.error(
+                `Could not read ${options.openPath} before saving from remote: ${origin.reason}`,
+              );
+            }
             const foreign =
               lastWrittenContent !== null &&
-              readOriginContent() !== lastWrittenContent;
+              (origin.status === "missing" ||
+                (origin.status === "read" &&
+                  origin.content !== lastWrittenContent));
             const { preCapture } = commitDocumentWrite(
               options.openPath,
               payload.content,
@@ -1855,6 +1868,35 @@ export function getServerStateFilePath(
   }
 
   return path.join(os.homedir(), ".roughdraft", "server.json");
+}
+
+export type OriginRead =
+  | { status: "read"; content: string }
+  /** Gone: itself a change, and the one the reviewer most needs told about. */
+  | { status: "missing" }
+  | { status: "unreadable"; reason: string };
+
+/**
+ * Whether the bytes beside the origin CLI are the ones it last wrote there.
+ *
+ * "I cannot look" is a third answer, not a change: reporting it as one names a
+ * write that did not happen, and the credibility of the only warning this pump
+ * emits is the whole reason the warning exists.
+ */
+export function readOriginContent(openPath: string): OriginRead {
+  try {
+    return { status: "read", content: fs.readFileSync(openPath, "utf-8") };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { status: "missing" };
+    }
+    return { status: "unreadable", reason: describeError(error) };
+  }
+}
+
+/** Beside the state file, so one directory holds everything about a server. */
+function getServerLogFilePath(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(path.dirname(getServerStateFilePath(env)), "server.log");
 }
 
 function isValidServerState(value: unknown): value is RoughdraftServerState {
@@ -2185,6 +2227,7 @@ export async function ensureServerRunning(
   const spawned = await deps.spawnServerProcess({
     port,
     projectDir,
+    logPath: getServerLogFilePath(deps.env),
   });
 
   try {
@@ -2329,6 +2372,7 @@ async function runDoctor(
     commandPath,
     stateFile: stateFilePath,
     stateFileExists: fs.existsSync(stateFilePath),
+    serverLog: getServerLogFilePath(deps.env),
     managedPid: persistedState?.pid ?? null,
     managedPidRunning,
     recordedPort: persistedState?.port ?? null,
@@ -2364,6 +2408,7 @@ async function runDoctor(
   deps.log(`Command path: ${report.commandPath ?? "unknown"}`);
   deps.log(`State file: ${report.stateFile}`);
   deps.log(`State file exists: ${report.stateFileExists ? "yes" : "no"}`);
+  deps.log(`Server log: ${report.serverLog}`);
   deps.log(
     `Managed PID: ${
       report.managedPid === null
@@ -2578,17 +2623,34 @@ function listHistory(
   return 0;
 }
 
+/**
+ * `null` for a snapshot that is not there, and a printed reason plus `null` for
+ * one that is there and cannot be read — an unreadable file is the caller's
+ * problem to hear about, not a Node stack trace out of `runCli`.
+ */
+function readSnapshotOrReport(
+  deps: CliDependencies,
+  absolutePath: string,
+  id: string,
+): string | null {
+  try {
+    const content = readSnapshot(absolutePath, id);
+    if (content === null) deps.error(`No snapshot ${id} for ${absolutePath}.`);
+    return content;
+  } catch (error) {
+    deps.error(`Could not read snapshot ${id}: ${describeError(error)}`);
+    return null;
+  }
+}
+
 function showSnapshot(
   deps: CliDependencies,
   absolutePath: string,
   id: string,
   json: boolean,
 ): number {
-  const content = readSnapshot(absolutePath, id);
-  if (content === null) {
-    deps.error(`No snapshot ${id} for ${absolutePath}.`);
-    return 1;
-  }
+  const content = readSnapshotOrReport(deps, absolutePath, id);
+  if (content === null) return 1;
 
   if (json) {
     emitJson(deps.log, { path: absolutePath, id, content });
@@ -2608,11 +2670,8 @@ function restoreSnapshot(
   id: string,
   json: boolean,
 ): number {
-  const content = readSnapshot(absolutePath, id);
-  if (content === null) {
-    deps.error(`No snapshot ${id} for ${absolutePath}.`);
-    return 1;
-  }
+  const content = readSnapshotOrReport(deps, absolutePath, id);
+  if (content === null) return 1;
 
   let preCapture: SnapshotSummary | null;
   try {
@@ -2995,6 +3054,7 @@ export async function runCli(
         deps.log(`PID: ${server.pid}`);
         deps.log(`Started: ${server.startedAt}`);
         deps.log(`State file: ${getServerStateFilePath(deps.env)}`);
+        deps.log(`Server log: ${getServerLogFilePath(deps.env)}`);
       } else {
         deps.log(
           `This server is not managed by ${getServerStateFilePath(deps.env)}.`,
