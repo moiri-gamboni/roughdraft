@@ -17,8 +17,6 @@ export interface SnapshotDiff {
   lines: DiffLine[];
   /** False when the two texts are identical, which is worth saying plainly. */
   changed: boolean;
-  /** At least one run hit the cap, so this is not the whole story. */
-  truncated: boolean;
 }
 
 /**
@@ -50,7 +48,6 @@ function kindOf(change: { added?: boolean; removed?: boolean }): DiffLineKind {
 export function diffSnapshot(before: string, after: string): SnapshotDiff {
   const lines: DiffLine[] = [];
   let changed = false;
-  let truncated = false;
 
   for (const change of diffLines(before, after)) {
     const kind = kindOf(change);
@@ -62,11 +59,8 @@ export function diffSnapshot(before: string, after: string): SnapshotDiff {
     }
 
     const elided = runLines.length - MAX_DIFF_RUN_LINES;
-    if (elided > 0) {
-      truncated = true;
-      lines.push({ kind: "elided", count: elided });
-    }
+    if (elided > 0) lines.push({ kind: "elided", count: elided });
   }
 
-  return { lines, changed, truncated };
+  return { lines, changed };
 }
