@@ -5,6 +5,7 @@ import {
   codeEditor,
   createMarkdownProject,
   documentSaveStatus,
+  fileConflictNotice,
   logE2eEvent,
   openMarkdownFile,
   readProjectFile,
@@ -179,5 +180,47 @@ test.describe("draft recovery", () => {
     expect(readProjectFile(projectDir, "diverge.md")).toBe(externalBody);
 
     logE2eEvent("draft-recovery.divergent-disk", { file: "diverge.md" });
+  });
+
+  test("keeps hearing the file after a restore loses a conflict", async ({
+    page,
+  }) => {
+    const filePath = writeProjectFile(projectDir, "deaf.md", ORIGINAL_BODY);
+    await blockSaves(page);
+    await openMarkdownFile(page, filePath, "code");
+    await expect(codeEditor(page)).toContainText("Original body.");
+
+    await appendInCodeEditor(page, "\nUnsent body.\n");
+    await expect(documentSaveStatus(page)).toHaveAttribute(
+      "aria-label",
+      RETRYING_LABEL,
+    );
+
+    // Come back with the unsent edits on the shelf and saves working again, so
+    // the restore below reaches the server and gets a real answer.
+    fs.writeFileSync(filePath, "# Recover\n\nSomeone else's body.\n");
+    await page.reload();
+    await allowSaves(page);
+    await expect(page.getByTestId("draft-restore-notice")).toBeVisible();
+
+    // A third writer lands while the offer is up. Disk changes are ignored in
+    // that state, on purpose, so the version the app holds is now stale and the
+    // restore it is about to send cannot land.
+    fs.writeFileSync(filePath, "# Recover\n\nA third body.\n");
+    await page.getByTestId("draft-restore-action-restore").click();
+    await expect(fileConflictNotice(page)).toContainText(
+      "This file changed on disk while you have unsaved edits.",
+    );
+
+    // The restore is over, so the watcher has to be listening again: this is
+    // the write the reviewer would otherwise never hear about.
+    fs.writeFileSync(filePath, "# Recover\n\nA fourth body.\n");
+    await expect(fileConflictNotice(page)).toContainText(
+      "Roughdraft found a newer version of this file on disk.",
+    );
+
+    logE2eEvent("draft-recovery.watcher-alive-after-lost-restore", {
+      file: "deaf.md",
+    });
   });
 });

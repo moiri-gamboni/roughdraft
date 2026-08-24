@@ -6,6 +6,7 @@ import { BackendUnavailableError, detectBackend } from "../src/detect-backend";
 import { DRAFT_KEY_PREFIX, DRAFT_SCHEMA } from "../src/draft-store";
 import { nextRetryDelayMs } from "../src/save-recovery";
 import {
+  type MarkdownFileChangeEvent,
   MarkdownFileConflictError,
   type Page,
   type StorageBackend,
@@ -39,6 +40,8 @@ class SilentEventSource {
 interface FakeBackend {
   backend: StorageBackend;
   saved: Array<{ content: string; expectedVersion?: string }>;
+  /** Report a change to whatever path the app actually subscribed to. */
+  emitDiskChange(version: string): void;
 }
 
 function createFakeBackend({
@@ -57,6 +60,10 @@ function createFakeBackend({
 } = {}): FakeBackend {
   const saved: FakeBackend["saved"] = [];
   let conflictsLeft = conflictOnFirstSaveWith === undefined ? 0 : 1;
+  let watcher: {
+    path: string;
+    onChange: (event: MarkdownFileChangeEvent) => void;
+  } | null = null;
   const page: Page = {
     id: "plan.md",
     title: "Plan",
@@ -66,7 +73,17 @@ function createFakeBackend({
 
   return {
     saved,
+    emitDiskChange(version) {
+      if (!watcher) throw new Error("Nothing is watching the document");
+      watcher.onChange({ path: watcher.path, exists: true, version });
+    },
     backend: {
+      watchMarkdownFile(relativePath, onChange) {
+        watcher = { path: relativePath, onChange };
+        return () => {
+          watcher = null;
+        };
+      },
       info: {
         kind,
         label: kind === "remote" ? "Remote document" : "Local files",
@@ -463,5 +480,27 @@ describe("resolving a save conflict", () => {
     expect(saved).toHaveLength(1);
     // The edits are still owed, so they must still be on the shelf.
     expect(localStorage.getItem(DRAFT_KEY)).not.toBeNull();
+  });
+
+  it("still reports later disk changes after the restore lost its conflict", async () => {
+    // The watcher stands down while a restore is in flight. A restore that
+    // conflicts is over, not in flight, so leaving it marked as pending would
+    // leave the reviewer blind to every later write for the rest of the
+    // session — the exact window an overwriting agent lands in.
+    const conflictNoticeSays = (text: string) =>
+      queryByTestId("file-conflict-notice")?.textContent?.includes(text) ??
+      false;
+
+    const fake = await bootWithSilentRestore({
+      conflictOnFirstSaveWith: "# Plan\n\nSomeone else.\n",
+    });
+    await waitFor(() => conflictNoticeSays("Save conflict"));
+
+    await act(async () => {
+      fake.emitDiskChange("v-external");
+      await Promise.resolve();
+    });
+
+    await waitFor(() => conflictNoticeSays("File changed on disk"));
   });
 });

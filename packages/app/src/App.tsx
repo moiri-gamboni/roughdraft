@@ -1939,6 +1939,10 @@ export function App() {
           return;
         }
 
+        // The restore is over, lost rather than landed. Leaving it marked as
+        // in flight would keep the watcher standing down for the rest of the
+        // session, so every later write to this file would go unreported.
+        setContentRestore(null);
         setDocumentDiskChangeState("conflict");
         throw error;
       }
@@ -2106,6 +2110,9 @@ export function App() {
     );
     documentDirtyRef.current = false;
     draftPersistence.noteSaveSuccess(content);
+    // Whatever was being restored is now what the file holds, so the watcher
+    // has no reason left to stand down.
+    setContentRestore(null);
     handleDocumentSaveStateChange("saved");
     setDocumentDiskChangeState("clean");
     setDocumentForceResetKey(nextForceResetKey(currentPath));
