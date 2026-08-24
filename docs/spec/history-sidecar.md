@@ -57,7 +57,7 @@ as the regular expression:
 
 `stamp` is a UTC instant to millisecond precision, in ISO 8601 form with `:` and `.` replaced by `-`. The digits after `p` are the writing process's pid. The grammar admits no `.`, no `/`, and no path separator of any kind, so an id can be joined to the leaf path without traversal.
 
-An id MUST NOT exceed 64 characters. The regular expression does not express this bound; a reader MUST apply it separately. The canonical id is 44 characters at a 7-digit pid.
+An id MUST NOT exceed 64 characters. The regular expression does not express this bound; a reader MUST apply it separately. The longest canonical id is 44 characters, at a 7-digit pid and the `replaced` trigger.
 
 A reader MUST reject an id whose `stamp` does not round-trip: `2026-02-30T…` is not an invalid date to an ISO 8601 parser, it is March 2nd, and accepting it would let a snapshot's parsed time disagree with its own name. Formatting the parsed instant back and comparing to the original id is sufficient.
 
@@ -71,7 +71,7 @@ date -u +%Y-%m-%dT%H-%M-%S-%3NZ
 
 Ids MUST be strictly increasing per document: a writer MUST NOT create a snapshot whose id sorts at or before the newest existing one, so that a pre-write `replaced` capture cannot sort after the write that caused it. A writer whose clock would produce such an id advances it to `max(now, newest + 1ms)`.
 
-The store advances explicitly. The hook does not compare against the newest id at all; it relies on its 90-second coalescing window to keep stamps apart, which a backwards clock step would defeat.
+The store advances explicitly. The hook does not compare against the newest id at all; it stamps from the clock. Its 90-second window keeps its own stamps apart within a burst of its own captures, but nothing keeps a hook stamp after a store stamp written in the same instant — the store advances into the future to break a tie, so a hook clock a few milliseconds behind produces an id that sorts earlier. A backwards clock step defeats both. The hook is a known non-conformance on this point.
 
 Because every conforming stamp is fixed-width and zero-padded, codepoint order on ids is chronological order. Tooling that determines which snapshot is newest or oldest by sorting file names MUST sort byte-wise. In a shell that means pinning the collation, since a UTF-8 locale's `sort` may ignore punctuation:
 
@@ -94,6 +94,10 @@ The trigger is the last segment of the id and records what caused the capture. T
 
 ## Capture rules
 
+A writer MUST NOT capture a file that lies inside a sidecar, whatever its depth: a snapshot is not a document, and capturing one starts a history of the history. The segment comparison is case-insensitive, so a shifted spelling on a case-insensitive filesystem cannot walk past it.
+
+A writer MAY otherwise restrict which documents it captures, and the two implementations restrict differently. The store captures every document written through it. The hook captures only a `*.md` file that already exists and contains at least one CriticMarkup marker (`{>>`, `{++`, `{--`, `{~~`, `{==`), on a `Write` or `Edit` tool call — so a plain Markdown document with no review markers in it is never snapshotted by the hook, however many times an agent overwrites it.
+
 A capture records content as the newest snapshot of a document, subject to three rules applied in this order.
 
 **Content-only dedup.** A writer MUST NOT store content identical to that of the newest snapshot. The comparison is on content alone; the trigger is not part of it. Only the newest snapshot is consulted, so identical content may appear more than once in a history if something else was captured in between.
@@ -103,17 +107,17 @@ A capture records content as the newest snapshot of a document, subject to three
 **Coalescing.** A writer MAY skip a capture when the newest snapshot is younger than 90 seconds AND carries the same trigger the writer is about to use, so that an edit burst cannot evict the whole history. A snapshot of a different trigger MUST NOT suppress a capture, whatever its age, and a writer MUST NOT skip a capture when the leaf is empty.
 
 - The store skips only a `save` whose newest snapshot is also a `save`, measured from the newest snapshot's id. A `replaced`, `review`, or `hook` capture is never skipped.
-- The hook skips its `hook` capture only when the newest snapshot is itself a `hook` snapshot, measured from the file's mtime.
+- The hook skips its `hook` capture only when the newest snapshot is itself a `hook` snapshot, measured from the newest snapshot's mtime.
 
-A history therefore records at most one state per 90 seconds per writer within a same-trigger burst, and intermediate states within such a burst are not recoverable.
+A history therefore records at most one state per 90 seconds per trigger, and intermediate states within such a burst are not recoverable. Coalescing keys on the trigger, not on the writing process, so writers that share a trigger fold into each other: in this repository the server, the CLI's remote pump and both MCP tools all write `save`. An agent's revision landing within 90 seconds of a browser autosave therefore leaves no snapshot of its own, and if the next save quotes a refreshed version the agent's intermediate state never enters the history at all. This is accepted: the window exists to stop an edit burst evicting the whole ring, and the alternative is a new trigger, which is a format change.
 
 ## Retention
 
-A leaf directory holds at most 50 snapshots (`MAX_SNAPSHOTS_PER_DOCUMENT`).
+A writer MUST trim a leaf to at most 50 snapshots (`MAX_SNAPSHOTS_PER_DOCUMENT`) after a capture that wrote a file.
 
-Eviction is oldest-first, except that **the newest `review` entry is never evicted**. The pin is part of the format, not an implementation detail: a writer that trims to 50 without honouring it deletes the reviewed state. Exactly one entry is pinned. Where several `review` entries exist, only the newest is protected; the rest are ordinary eviction candidates.
+Eviction is oldest-first, except that **the newest `review` entry is never evicted**. Exactly one entry is pinned: the newest `review`. Where several `review` entries exist, only the newest is protected; the rest are ordinary eviction candidates.
 
-The cap is enforced lazily, after a capture that actually wrote a file. A capture suppressed by dedup or coalescing performs no eviction, so a leaf that is already over the cap stays over it until the next real capture. The cap is not an invariant a reader may rely on.
+A capture suppressed by dedup or coalescing wrote no file, so it evicts nothing: a leaf already over the cap stays over it until the next real capture. The cap is therefore not an invariant a reader may rely on.
 
 Files in the leaf whose names are not conforming ids are neither listed as snapshots nor evicted. A reader SHOULD report their count; a non-zero count means either a hand-placed file or a writer whose ids have drifted from this grammar.
 
@@ -129,14 +133,16 @@ A repository whose working tree holds documents MAY additionally ignore `.roughd
 
 A writer MUST refuse to create or write through a symlink at any level of the sidecar — root, version directory, or leaf — and MUST make no snapshot rather than follow one. Following one grants whoever planted it file creation in a directory of their choosing, triggered by whoever next edits the document.
 
-A reader MUST NOT list a leaf that is not a directory, and MUST NOT read a snapshot entry that is not a regular file. Opening a snapshot with `O_NOFOLLOW`, and treating `ELOOP` as a missing snapshot, satisfies the second requirement.
+A reader MUST NOT list through a sidecar level that is not a directory — root, version directory, or leaf, the same three the writer refuses — and MUST NOT read a snapshot entry that is not a regular file. Checking one level only leaves a link planted above it serving chosen content as a document's history. Opening a snapshot with `O_NOFOLLOW`, and treating `ELOOP` as a missing snapshot, satisfies the second requirement.
 
 ## Writing
 
-Documents and snapshots written through the store are written atomically: content goes to a fresh temporary in the target's own directory, which is then renamed over the target.
+Snapshots written through the store are written atomically: content goes to a fresh temporary in the target's own directory, which is then renamed over the target. Documents are written the same way, with two exceptions below under which the store writes in place instead.
 
 - The temporary is named `.<target name>.tmp-<16 hex digits>` and is created `O_EXCL`, so a planted path is an error rather than something written through. The name deliberately does not end in `.md`, so an abandoned temporary is never mistaken for a snapshot. Anything enumerating a document's directory should expect such files transiently.
-- Renaming over a symlinked target **replaces the link** instead of writing through it, and **breaks a hard link** to the target.
+- Renaming over a symlinked target would **replace the link**, and over a hard-linked one would **break the link**. A document is the file the user named, so the store writes in place when the target is a symlink or has more than one link, preserving both. A snapshot never meets this case: its target is a fresh id that does not exist yet.
+- Creating a temporary needs write permission on the *directory*, which a plain write to an already-writable file does not. Where the directory refuses the temporary (`EACCES`, `EPERM`, `EROFS`) the store writes the document in place rather than refusing a save that would otherwise have succeeded.
+- An in-place write is not atomic: a concurrent reader may see a partial document, and a watcher may wake more than once. That is the cost of not silently detaching the file from the name the user opened.
 - There is no `fsync`. The write is atomic against concurrent readers, not against a crash: after a power loss a renamed file may be present with unflushed content. Snapshots are a recovery aid; the document itself remains the primary copy.
 - Files created through the store have mode `0600`. Replacing an existing document preserves that document's mode; only the temporary is private. File mode is not part of this format, and the two implementations differ: the hook copies snapshots with `cp`, which gives them the document's mode.
 
@@ -154,7 +160,7 @@ Both implementations are conforming; these are the places where they answer diff
 
 | Point | The store (and this repository's server routes) | The hook |
 |---|---|---|
-| Documents recognised | Any path ending in `.md`, compared case-insensitively | Only a path matching `*.md` |
+| Documents recognised | Any path ending in `.md`, compared case-insensitively | Only an existing `*.md` file that already carries a CriticMarkup marker, on a `Write`/`Edit` tool call |
 | Coalescing applies to | A `save` behind a `save` | A `hook` behind a `hook` |
 | Coalescing measures | The newest snapshot's id, to the millisecond | The newest snapshot's mtime, to the second |
 | Increasing ids | Advanced against the newest id | Left to the clock |
@@ -169,7 +175,6 @@ Stem derivation is case-sensitive in both. A document named `notes.MD` is conseq
 Non-normative. The sidecar is reached through:
 
 - `GET /api/markdown-file/history` and `GET /api/markdown-file/history/:id` — list a document's snapshots and read one.
+- The in-app history dialog — lists versions, shows one, diffs it against the open document, and restores it, over the two routes above.
 - `roughdraft history <path>` — list, print, and restore, with no running server. See the CLI reference in [README.md](../../README.md).
-- The hook — writes `hook` snapshots before an agent's write; never reads.
-
-Server routes refuse any path containing a `.roughdraft-history` segment, compared case-insensitively, so a snapshot cannot be opened, saved, or reviewed as a document.
+- The hook — writes `hook` snapshots before an agent's write; exposes no way to read one back.
