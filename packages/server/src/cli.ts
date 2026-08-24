@@ -15,6 +15,7 @@ import {
   historyDirFor,
   listSnapshots,
   readSnapshot,
+  refusesHistorySegment,
   type SnapshotSummary,
 } from "./checkpoint-store.js";
 import {
@@ -2553,6 +2554,16 @@ function runHistory(
   }
 
   const absolutePath = path.resolve(deps.cwd, targetPath);
+  // The same refusal the routes and the MCP tools apply. A snapshot has no
+  // history of its own, so without this the command answers an empty listing
+  // for a sidecar that was never going to exist, and `--restore` would nest a
+  // history inside a history.
+  if (refusesHistorySegment(absolutePath)) {
+    deps.error(
+      `That path is inside a document's history, not a document: ${absolutePath}`,
+    );
+    return USAGE_ERROR;
+  }
   if (options.showId !== undefined) {
     return showSnapshot(deps, absolutePath, options.showId, json);
   }
