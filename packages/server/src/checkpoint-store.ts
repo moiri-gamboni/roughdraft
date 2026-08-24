@@ -225,7 +225,7 @@ export function commitDocumentWrite(
   options: CommitDocumentWriteOptions,
 ): CommitDocumentWriteResult {
   const preCapture = captureReplacedContent(documentPath, options.priorContent);
-  atomicWriteFileSync(documentPath, nextContent);
+  writeDocumentFileSync(documentPath, nextContent);
   return {
     preCapture,
     postCapture: capturePostWrite(documentPath, nextContent, options.trigger),
@@ -254,40 +254,57 @@ function capturePostWrite(
 }
 
 /**
- * Writes via a fresh temporary in the same directory, so a reader never sees a
- * half-written document and `fs.watchFile` sees exactly one change. The
- * temporary is created `O_EXCL` under an unguessable name: a planted path is an
- * error, never something we write through. Renaming over a symlinked target
- * replaces the link rather than following it.
+ * How a *document* is written, as opposed to a snapshot: the file the reviewer
+ * named must stay the file they named, so two cases give up atomicity rather
+ * than damage the target.
+ *
+ * Snapshots deliberately do not come through here, and a snapshot id being hard
+ * to guess is not the reason. The monotonic clamp stamps the next capture at
+ * `newest + 1ms`, so one planted far-future id fixes the next id exactly, and
+ * the pid in it is published in `server.json`. A snapshot target therefore
+ * *can* pre-exist as a planted symlink, and writing through one is arbitrary
+ * file creation triggered by whoever next edits the document.
  */
-export function atomicWriteFileSync(targetPath: string, content: string): void {
-  // A rename would replace a symlink with a regular file and break a hard
-  // link, so the name the caller was given would quietly stop being the file
-  // they meant to edit. A snapshot never takes this path: its target is a fresh
-  // id that does not exist yet.
+export function writeDocumentFileSync(
+  targetPath: string,
+  content: string,
+): void {
+  // A rename would replace a symlink with a regular file and break a hard link,
+  // so the name the caller was given would quietly stop being the file they
+  // meant to edit, while the write reported success.
   const target = lstatOrNull(targetPath);
   if (target?.isSymbolicLink() || (target?.isFile() && target.nlink > 1)) {
     fs.writeFileSync(targetPath, content);
     return;
   }
 
+  try {
+    atomicWriteFileSync(targetPath, content);
+  } catch (error) {
+    // A temporary needs write permission on the *directory*, which a plain
+    // write to an already-writable file does not. Refusing here would refuse a
+    // save that succeeded before this writer existed. If the plain write cannot
+    // land either, its own error propagates.
+    if (!IN_PLACE_WRITE_CODES.includes(errorCode(error) ?? "")) throw error;
+    fs.writeFileSync(targetPath, content);
+  }
+}
+
+/**
+ * Writes via a fresh temporary in the same directory, so a reader never sees a
+ * half-written file and `fs.watchFile` sees exactly one change. The temporary
+ * is created `O_EXCL` under an unguessable name: a planted path is an error,
+ * never something we write through. Renaming over a symlinked target replaces
+ * the link rather than following it.
+ */
+export function atomicWriteFileSync(targetPath: string, content: string): void {
   const suffix = crypto.randomBytes(8).toString("hex");
   const tempPath = path.join(
     path.dirname(targetPath),
     `.${path.basename(targetPath)}.tmp-${suffix}`,
   );
 
-  let handle: number;
-  try {
-    handle = fs.openSync(tempPath, "wx", 0o600);
-  } catch (error) {
-    // A temporary needs write permission on the directory, which a plain write
-    // to an already-writable file does not. Failing here would refuse a save
-    // that succeeded before this writer existed.
-    if (!IN_PLACE_WRITE_CODES.includes(errorCode(error) ?? "")) throw error;
-    fs.writeFileSync(targetPath, content);
-    return;
-  }
+  const handle = fs.openSync(tempPath, "wx", 0o600);
   try {
     try {
       fs.writeFileSync(handle, content);

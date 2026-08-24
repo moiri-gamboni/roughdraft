@@ -1119,10 +1119,7 @@ function printCommandHelp(
     log(
       "A restore keeps the content it replaces as a snapshot, so it can be undone.",
     );
-    log(
-      "A snapshot id can change when a review pins it; re-run `roughdraft history",
-    );
-    log("<path>` if an id is rejected.");
+    log("A review can rename a snapshot id, so re-list if an id is rejected.");
     return;
   }
 
