@@ -22,19 +22,19 @@ export interface SnapshotSummary {
   bytes: number;
 }
 
-export type SnapshotListing =
+type SnapshotListing =
   | { status: "absent" }
   | { status: "error"; reason: string }
   /** `unreadable` counts `.md` files whose name is not a snapshot id. */
   | { status: "ok"; snapshots: SnapshotSummary[]; unreadable: number };
 
-export interface CommitDocumentWriteOptions {
+interface CommitDocumentWriteOptions {
   /** What the caller believes is on disk; anything else is captured first. */
   priorContent?: string;
   trigger: SnapshotTrigger;
 }
 
-export interface CommitDocumentWriteResult {
+interface CommitDocumentWriteResult {
   preCapture: SnapshotSummary | null;
   postCapture: SnapshotSummary | null;
 }
