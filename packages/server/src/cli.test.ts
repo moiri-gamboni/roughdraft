@@ -16,6 +16,7 @@ import {
   createDefaultOpenUrl,
   ensureServerRunning,
   getServerStateFilePath,
+  readOriginContent,
   runCli,
 } from "./cli";
 import { createApp } from "./index";
@@ -152,6 +153,7 @@ describe("cli", () => {
     const errors: string[] = [];
     let lastOpenedUrl: string | null = null;
     let spawnCount = 0;
+    let lastSpawnOptions: Record<string, unknown> | null = null;
 
     const deps = createCliDependencies({
       env: {
@@ -186,7 +188,9 @@ describe("cli", () => {
         return "disabled";
       },
       resolveUpdateStatus: noUpdateStatus,
-      spawnServerProcess: async ({ port, projectDir: nextProjectDir }) => {
+      spawnServerProcess: async (spawnOptions) => {
+        lastSpawnOptions = spawnOptions;
+        const { port, projectDir: nextProjectDir } = spawnOptions;
         spawnCount += 1;
         const pid = nextPid;
         nextPid += 1;
@@ -220,6 +224,7 @@ describe("cli", () => {
       errors,
       getLastOpenedUrl: () => lastOpenedUrl,
       getSpawnCount: () => spawnCount,
+      getSpawnOptions: () => lastSpawnOptions,
     };
   }
 
@@ -896,6 +901,34 @@ describe("cli", () => {
     expect(test.getSpawnCount()).toBe(0);
     expect(test.errors).toContain(`Path not found: ${missingPath}`);
     expect(test.getLastOpenedUrl()).toBeNull();
+  });
+
+  it("tells a human where the background server writes its output", async () => {
+    // The managed server is detached, so everything it and the history store
+    // report goes to this file or nowhere at all.
+    const test = createTestDependencies();
+    await ensureServerRunning(test.deps, { projectDir });
+    const expectedLogPath = path.join(stateDir, "server.log");
+
+    const statusExitCode = await runCli(["status"], test.deps);
+    const doctorExitCode = await runCli(["doctor"], test.deps);
+
+    expect(statusExitCode).toBe(0);
+    expect(doctorExitCode).toBe(0);
+    expect(test.logs).toContain(`Server log: ${expectedLogPath}`);
+    expect(
+      test.logs.filter((line) => line === `Server log: ${expectedLogPath}`),
+    ).toHaveLength(2);
+  });
+
+  it("points the spawned server's output at the log file beside its state", async () => {
+    const test = createTestDependencies();
+
+    await ensureServerRunning(test.deps, { projectDir });
+
+    expect(test.getSpawnOptions()).toMatchObject({
+      logPath: path.join(stateDir, "server.log"),
+    });
   });
 
   it("stops the running server and removes persisted state", async () => {
@@ -3102,6 +3135,52 @@ describe("runCli open in remote mode reconnects", () => {
   });
 });
 
+describe("readOriginContent", () => {
+  let tempDir: string;
+  let filePath: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-origin-"));
+    filePath = path.join(tempDir, "draft.md");
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("reads the bytes on disk", () => {
+    fs.writeFileSync(filePath, "on disk\n");
+
+    expect(readOriginContent(filePath)).toEqual({
+      status: "read",
+      content: "on disk\n",
+    });
+  });
+
+  it("calls a document that has gone missing", () => {
+    expect(readOriginContent(filePath)).toEqual({ status: "missing" });
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "separates a document it cannot read from one that changed",
+    () => {
+      // Folding this into "missing" makes the pump warn that the file changed
+      // outside Roughdraft, naming a write that never happened.
+      fs.writeFileSync(filePath, "on disk\n");
+      fs.chmodSync(filePath, 0o000);
+
+      try {
+        const result = readOriginContent(filePath);
+
+        expect(result.status).toBe("unreadable");
+        expect(result).toMatchObject({ reason: expect.stringContaining("EACCES") });
+      } finally {
+        fs.chmodSync(filePath, 0o600);
+      }
+    },
+  );
+});
+
 describe("runCli history", () => {
   let tempDir: string;
   let projectDir: string;
@@ -3286,6 +3365,27 @@ describe("runCli history", () => {
       "2026-01-01T00-00-00-000Z--p1--save",
     );
   });
+
+  it.skipIf(process.getuid?.() === 0).each(["--show", "--restore"])(
+    "reports an unreadable snapshot rather than throwing out of %s",
+    async (flag: string) => {
+      // `restoreSnapshot` already writes a careful message when the *write*
+      // fails; a read that fails printed a Node stack trace instead.
+      const saved = commitDocumentWrite(filePath, "one\n", { trigger: "save" });
+      const id = saved.postCapture?.id ?? "";
+      const snapshotFile = path.join(historyDirFor(filePath), `${id}.md`);
+      fs.chmodSync(snapshotFile, 0o000);
+
+      try {
+        const run = await runHistory([filePath, flag, id]);
+
+        expect(run.exitCode).toBe(1);
+        expect(run.errors.join("\n")).toContain(id);
+      } finally {
+        fs.chmodSync(snapshotFile, 0o600);
+      }
+    },
+  );
 
   it("refuses a snapshot id that is a path rather than an id", async () => {
     commitDocumentWrite(filePath, "one\n", { trigger: "save" });
