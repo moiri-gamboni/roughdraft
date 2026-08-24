@@ -661,9 +661,12 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
 
     const listing = listSnapshots(target.absolutePath);
     if (listing.status === "error") {
-      res
-        .status(500)
-        .json({ error: "Could not read history", reason: listing.reason });
+      // These routes are unauthenticated and the reason is a raw fs message
+      // carrying absolute paths, so it stays in the server log.
+      console.warn(
+        `[roughdraft:history] could not list ${target.absolutePath}: ${listing.reason}`,
+      );
+      res.status(500).json({ error: "History unavailable" });
       return;
     }
     // No history is an empty history, not an error: a document nobody has saved
