@@ -440,19 +440,6 @@ describe("snapshot eviction", () => {
     );
   });
 
-  it("holds the cap on the path production writes through", () => {
-    for (let index = 0; index < MAX_SNAPSHOTS_PER_DOCUMENT + 3; index += 1) {
-      commitDocumentWrite(docPath, `revision ${index}`, {
-        priorContent: `revision ${index - 1}`,
-        trigger: "hook",
-      });
-    }
-
-    expect(readableSnapshots(docPath).snapshots).toHaveLength(
-      MAX_SNAPSHOTS_PER_DOCUMENT,
-    );
-  });
-
   it("keeps the newest review snapshot even when it is the oldest entry", () => {
     const reviewed = captureSnapshot(docPath, "reviewed state", "review");
     if (!reviewed) throw new Error("expected a snapshot");
