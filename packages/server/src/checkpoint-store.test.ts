@@ -329,27 +329,24 @@ describe("captureSnapshot", () => {
     }
   });
 
-  it.skipIf(asRoot)(
-    "refuses to capture into a history it cannot list",
-    () => {
-      // A leaf that is writable but not readable makes every capture look like
-      // the first one: no dedup, no coalescing and no pruning, so the cap stops
-      // holding and the directory grows a snapshot per keystroke pause.
-      captureSnapshot(docPath, "first", "save");
-      const leaf = historyDirFor(docPath);
-      fs.chmodSync(leaf, 0o300);
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it.skipIf(asRoot)("refuses to capture into a history it cannot list", () => {
+    // A leaf that is writable but not readable makes every capture look like
+    // the first one: no dedup, no coalescing and no pruning, so the cap stops
+    // holding and the directory grows a snapshot per keystroke pause.
+    captureSnapshot(docPath, "first", "save");
+    const leaf = historyDirFor(docPath);
+    fs.chmodSync(leaf, 0o300);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-      try {
-        expect(captureSnapshot(docPath, "second", "save")).toBeNull();
-        expect(warn).toHaveBeenCalled();
-      } finally {
-        fs.chmodSync(leaf, 0o700);
-      }
+    try {
+      expect(captureSnapshot(docPath, "second", "save")).toBeNull();
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      fs.chmodSync(leaf, 0o700);
+    }
 
-      expect(contents(docPath)).toEqual(["first"]);
-    },
-  );
+    expect(contents(docPath)).toEqual(["first"]);
+  });
 
   it("rethrows a programmer error rather than degrading to no history", () => {
     // A blanket catch that swallows everything hides a broken refactor behind
@@ -609,31 +606,42 @@ describe("readSnapshot", () => {
   });
 
   it.each([
-    { level: "sidecar root", link: [".roughdraft-history"], inner: ["v1", "notes"] },
-    { level: "version directory", link: [".roughdraft-history", "v1"], inner: ["notes"] },
-  ])(
-    "refuses to list through a symlinked $level",
-    ({ link, inner }: { link: string[]; inner: string[] }) => {
-      // The write path refuses a symlink at all three levels; a listing that
-      // only checked the leaf would still serve a planted link's contents.
-      const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "rd-elsewhere-"));
-      try {
-        const leaf = path.join(elsewhere, ...inner);
-        fs.mkdirSync(leaf, { recursive: true });
-        fs.writeFileSync(
-          path.join(leaf, "2026-08-24T10-11-12-345Z--p1--save.md"),
-          "planted",
-        );
-        const linkPath = path.join(projectDir, ...link);
-        fs.mkdirSync(path.dirname(linkPath), { recursive: true });
-        fs.symlinkSync(elsewhere, linkPath);
-
-        expect(listSnapshots(docPath).status).toBe("error");
-      } finally {
-        fs.rmSync(elsewhere, { recursive: true, force: true });
-      }
+    {
+      level: "sidecar root",
+      link: [".roughdraft-history"],
+      inner: ["v1", "notes"],
     },
-  );
+    {
+      level: "version directory",
+      link: [".roughdraft-history", "v1"],
+      inner: ["notes"],
+    },
+  ])("refuses to list through a symlinked $level", ({
+    link,
+    inner,
+  }: {
+    link: string[];
+    inner: string[];
+  }) => {
+    // The write path refuses a symlink at all three levels; a listing that
+    // only checked the leaf would still serve a planted link's contents.
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "rd-elsewhere-"));
+    try {
+      const leaf = path.join(elsewhere, ...inner);
+      fs.mkdirSync(leaf, { recursive: true });
+      fs.writeFileSync(
+        path.join(leaf, "2026-08-24T10-11-12-345Z--p1--save.md"),
+        "planted",
+      );
+      const linkPath = path.join(projectDir, ...link);
+      fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+      fs.symlinkSync(elsewhere, linkPath);
+
+      expect(listSnapshots(docPath).status).toBe("error");
+    } finally {
+      fs.rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("commitDocumentWrite", () => {
