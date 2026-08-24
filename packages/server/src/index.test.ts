@@ -1199,6 +1199,25 @@ describe("createApp", () => {
   });
 
   describe("error handling", () => {
+    it("keeps a malformed body a client error rather than a server one", async () => {
+      // `express.json` marks its own failures with a 4xx `status`. Flattening
+      // those to 500 tells the reviewer the server broke when in fact their
+      // request did — and the same path carries the over-limit 413 that a
+      // large base64 asset upload produces.
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Draft\n");
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      const response = await request(app)
+        .put("/api/markdown-file")
+        .query({ projectPath: projectDir, path: "draft.md" })
+        .set("Content-Type", "application/json")
+        .send('{"content": ');
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ error: "Bad request" });
+      expect(response.text).not.toContain(projectDir);
+    });
+
     it("answers a generic 400 for an id that cannot be decoded", async () => {
       const { app } = createApp({ homeDir, staticDirPath: projectDir });
 

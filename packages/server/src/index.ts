@@ -307,6 +307,14 @@ function ensureProjectPath(
   return absolute;
 }
 
+/** The 4xx an error carries when middleware refused the request, else `null`. */
+function clientErrorStatus(error: unknown): number | null {
+  const carried = error as { status?: unknown; statusCode?: unknown };
+  const status = carried.status ?? carried.statusCode;
+  if (typeof status !== "number" || status < 400 || status >= 500) return null;
+  return status;
+}
+
 function pageFilePathFromId(projectDir: string, id: string): string | null {
   const absolutePath = ensureProjectPath(projectDir, `${id}.md`);
   // Express matches `:id` against the encoded path and decodes afterwards, so
@@ -1397,6 +1405,16 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       // caller's malformed request rather than anything wrong here.
       if (error instanceof URIError) {
         res.status(400).json({ error: "Bad request" });
+        return;
+      }
+      // `express.json` marks its own refusals with a 4xx status — a malformed
+      // body is 400, one over the size limit 413. Answering 500 for those
+      // would blame the server for the request, and an asset upload big
+      // enough to cross the limit is a real thing a reviewer does. The body
+      // stays the fixed string, so honouring the status discloses nothing.
+      const status = clientErrorStatus(error);
+      if (status !== null) {
+        res.status(status).json({ error: "Bad request" });
         return;
       }
       res.status(500).json({ error: "Internal server error" });
