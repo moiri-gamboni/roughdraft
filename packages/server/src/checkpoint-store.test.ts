@@ -616,6 +616,24 @@ describe("readSnapshot", () => {
     expect(ids(docPath)).toEqual([]);
   });
 
+  it("refuses to read through a symlinked sidecar root", () => {
+    // The listing refuses a planted root, but the read route never lists
+    // first, so this would serve chosen content as the document's history —
+    // and `--restore` puts that content back into the reviewer's document.
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "rd-elsewhere-"));
+    try {
+      const leaf = path.join(elsewhere, "v1", "notes");
+      fs.mkdirSync(leaf, { recursive: true });
+      const planted = "2026-08-24T10-11-12-345Z--p1--save";
+      fs.writeFileSync(path.join(leaf, `${planted}.md`), "attacker content");
+      fs.symlinkSync(elsewhere, path.join(projectDir, ".roughdraft-history"));
+
+      expect(readSnapshot(docPath, planted)).toBeNull();
+    } finally {
+      fs.rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
   it("refuses to list through a symlinked history leaf directory", () => {
     // The write path refuses a symlinked leaf; a listing that followed one
     // would let a planted link serve chosen content as this document's history.

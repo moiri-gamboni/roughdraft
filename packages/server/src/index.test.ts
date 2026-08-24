@@ -555,7 +555,43 @@ describe("createApp", () => {
       expect(JSON.stringify(response.body)).not.toContain(projectDir);
     });
 
-    it("does not leak filesystem detail when a snapshot cannot be read", async () => {
+    it.skipIf(process.getuid?.() === 0)(
+      "does not leak filesystem detail when a snapshot cannot be read",
+      async () => {
+        // An unreadable snapshot file, rather than a planted non-directory
+        // level: the latter is now answered as "not there" before the open,
+        // so this drives the errno that genuinely still reaches the route.
+        fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+        const { app } = createApp({ homeDir, staticDirPath: projectDir });
+        await save(app, "# Saved\n");
+        const id = snapshotsOfDraft()[0].id;
+        const snapshotFile = path.join(
+          projectDir,
+          ".roughdraft-history",
+          "v1",
+          "draft",
+          `${id}.md`,
+        );
+        fs.chmodSync(snapshotFile, 0o000);
+
+        try {
+          const response = await request(app)
+            .get(`/api/markdown-file/history/${id}`)
+            .query({ projectPath: projectDir, path: "draft.md" });
+
+          expect(response.status).toBe(500);
+          expect(response.body).toEqual({ error: "Snapshot unavailable" });
+          // Left to Express, this answers with a stack trace naming real paths.
+          expect(response.text).not.toContain(projectDir);
+        } finally {
+          fs.chmodSync(snapshotFile, 0o600);
+        }
+      },
+    );
+
+    it("answers a snapshot read through a planted non-directory level as absent", async () => {
+      // The same three-level refusal the listing applies, arriving at the
+      // reader's own vocabulary: `readSnapshot` says "not there".
       fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
       fs.mkdirSync(path.join(projectDir, ".roughdraft-history", "v1"), {
         recursive: true,
@@ -570,9 +606,7 @@ describe("createApp", () => {
         .get("/api/markdown-file/history/2026-08-24T14-28-49-132Z--p1234--save")
         .query({ projectPath: projectDir, path: "draft.md" });
 
-      expect(response.status).toBe(500);
-      expect(response.body).toEqual({ error: "Snapshot unavailable" });
-      // Left to Express, this answers with a stack trace naming real paths.
+      expect(response.status).toBe(404);
       expect(response.text).not.toContain(projectDir);
     });
 
@@ -591,6 +625,35 @@ describe("createApp", () => {
       expect(response.body).toEqual({ error: "Snapshot not found" });
       // A refusal that served the file under a 404 would pass on status alone.
       expect(response.text).not.toContain("# Secret");
+    });
+
+    it("refuses to serve a snapshot through a symlinked sidecar root", async () => {
+      // The list route refuses this; the read route never lists first, so
+      // without its own check a planted root serves chosen content as the
+      // document's history.
+      fs.writeFileSync(path.join(projectDir, "draft.md"), "# Original\n");
+      const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "rd-planted-"));
+      const { app } = createApp({ homeDir, staticDirPath: projectDir });
+
+      try {
+        const leaf = path.join(elsewhere, "v1", "draft");
+        fs.mkdirSync(leaf, { recursive: true });
+        const planted = "2026-08-24T10-11-12-345Z--p1--save";
+        fs.writeFileSync(path.join(leaf, `${planted}.md`), "# Attacker\n");
+        fs.symlinkSync(
+          elsewhere,
+          path.join(projectDir, ".roughdraft-history"),
+        );
+
+        const response = await request(app)
+          .get(`/api/markdown-file/history/${planted}`)
+          .query({ projectPath: projectDir, path: "draft.md" });
+
+        expect(response.status).toBe(404);
+        expect(response.text).not.toContain("# Attacker");
+      } finally {
+        fs.rmSync(elsewhere, { recursive: true, force: true });
+      }
     });
 
     it("refuses a snapshot reached as a page id through an encoded slash", async () => {
