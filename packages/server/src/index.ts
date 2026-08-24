@@ -8,7 +8,12 @@ import {
   appendRoughdraftDocumentComment,
   extractRoughdraftReviewIndex,
 } from "@roughdraft/rfm";
-import express, { type Express, type Request, type Response } from "express";
+import express, {
+  type Express,
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
 import {
   captureSnapshot,
   commitDocumentWrite,
@@ -196,18 +201,9 @@ function titleFromContent(content: string, fallback: string): string {
   return firstLine.replace(/^#*\s*/, "").trim() || fallback;
 }
 
-function fileVersionFromContent(
-  stats: fs.Stats,
-  content: string | Buffer,
-): string {
+function fileVersionFromContent(stats: fs.Stats, content: string): string {
   const contentHash = crypto.createHash("sha256").update(content).digest("hex");
   return `${stats.mtimeMs}:${stats.size}:${contentHash}`;
-}
-
-function fileVersionFromFile(filePath: string): string {
-  const content = fs.readFileSync(filePath);
-  const stats = fs.statSync(filePath);
-  return fileVersionFromContent(stats, content);
 }
 
 /**
@@ -215,20 +211,23 @@ function fileVersionFromFile(filePath: string): string {
  * both — a version check followed by a separate read could compare against one
  * state and then write over another.
  *
- * A sibling of `fileVersionFromFile` rather than a replacement: it hashes the
- * same Buffer, so the two agree on versions, while callers that only want the
- * version keep paying for one decode less.
+ * Every version in the server comes from here or from `markdownPageFromFile`,
+ * and both hash the *decoded* string. Hashing raw bytes anywhere would make a
+ * document containing invalid UTF-8 unsaveable: it decodes to U+FFFD, so the
+ * version a client is handed and the version its save is checked against stop
+ * matching, and every version-quoting save 409s against its own version.
  */
 function readFileWithVersion(filePath: string): {
   content: string;
   version: string;
 } {
-  const buffer = fs.readFileSync(filePath);
+  const content = fs.readFileSync(filePath, "utf-8");
   const stats = fs.statSync(filePath);
-  return {
-    content: buffer.toString("utf-8"),
-    version: fileVersionFromContent(stats, buffer),
-  };
+  return { content, version: fileVersionFromContent(stats, content) };
+}
+
+function fileVersionFromFile(filePath: string): string {
+  return readFileWithVersion(filePath).version;
 }
 
 /**
@@ -307,8 +306,28 @@ function ensureProjectPath(
   return absolute;
 }
 
+/**
+ * Snapshots are `.md` files inside the project, so without this they would be
+ * openable, savable and reviewable as documents — and each save would start a
+ * history of the history.
+ *
+ * Case-insensitively, because on a case-insensitive filesystem a shifted
+ * segment still resolves to the real sidecar, and the routes treat the `.md`
+ * extension the same way.
+ */
+function refusesHistorySegment(absolutePath: string): boolean {
+  return absolutePath
+    .split(path.sep)
+    .some((segment) => segment.toLowerCase() === HISTORY_DIR_NAME);
+}
+
 function pageFilePathFromId(projectDir: string, id: string): string | null {
-  return ensureProjectPath(projectDir, `${id}.md`);
+  const absolutePath = ensureProjectPath(projectDir, `${id}.md`);
+  // Express matches `:id` against the encoded path and decodes afterwards, so
+  // `%2F` puts a whole sidecar path in here without ever passing through the
+  // document resolver that would otherwise refuse it.
+  if (!absolutePath || refusesHistorySegment(absolutePath)) return null;
+  return absolutePath;
 }
 
 function nextAssetPath(projectDir: string, filename: string): string {
@@ -455,6 +474,10 @@ function listProjectTree(projectDir: string): ProjectTreeListing {
       const absolutePath = path.join(dir, entry.name);
 
       if (entry.isDirectory()) {
+        // A document's history is an implementation detail of the document
+        // beside it, not part of the project a reviewer browses. This is the
+        // one enumerator that recurses, so it is the one that would find it.
+        if (entry.name.toLowerCase() === HISTORY_DIR_NAME) continue;
         paths.push(toCanonicalRelativePath(projectDir, absolutePath, true));
         visitDirectory(absolutePath);
         continue;
@@ -584,19 +607,11 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       return null;
     }
 
-    // Snapshots are `.md` files inside the project, so without this they would
-    // be openable, savable and reviewable as documents — and each save would
-    // start a history of the history. The history routes are the only way to
-    // reach snapshot bytes. Refusing here covers every route that resolves a
-    // document path, which is why the dead directory enumerators need no filter.
-    // Case-insensitively, because on a case-insensitive filesystem a shifted
-    // segment still resolves to the real sidecar, and the route above already
-    // treats the `.md` extension the same way.
-    if (
-      absolutePath
-        .split(path.sep)
-        .some((segment) => segment.toLowerCase() === HISTORY_DIR_NAME)
-    ) {
+    // This covers every route that resolves a document path; the pages routes
+    // resolve their own and refuse the same segment there. It is not a claim
+    // that snapshot bytes are unreachable — `GET /api/files` serves any
+    // in-project path, and the MCP tools reach documents by their own route.
+    if (refusesHistorySegment(absolutePath)) {
       res.status(404).json({ error: "Markdown file not found" });
       return null;
     }
@@ -1377,6 +1392,27 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
   app.get("/{*splat}", (_req, res) => {
     res.sendFile(path.join(staticDirPath, "index.html"));
   });
+
+  /**
+   * Express's default handler answers a stack trace naming absolute paths, the
+   * server's own sources and its dependency versions — on routes that need no
+   * credentials. The routes above report their own failures; this catches what
+   * they cannot, including the router's own decode failure, which runs before
+   * any handler and so cannot be caught inside one.
+   */
+  app.use(
+    (error: Error, _req: Request, res: Response, next: NextFunction): void => {
+      if (res.headersSent) {
+        next(error);
+        return;
+      }
+      console.warn(`[roughdraft] request failed: ${error.message}`);
+      const status = error instanceof URIError ? 400 : 500;
+      res
+        .status(status)
+        .json({ error: status === 400 ? "Bad request" : "Internal server error" });
+    },
+  );
 
   return { app, port };
 }
