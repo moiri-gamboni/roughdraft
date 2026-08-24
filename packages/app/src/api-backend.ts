@@ -7,7 +7,6 @@ import {
   MarkdownFileConflictError,
   type Page,
   type ReviewWatchStatus,
-  type SnapshotSummary,
   type StorageBackend,
   type StoredAsset,
 } from "./storage";
@@ -122,15 +121,7 @@ export class ApiBackend implements StorageBackend {
         `Failed to list history for ${relativePath}: ${res.status}`,
       );
     }
-    const payload = (await res.json()) as {
-      snapshots?: SnapshotSummary[];
-      unreadable?: number;
-    };
-    return {
-      snapshots: payload.snapshots ?? [],
-      unreadable:
-        typeof payload.unreadable === "number" ? payload.unreadable : 0,
-    };
+    return res.json();
   }
 
   async getSnapshot(relativePath: string, id: string): Promise<string> {
