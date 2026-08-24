@@ -2,6 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  listSnapshots,
+  readSnapshot,
+  type SnapshotSummary,
+} from "./checkpoint-store";
 import { callTool } from "./mcp";
 
 describe("mcp", () => {
@@ -117,5 +122,46 @@ describe("mcp", () => {
     ).rejects.toThrow(/CriticMarkup close delimiter/);
 
     expect(fs.readFileSync(documentPath, "utf8")).toBe(original);
+  });
+
+  /** The snapshots of the test document, newest first. */
+  function snapshots(): SnapshotSummary[] {
+    const listing = listSnapshots(documentPath);
+    if (listing.status !== "ok") {
+      throw new Error(`Expected a readable history, got ${listing.status}`);
+    }
+    return listing.snapshots;
+  }
+
+  it("keeps the replies it writes in the document history", async () => {
+    const original =
+      '# Draft\n\n{>>Needs proof<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}\n';
+    fs.writeFileSync(documentPath, original);
+
+    await callTool(
+      "roughdraft_reply_to_comment",
+      { documentPath, parentId: "c1", message: "Source added." },
+      { ROUGHDRAFT_STATE_FILE: stateFile },
+    );
+
+    const written = fs.readFileSync(documentPath, "utf8");
+    expect(written).toContain("Source added.");
+    expect(readSnapshot(documentPath, snapshots()[0].id)).toBe(written);
+  });
+
+  it("keeps the resolutions it writes in the document history", async () => {
+    const original =
+      '# Draft\n\n{>>Needs proof<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}\n';
+    fs.writeFileSync(documentPath, original);
+
+    await callTool(
+      "roughdraft_mark_resolved",
+      { documentPath, targetId: "c1", summary: "Cited." },
+      { ROUGHDRAFT_STATE_FILE: stateFile },
+    );
+
+    const written = fs.readFileSync(documentPath, "utf8");
+    expect(written).not.toBe(original);
+    expect(readSnapshot(documentPath, snapshots()[0].id)).toBe(written);
   });
 });
