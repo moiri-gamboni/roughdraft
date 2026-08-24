@@ -60,6 +60,13 @@ export interface ContentRestore {
 /**
  * What caused a snapshot to be taken. `replaced` is the bytes a write was
  * about to destroy, which is the entry a clobber recovery reaches for.
+ *
+ * A third declaration of one vocabulary: this one, `SnapshotTrigger` in
+ * `packages/server/src/checkpoint-store.ts`, and the trigger table in
+ * `docs/spec/history-sidecar.md`. The app cannot import the server's — it does
+ * not depend on that package — so adding a value means editing all three.
+ * `DocumentHistoryDialog` renders an unrecognised one as "unknown" rather than
+ * as a blank badge, which is what a build that missed the edit will show.
  */
 export type SnapshotTrigger = "save" | "review" | "replaced" | "hook";
 

@@ -214,6 +214,10 @@ export interface DocumentHistoryWiring {
    * not re-render the tree on every keystroke — and the last *saved* copy is
    * the wrong answer, since the states that offer the overwrite escape are
    * exactly the states where unsaved work has been accumulating.
+   *
+   * Must be referentially stable: the dialog's fetch effect lists it as a
+   * dependency and calls four setters on every run, so a fresh identity per
+   * render is an unbroken re-render loop for as long as the dialog is open.
    */
   getDocumentContent: () => string;
   onRestore: (restore: SnapshotRestore) => void | Promise<void>;
@@ -826,12 +830,13 @@ export function DocumentWorkspace({
     !!activeDocumentPath &&
     !!history;
   // One banner at a time, and this is the least urgent of the three: the file
-  // has already been reloaded, so nothing is blocked or at risk.
+  // has already been reloaded, so nothing is blocked or at risk. It does not
+  // depend on `canBrowseHistory`: a remote session watches the origin file
+  // without serving its snapshots, and telling that reviewer their text moved
+  // is worth more than the button they cannot have. The snapshots are still on
+  // the origin box for `roughdraft history` to read.
   const showExternalChangeNotice =
-    !!externalChangeNotice &&
-    canBrowseHistory &&
-    !conflictNotice &&
-    !draftRestoreNotice;
+    !!externalChangeNotice && !conflictNotice && !draftRestoreNotice;
   const hasTopNotice =
     !!conflictNotice || !!draftRestoreNotice || showExternalChangeNotice;
   const restoreAvailability = resolveRestoreAvailability({
@@ -1131,17 +1136,19 @@ export function DocumentWorkspace({
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
-            <Button
-              type="button"
-              data-testid="external-change-notice-view-history"
-              variant="ghost"
-              size="sm"
-              className="h-8 rounded-[7px] px-2 text-xs text-stone-700 hover:bg-stone-100 dark:text-slate-200 dark:hover:bg-slate-800"
-              onClick={() => setHistoryOpen(true)}
-            >
-              <History className="size-3.5" />
-              View history
-            </Button>
+            {canBrowseHistory ? (
+              <Button
+                type="button"
+                data-testid="external-change-notice-view-history"
+                variant="ghost"
+                size="sm"
+                className="h-8 rounded-[7px] px-2 text-xs text-stone-700 hover:bg-stone-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                onClick={() => setHistoryOpen(true)}
+              >
+                <History className="size-3.5" />
+                View history
+              </Button>
+            ) : null}
             <Button
               type="button"
               data-testid="external-change-notice-dismiss"

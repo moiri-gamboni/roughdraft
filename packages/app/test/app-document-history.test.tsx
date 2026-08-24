@@ -45,9 +45,10 @@ class SilentEventSource {
 interface FakeBackend {
   backend: StorageBackend;
   saved: Array<{ content: string; expectedVersion?: string }>;
+  /** The version each save handed back, in order. */
+  versionsWritten: string[];
   /** Report a change to whatever path the app actually subscribed to. */
   emitDiskChange(version: string): void;
-  isWatched(): boolean;
   /** What the document reads as on the next load. */
   setDiskContent(content: string, version: string): void;
   historyCalls: string[];
@@ -105,6 +106,8 @@ function createFakeBackend({
   const snapshotCalls: string[] = [];
   const heldSnapshots: Array<() => void> = [];
   let conflictsLeft = conflictOnFirstSaveWith === undefined ? 0 : 1;
+  let savedVersionCount = 0;
+  const versionsWritten: string[] = [];
   let watcher: {
     path: string;
     onChange: (event: MarkdownFileChangeEvent) => void;
@@ -139,6 +142,7 @@ function createFakeBackend({
 
   return {
     saved,
+    versionsWritten,
     historyCalls,
     snapshotCalls,
     heldSnapshotCount: () => heldSnapshots.length,
@@ -149,7 +153,6 @@ function createFakeBackend({
       const waiting = heldSnapshots.splice(0, heldSnapshots.length).reverse();
       for (const resolve of waiting) resolve();
     },
-    isWatched: () => watcher !== null,
     setDiskContent(nextContent, version) {
       page.content = nextContent;
       page.version = version;
@@ -189,7 +192,11 @@ function createFakeBackend({
           });
         }
         page.content = nextContent;
-        page.version = "v2";
+        // A fresh version per save, as a real backend gives: two saves that
+        // both reported "v2" would hide whether the app remembers each one.
+        savedVersionCount += 1;
+        page.version = `v-saved-${savedVersionCount}`;
+        versionsWritten.push(page.version);
         return { ...page };
       },
       async saveAsset(file) {
@@ -630,6 +637,35 @@ describe("restoring when the destination will not take a plain save", () => {
 
     await waitFor(() => queryByTestId("external-change-notice") !== null);
   });
+
+  it("does not report the overwrite's own echo as an external change", async () => {
+    // The server's watcher polls, so the echo of our own write can arrive after
+    // a later save has moved the document on. Recognising it then depends on
+    // the overwrite having recorded the version it wrote — the plain save path
+    // does, and this one used to not.
+    const fake = await bootIntoConflict();
+    const savedBefore = fake.saved.length;
+    await openHistoryAndSelectNewest();
+    await click(queryByTestId("document-history-restore-overwrite"));
+    await waitFor(() => fake.saved.length > savedBefore);
+    await waitFor(() => queryByTestId("file-conflict-notice") === null);
+    const overwriteVersion = fake.versionsWritten.at(-1) as string;
+
+    // A later save, so the echo below can no longer be recognised by the
+    // document's current version alone.
+    await openHistoryAndSelectNewest();
+    await click(restoreButton());
+    await waitFor(() => fake.versionsWritten.length > 1);
+    await waitFor(() => queryByTestId("document-history-dialog") === null);
+
+    await act(async () => {
+      fake.emitDiskChange(overwriteVersion);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => queryByTestId("document-history-dialog") === null);
+    expect(queryByTestId("external-change-notice")).toBeNull();
+  });
 });
 
 describe("when a restore cannot be delivered", () => {
@@ -737,12 +773,6 @@ describe("telling the reviewer their text moved", () => {
     return fake;
   }
 
-  it("says so after a silent reload, and points at the history", async () => {
-    await bootAndTakeAnExternalWrite();
-
-    expect(queryByTestId("external-change-notice-view-history")).not.toBeNull();
-  });
-
   it("stays out of the way once dismissed", async () => {
     await bootAndTakeAnExternalWrite();
     await click(queryByTestId("external-change-notice-dismiss"));
@@ -768,5 +798,24 @@ describe("telling the reviewer their text moved", () => {
     await click(queryByTestId("external-change-notice-view-history"));
 
     await waitFor(() => queryByTestId("document-history-dialog") !== null);
+  });
+
+  it("still says so on a backend that watches but cannot browse history", async () => {
+    // A remote session watches the origin file but serves no snapshots. Gating
+    // the whole notice on the browse controls replaced the reviewer's text
+    // under them with no banner and nothing to click.
+    const fake = createFakeBackend({ withHistorySupport: false });
+    detectBackendMock.mockResolvedValue(fake.backend);
+
+    await renderApp();
+    fake.setDiskContent("# Plan\n\nAn agent's body.\n", "v-agent");
+    await act(async () => {
+      fake.emitDiskChange("v-agent");
+      await Promise.resolve();
+    });
+
+    await waitFor(() => queryByTestId("external-change-notice") !== null);
+    expect(queryByTestId("external-change-notice-view-history")).toBeNull();
+    expect(queryByTestId("external-change-notice-dismiss")).not.toBeNull();
   });
 });

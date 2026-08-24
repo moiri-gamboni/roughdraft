@@ -64,6 +64,15 @@ const triggerLabels: Record<SnapshotSummary["trigger"], string> = {
   hook: "before agent write",
 };
 
+/**
+ * A trigger the server added and this build has not learned yet. Without the
+ * fallback the badge renders empty, which reads as a rendering bug rather than
+ * as a version whose provenance this build cannot name.
+ */
+function triggerLabel(trigger: SnapshotSummary["trigger"]): string {
+  return triggerLabels[trigger] ?? "unknown";
+}
+
 export function formatSnapshotBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   return `${(bytes / 1024).toFixed(1)} KB`;
@@ -230,7 +239,16 @@ export function DocumentHistoryDialog({
     void (async () => {
       try {
         const history = await backend.listSnapshots?.(documentPath);
-        if (cancelled || !history) return;
+        if (cancelled) return;
+        // A backend without the method resolves `undefined`. Returning quietly
+        // would leave "Loading history…" up for ever; the dialog is only
+        // reachable when both methods exist, so this is a broken backend and
+        // says so rather than hanging.
+        if (!history) {
+          setListing({ status: "error" });
+          logHistoryEvent("list-failed", { reason: "no listing returned" });
+          return;
+        }
         setListing({ status: "ready", history });
         logHistoryEvent("listed", {
           count: history.snapshots.length,
@@ -260,7 +278,14 @@ export function DocumentHistoryDialog({
           // clicked away from must not replace the one they are looking at —
           // Restore sends what the viewer holds, so this would send the wrong
           // bytes, not merely show the wrong text.
-          if (requestedIdRef.current !== id || content === undefined) return;
+          if (requestedIdRef.current !== id) return;
+          // Same reasoning as the listing: a missing method resolves
+          // `undefined`, which must not read as a version still loading.
+          if (content === undefined) {
+            setViewing({ status: "error", id });
+            logHistoryEvent("view-failed", { id, reason: "no content returned" });
+            return;
+          }
           setViewing({ status: "ready", id, content });
           logHistoryEvent("viewed", { id });
         } catch (error) {
@@ -336,8 +361,7 @@ export function DocumentHistoryDialog({
                 data-testid="document-history-empty"
                 className="px-1 text-xs text-stone-500 dark:text-slate-400"
               >
-                No versions yet. Roughdraft records one every time it writes to
-                this file.
+                No versions recorded for this file yet.
               </p>
             ) : null}
 
@@ -364,7 +388,7 @@ export function DocumentHistoryDialog({
                     >
                       <span className="flex items-center gap-1.5">
                         <span className="rounded-full bg-stone-200 px-1.5 py-px text-[0.62rem] font-medium tracking-[0.02em] text-stone-700 dark:bg-slate-600 dark:text-slate-100">
-                          {triggerLabels[snapshot.trigger]}
+                          {triggerLabel(snapshot.trigger)}
                         </span>
                         <span className="text-[0.72rem] font-medium text-stone-700 dark:text-slate-200">
                           {formatSnapshotAge(snapshot.createdAt, now)}
