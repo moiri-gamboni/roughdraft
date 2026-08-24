@@ -3389,6 +3389,22 @@ describe("runCli history", () => {
     },
   );
 
+  it("refuses a document path that is itself inside a history", async () => {
+    // Pasting a snapshot path back in is the likely way to reach this. Left
+    // alone it lists an empty history for a nested sidecar that does not
+    // exist, which reads as "no versions" rather than "wrong kind of path".
+    const saved = commitDocumentWrite(filePath, "one\n", { trigger: "save" });
+    const snapshotPath = path.join(
+      historyDirFor(filePath),
+      `${saved.postCapture?.id}.md`,
+    );
+
+    const run = await runHistory([snapshotPath]);
+
+    expect(run.exitCode).not.toBe(0);
+    expect(run.errors.join("\n")).toMatch(/history/i);
+  });
+
   it("refuses a snapshot id that is a path rather than an id", async () => {
     commitDocumentWrite(filePath, "one\n", { trigger: "save" });
     const outsider = path.join(tempDir, "outside.md");
