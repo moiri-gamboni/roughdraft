@@ -640,10 +640,7 @@ describe("createApp", () => {
         fs.mkdirSync(leaf, { recursive: true });
         const planted = "2026-08-24T10-11-12-345Z--p1--save";
         fs.writeFileSync(path.join(leaf, `${planted}.md`), "# Attacker\n");
-        fs.symlinkSync(
-          elsewhere,
-          path.join(projectDir, ".roughdraft-history"),
-        );
+        fs.symlinkSync(elsewhere, path.join(projectDir, ".roughdraft-history"));
 
         const response = await request(app)
           .get(`/api/markdown-file/history/${planted}`)
