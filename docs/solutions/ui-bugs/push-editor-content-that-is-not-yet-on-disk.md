@@ -81,3 +81,4 @@ Standing the watcher down during a restore does not weaken the disk-divergence p
 - Regression coverage: `packages/app/e2e/draft-recovery.spec.ts`, `packages/app/test/page-card.test.tsx`, `packages/app/test/app-draft-recovery.test.tsx`
 - Runtime path involved: `packages/app/src/PageCard.tsx`, `packages/app/src/App.tsx`, `packages/app/src/useDraftPersistence.ts`
 - Adjacent hazard already documented: `docs/solutions/ui-bugs/verify-exact-ui-submit-path-for-cross-boundary-handoffs.md`
+- Where the last of the Prevention rules turned out to be incomplete — a version recorded synchronously still does not exist until the save answers: `docs/solutions/ui-bugs/an-echo-of-our-own-write-is-not-an-external-change.md`

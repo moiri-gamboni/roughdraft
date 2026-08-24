@@ -8,6 +8,28 @@ import {
   writeProjectFile,
 } from "./helpers";
 
+/**
+ * The parked watch is what makes the Done button appear at all, so a budget
+ * that expires mid-flow drops the watcher count to zero and the handoff reports
+ * "No agent is watching now" — the test failing on its own scaffolding. Ten
+ * seconds lost that race on a loaded machine.
+ *
+ * Deliberately longer than the 30s Playwright test timeout rather than merely
+ * generous: the test now cannot outlive its own watch, whatever the machine is
+ * doing, so this is a structural bound and not another bet on how fast the box
+ * is. `roughdraft watch` keeps its own presence alive the same way, by
+ * re-issuing the poll in long chunks.
+ */
+const WATCH_TIMEOUT_SECONDS = 60;
+
+/**
+ * How long to let a still-parked watch settle during teardown. A test that
+ * fails before the Done click leaves the poll running, and awaiting it in full
+ * would spend the watch budget inside `afterEach` — where Playwright charges it
+ * to the test, burying the real assertion failure under a hook timeout.
+ */
+const WATCH_TEARDOWN_GRACE_MS = 500;
+
 test.describe("review handoff", () => {
   let projectDir: string;
   let pendingWatch: Promise<unknown> | null = null;
@@ -18,7 +40,12 @@ test.describe("review handoff", () => {
   });
 
   test.afterEach(async () => {
-    await pendingWatch?.catch(() => undefined);
+    if (pendingWatch) {
+      await Promise.race([
+        pendingWatch.catch(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, WATCH_TEARDOWN_GRACE_MS)),
+      ]);
+    }
     removeMarkdownProject(projectDir);
   });
 
@@ -38,7 +65,7 @@ test.describe("review handoff", () => {
       data: {
         projectPath: projectDir,
         path: relativePath,
-        timeoutSeconds: 10,
+        timeoutSeconds: WATCH_TIMEOUT_SECONDS,
       },
     });
 
@@ -88,7 +115,7 @@ test.describe("review handoff", () => {
       data: {
         projectPath: projectDir,
         path: relativePath,
-        timeoutSeconds: 10,
+        timeoutSeconds: WATCH_TIMEOUT_SECONDS,
       },
     });
 
@@ -107,7 +134,5 @@ test.describe("review handoff", () => {
     logE2eEvent("review-handoff.sent-button-reopened-status", {
       buttonLabel: await page.getByTestId("review-handoff-button").innerText(),
     });
-
-    await pendingWatch;
   });
 });
