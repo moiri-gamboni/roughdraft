@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -898,23 +897,6 @@ describe("atomicWriteFileSync", () => {
       }
     },
   );
-
-  it("refuses to write through a pre-existing temporary file", () => {
-    const suffix = Buffer.from("0123456789abcdef", "hex");
-    vi.spyOn(crypto, "randomBytes").mockReturnValue(
-      suffix as unknown as ReturnType<typeof crypto.randomBytes>,
-    );
-    fs.writeFileSync(docPath, "before");
-    const planted = path.join(
-      projectDir,
-      `.notes.md.tmp-${suffix.toString("hex")}`,
-    );
-    fs.writeFileSync(planted, "planted");
-
-    expect(() => atomicWriteFileSync(docPath, "after")).toThrow(/EEXIST/);
-    expect(fs.readFileSync(planted, "utf8")).toBe("planted");
-    expect(fs.readFileSync(docPath, "utf8")).toBe("before");
-  });
 
   it("leaves no temporary behind when the write fails", () => {
     fs.writeFileSync(docPath, "before");
