@@ -536,7 +536,7 @@ describe("Dashboard recent reviews", () => {
 
     expect(
       query('[data-testid="dashboard-review-item"]')?.textContent,
-    ).toContain("no agent was waiting for this");
+    ).toContain("no agent was waiting when this was sent");
   });
 });
 

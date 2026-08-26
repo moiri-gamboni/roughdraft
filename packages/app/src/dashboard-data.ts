@@ -94,7 +94,9 @@ export async function fetchDashboard(
     return { kind: "unreachable" };
   }
 
-  if (!isDashboardPayload(body)) return { kind: "unreachable" };
+  // The route answered, so the server is reachable; a body with the wrong
+  // shape means a build mismatch, same as the SPA fallback's HTML.
+  if (!isDashboardPayload(body)) return { kind: "unsupported" };
   return { kind: "ok", payload: body };
 }
 

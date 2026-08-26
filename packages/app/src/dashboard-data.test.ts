@@ -114,7 +114,7 @@ describe("fetchDashboard", () => {
     expect(result).toEqual({ kind: "unreachable" });
   });
 
-  it("reports unreachable when the JSON body is not a dashboard payload", async () => {
+  it("reports unsupported when the JSON body is not a dashboard payload", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ documents: [] }));
 
     const result = await fetchDashboard(
@@ -122,7 +122,7 @@ describe("fetchDashboard", () => {
       new AbortController().signal,
     );
 
-    expect(result).toEqual({ kind: "unreachable" });
+    expect(result).toEqual({ kind: "unsupported" });
   });
 
   it("passes the caller's abort signal to the request", async () => {

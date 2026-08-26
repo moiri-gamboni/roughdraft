@@ -1979,6 +1979,54 @@ suggestions:
     await watching;
   });
 
+  /**
+   * The app mirrors this payload as DashboardPayload by hand; no compiler
+   * links the two sides. This pins the exact key set so a server-side rename
+   * fails here instead of rendering as a misleading client notice.
+   */
+  it("keeps the dashboard wire contract's exact key sets", async () => {
+    const file = path.join(projectDir, "draft.md");
+    fs.writeFileSync(file, REVIEW_DOC);
+    const app = newApp();
+    await request(app)
+      .get("/api/markdown-file")
+      .query({ projectPath: projectDir, path: "draft.md" });
+    await request(app)
+      .post("/api/review-events")
+      .send({ projectPath: projectDir, path: "draft.md" });
+
+    const body = await readDashboard(app);
+
+    expect(Object.keys(body).sort()).toEqual([
+      "documents",
+      "recentReviews",
+      "server",
+    ]);
+    expect(Object.keys(body.server).sort()).toEqual([
+      "now",
+      "port",
+      "startedAt",
+    ]);
+    expect(Object.keys(body.documents[0]).sort()).toEqual([
+      "absolutePath",
+      "exists",
+      "lastActivityAt",
+      "lastOpenedAt",
+      "lastReviewedAt",
+      "modifiedAt",
+      "summary",
+      "waiterCount",
+    ]);
+    expect(Object.keys(body.recentReviews[0]).sort()).toEqual([
+      "absolutePath",
+      "createdAt",
+      "deliveredToWaiter",
+      "hasOverallComment",
+      "sequence",
+      "summary",
+    ]);
+  });
+
   it("answers an unknown /api route with a JSON 404", async () => {
     const response = await request(newApp()).get("/api/nope");
 
