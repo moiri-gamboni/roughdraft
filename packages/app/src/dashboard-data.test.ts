@@ -22,7 +22,6 @@ function documentRow(
     absolutePath: "/work/notes.md",
     lastActivityAt: "2026-08-26T09:30:00.000Z",
     lastOpenedAt: "2026-08-26T09:30:00.000Z",
-    lastLoadedAt: null,
     lastReviewedAt: null,
     exists: true,
     modifiedAt: "2026-08-26T09:00:00.000Z",

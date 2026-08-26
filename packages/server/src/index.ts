@@ -670,7 +670,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     const target = markdownPathFromRequest(req, res);
     if (!target) return;
 
-    documentRegistry.noteOpened(target.absolutePath, "load");
+    documentRegistry.noteOpened(target.absolutePath);
     res.json(markdownPageFromFile(target.relativePath, target.absolutePath));
   });
 
@@ -847,7 +847,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     const target = markdownPathFromRequest(req, res);
     if (!target) return;
 
-    documentRegistry.noteOpened(target.absolutePath, "request");
+    documentRegistry.noteOpened(target.absolutePath);
 
     const fromNow = req.body?.fromNow !== false;
     const timeoutSeconds =
@@ -916,7 +916,6 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
           absolutePath: waitingPath,
           lastActivityAt: now,
           lastOpenedAt: null,
-          lastLoadedAt: null,
           lastReviewedAt: null,
         });
       }
@@ -1040,7 +1039,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
         ? req.query.path.trim()
         : null;
     const registryPath = registryPathFromRequest(requestedPath);
-    if (registryPath) documentRegistry.noteOpened(registryPath, "request");
+    if (registryPath) documentRegistry.noteOpened(registryPath);
     const client: OpenRequestClient = {
       id: nextOpenRequestClientId,
       path: requestedPath,
@@ -1084,7 +1083,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     }
 
     const registryPath = registryPathFromRequest(targetPath);
-    if (registryPath) documentRegistry.noteOpened(registryPath, "request");
+    if (registryPath) documentRegistry.noteOpened(registryPath);
 
     const matchingClient = Array.from(openRequestClients)
       .reverse()

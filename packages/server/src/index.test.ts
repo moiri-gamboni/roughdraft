@@ -1746,7 +1746,7 @@ suggestions:
         absolutePath: string;
         exists: boolean;
         waiterCount: number;
-        lastLoadedAt: string | null;
+        lastOpenedAt: string | null;
         lastReviewedAt: string | null;
         summary: unknown;
       }>;
@@ -1783,7 +1783,7 @@ suggestions:
     const [row] = body.documents;
     expect(row.absolutePath).toBe(file);
     expect(row.exists).toBe(true);
-    expect(row.lastLoadedAt).toEqual(expect.any(String));
+    expect(row.lastOpenedAt).toEqual(expect.any(String));
     expect(row.summary).toEqual({
       comments: 1,
       replies: 0,
@@ -1970,7 +1970,7 @@ suggestions:
     const row = body.documents.find((entry) => entry.absolutePath === file);
     expect(row).toBeDefined();
     expect(row?.waiterCount).toBe(1);
-    expect(row?.lastLoadedAt).toBeNull();
+    expect(row?.lastOpenedAt).toBeNull();
     expect(row?.lastReviewedAt).toBeNull();
 
     await request(app)
