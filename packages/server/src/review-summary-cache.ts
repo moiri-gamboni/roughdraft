@@ -4,7 +4,7 @@ import { MAX_TRACKED_DOCUMENTS } from "./document-registry.js";
 
 export const MAX_SUMMARY_BYTES = 2_000_000;
 
-export interface ReviewSummary {
+interface ReviewSummary {
   comments: number;
   replies: number;
   suggestions: number;
