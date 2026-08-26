@@ -411,6 +411,25 @@ describe("Dashboard rows", () => {
     );
   });
 
+  it("renders no draft affordances for a reverted draft", async () => {
+    await render({
+      data: dashboardData({
+        payload: payloadOf([documentEntry()]),
+        drafts: [draftEntry({ disposition: "none" })],
+      }),
+    });
+
+    const row = query(
+      '[data-testid="dashboard-row"][data-document-path="/work/notes.md"]',
+    );
+    expect(row).not.toBeNull();
+    expect(row?.querySelector('[data-testid="dashboard-draft-badge"]')).toBeNull();
+    expect(row?.textContent).not.toContain("draft saved");
+    expect(
+      row?.querySelector('[data-testid="dashboard-row-discard-draft"]'),
+    ).toBeNull();
+  });
+
   it("flags an unsaved draft and offers to discard it", async () => {
     const discardDraft = vi.fn();
     vi.spyOn(window, "confirm").mockReturnValue(true);
