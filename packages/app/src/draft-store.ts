@@ -33,6 +33,16 @@ export interface DraftKey {
   mode: DraftMode;
 }
 
+export type DraftDisposition = "unsaved" | "none";
+
+export interface DraftListing {
+  key: string;
+  mode: DraftMode;
+  path: string;
+  updatedAt: number;
+  disposition: DraftDisposition;
+}
+
 /** One line per persistence decision; the e2e suite waits on these. */
 export function logDraftEvent(
   event: string,
@@ -186,6 +196,43 @@ export function updateBase(
 
 export function clearDraft(storage: Storage | null, key: string): void {
   storage?.removeItem(key);
+}
+
+/**
+ * Every document draft this browser holds, newest first, so the dashboard can
+ * merge them onto the server's rows. Session pointers and records we cannot
+ * read are skipped; a record whose content matches its known base is `none`
+ * (edited then reverted), and a record with no known base reads as `unsaved`,
+ * which is the state the workspace prompts about on open.
+ */
+export function listDraftRecords(storage: Storage | null): DraftListing[] {
+  if (!storage) return [];
+
+  const listings: DraftListing[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (!key) continue;
+    const prefix = RECORD_PREFIXES.find((candidate) =>
+      key.startsWith(candidate),
+    );
+    if (!prefix) continue;
+
+    const record = readDraft(storage, key);
+    if (!record) continue;
+
+    listings.push({
+      key,
+      mode: prefix.endsWith("origin:") ? "remote" : "local",
+      path: key.slice(prefix.length),
+      updatedAt: record.updatedAt,
+      disposition:
+        record.baseContent !== null && record.content === record.baseContent
+          ? "none"
+          : "unsaved",
+    });
+  }
+
+  return listings.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 function serialize(record: DraftRecord): string {
