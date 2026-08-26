@@ -11,10 +11,8 @@ export interface DocumentActivity {
   absolutePath: string;
   /** ISO; eviction and sort key. */
   lastActivityAt: string;
-  /** ISO; open request, tab subscribe, or watch. */
+  /** ISO; open request, tab subscribe, watch, or document load. */
   lastOpenedAt: string | null;
-  /** ISO; GET /api/markdown-file. */
-  lastLoadedAt: string | null;
   lastReviewedAt: string | null;
 }
 
@@ -34,13 +32,9 @@ export class DocumentRegistry {
     this.startedAt = new Date(this.now()).toISOString();
   }
 
-  noteOpened(absolutePath: string, source: "request" | "load"): void {
+  noteOpened(absolutePath: string): void {
     const entry = this.touch(absolutePath);
-    if (source === "load") {
-      entry.lastLoadedAt = entry.lastActivityAt;
-    } else {
-      entry.lastOpenedAt = entry.lastActivityAt;
-    }
+    entry.lastOpenedAt = entry.lastActivityAt;
     this.slog("noteOpened", absolutePath);
   }
 
@@ -55,10 +49,6 @@ export class DocumentRegistry {
     return [...this.entries.values()].reverse();
   }
 
-  size(): number {
-    return this.entries.size;
-  }
-
   /** Re-inserts so map order stays ascending by activity, then evicts LRU. */
   private touch(absolutePath: string): DocumentActivity {
     const lastActivityAt = new Date(this.now()).toISOString();
@@ -66,7 +56,6 @@ export class DocumentRegistry {
       absolutePath,
       lastActivityAt,
       lastOpenedAt: null,
-      lastLoadedAt: null,
       lastReviewedAt: null,
     };
     entry.lastActivityAt = lastActivityAt;
