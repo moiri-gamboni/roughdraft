@@ -16,7 +16,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { buildLocationForPath } from "./app-navigation";
+import { buildLocationForPath, getPathLeaf } from "./app-navigation";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
@@ -406,7 +406,7 @@ function ReviewItem({
         href={buildLocationForPath(review.absolutePath)}
         className="text-xs font-medium text-stone-900 underline decoration-stone-300 underline-offset-4 hover:decoration-stone-700 dark:text-slate-100 dark:decoration-slate-600 dark:hover:decoration-slate-200"
       >
-        {fileNameOf(review.absolutePath)}
+        {getPathLeaf(review.absolutePath) ?? review.absolutePath}
       </a>
       {counts && <Badge variant="muted">{counts}</Badge>}
       {review.hasOverallComment && (
@@ -414,7 +414,7 @@ function ReviewItem({
       )}
       {!review.deliveredToWaiter && (
         <span className="text-amber-700 dark:text-amber-300">
-          no agent was waiting for this
+          no agent was waiting when this was sent
         </span>
       )}
     </div>
@@ -513,15 +513,11 @@ function formatRowFacts(row: DashboardRow, nowMs: number): string {
   }
   if (row.draft) {
     facts.push(
-      `draft saved ${formatRelativeAge(new Date(row.draft.updatedAt).toISOString(), nowMs)}`,
+      `draft saved ${formatRelativeAge(row.draft.updatedAt, nowMs)}`,
     );
   }
 
   return facts.join(" · ");
-}
-
-function fileNameOf(absolutePath: string): string {
-  return absolutePath.slice(absolutePath.lastIndexOf("/") + 1);
 }
 
 /** Relative while the server started today; a full date-time once it did not. */

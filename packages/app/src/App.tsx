@@ -748,8 +748,10 @@ export function App() {
 
   useEffect(() => {
     const sourceUrl = new URL("/api/open-requests", window.location.origin);
-    // A load-error tab must not claim the failing path on the server, or its
-    // subscription registers a document row for a file that never opened.
+    // While a load error is showing, this tab must not be the reuse target
+    // for POST /api/open-request, so it re-subscribes without the path. The
+    // initial subscribe already carried it -- that is what puts the failed
+    // file's row (with its missing chip) on the dashboard.
     if (requestedPathState.rawPath && !loadError) {
       sourceUrl.searchParams.set("path", requestedPathState.rawPath);
     }
