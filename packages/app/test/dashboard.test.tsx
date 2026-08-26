@@ -423,7 +423,9 @@ describe("Dashboard rows", () => {
       '[data-testid="dashboard-row"][data-document-path="/work/notes.md"]',
     );
     expect(row).not.toBeNull();
-    expect(row?.querySelector('[data-testid="dashboard-draft-badge"]')).toBeNull();
+    expect(
+      row?.querySelector('[data-testid="dashboard-draft-badge"]'),
+    ).toBeNull();
     expect(row?.textContent).not.toContain("draft saved");
     expect(
       row?.querySelector('[data-testid="dashboard-row-discard-draft"]'),
