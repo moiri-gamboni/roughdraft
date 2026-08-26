@@ -1703,6 +1703,263 @@ describe("createApp", () => {
   });
 });
 
+describe("GET /api/dashboard", () => {
+  let projectDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-dash-"));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-dash-home-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  const REVIEW_DOC = `# Draft
+
+Some {==highlighted==}{>>A comment<<}{#c1} text and {++inserted++}{#s1} more.
+
+---
+comments:
+  c1:
+    by: AI
+    at: "2026-04-28T12:00:00.000Z"
+suggestions:
+  s1:
+    by: AI
+    at: "2026-04-28T12:10:00.000Z"
+`;
+
+  function newApp() {
+    return createApp({ homeDir, staticDirPath: projectDir }).app;
+  }
+
+  async function readDashboard(app: ReturnType<typeof newApp>) {
+    const response = await request(app).get("/api/dashboard");
+    expect(response.status).toBe(200);
+    return response.body as {
+      server: { port: number; startedAt: string; now: string };
+      documents: Array<{
+        absolutePath: string;
+        exists: boolean;
+        waiterCount: number;
+        lastLoadedAt: string | null;
+        lastReviewedAt: string | null;
+        summary: unknown;
+      }>;
+      recentReviews: Array<{
+        absolutePath: string;
+        hasOverallComment: boolean;
+        deliveredToWaiter: boolean;
+      }>;
+    };
+  }
+
+  it("reports an empty document list with ISO timestamps on a fresh app", async () => {
+    const body = await readDashboard(newApp());
+
+    expect(body.documents).toEqual([]);
+    expect(body.recentReviews).toEqual([]);
+    expect(new Date(body.server.startedAt).toISOString()).toBe(
+      body.server.startedAt,
+    );
+    expect(new Date(body.server.now).toISOString()).toBe(body.server.now);
+  });
+
+  it("feeds a row from a markdown-file load", async () => {
+    const file = path.join(projectDir, "draft.md");
+    fs.writeFileSync(file, REVIEW_DOC);
+    const app = newApp();
+
+    await request(app)
+      .get("/api/markdown-file")
+      .query({ projectPath: projectDir, path: "draft.md" });
+
+    const body = await readDashboard(app);
+    expect(body.documents).toHaveLength(1);
+    const [row] = body.documents;
+    expect(row.absolutePath).toBe(file);
+    expect(row.exists).toBe(true);
+    expect(row.lastLoadedAt).toEqual(expect.any(String));
+    expect(row.summary).toEqual({
+      comments: 1,
+      replies: 0,
+      suggestions: 1,
+      unresolved: 2,
+    });
+    expect(row.waiterCount).toBe(0);
+  });
+
+  it("feeds an exists:false row from an open-request to a missing markdown path", async () => {
+    const ghost = path.join(projectDir, "ghost.md");
+    const app = newApp();
+
+    const response = await request(app)
+      .post("/api/open-request")
+      .send({ path: ghost, url: "http://localhost:7373/?path=/ghost.md" });
+
+    expect(response.body).toEqual({ delivered: false });
+    const body = await readDashboard(app);
+    expect(body.documents).toHaveLength(1);
+    expect(body.documents[0]).toMatchObject({
+      absolutePath: ghost,
+      exists: false,
+      summary: null,
+    });
+  });
+
+  it("skips an invalid open-request path without adding a row", async () => {
+    const app = newApp();
+
+    const response = await request(app)
+      .post("/api/open-request")
+      .send({ path: "../x.md", url: "http://localhost:7373/?path=/x.md" });
+
+    expect(response.body).toEqual({ delivered: false });
+    const body = await readDashboard(app);
+    expect(body.documents).toEqual([]);
+  });
+
+  it("shows a live waiter and flips it to a delivered review", async () => {
+    const file = path.join(projectDir, "draft.md");
+    fs.writeFileSync(file, REVIEW_DOC);
+    const app = newApp();
+
+    const watching = request(app)
+      .post("/api/review-events/watch")
+      .send({
+        projectPath: projectDir,
+        path: "draft.md",
+        timeoutSeconds: 2,
+        batchWindowSeconds: 0,
+      })
+      .then((response) => response);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const duringWatch = await readDashboard(app);
+    const watchedRow = duringWatch.documents.find(
+      (row) => row.absolutePath === file,
+    );
+    expect(watchedRow?.waiterCount).toBe(1);
+
+    await request(app)
+      .post("/api/review-events")
+      .send({ projectPath: projectDir, path: "draft.md" });
+    await watching;
+
+    const afterReview = await readDashboard(app);
+    const reviewedRow = afterReview.documents.find(
+      (row) => row.absolutePath === file,
+    );
+    expect(reviewedRow?.waiterCount).toBe(0);
+    expect(reviewedRow?.lastReviewedAt).toEqual(expect.any(String));
+    expect(afterReview.recentReviews[0]).toMatchObject({
+      absolutePath: file,
+      deliveredToWaiter: true,
+    });
+  });
+
+  it("cancels the waiter when the watch socket is aborted", async () => {
+    const file = path.join(projectDir, "draft.md");
+    fs.writeFileSync(file, REVIEW_DOC);
+    const app = newApp();
+    const server = app.listen(0);
+    try {
+      const { port } = server.address() as AddressInfo;
+      const controller = new AbortController();
+      const watch = fetch(`http://127.0.0.1:${port}/api/review-events/watch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectPath: projectDir,
+          path: "draft.md",
+          batchWindowSeconds: 0,
+        }),
+        signal: controller.signal,
+      }).catch(() => undefined);
+
+      await waitForWaiterCount(app, file, 1);
+      controller.abort();
+      await watch;
+      await waitForWaiterCount(app, file, 0);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("marks an undelivered review and surfaces its overall comment", async () => {
+    const file = path.join(projectDir, "draft.md");
+    fs.writeFileSync(file, REVIEW_DOC);
+    const app = newApp();
+
+    await request(app).post("/api/review-events").send({
+      projectPath: projectDir,
+      path: "draft.md",
+      overallComment: "Please tighten the intro.",
+    });
+
+    const body = await readDashboard(app);
+    expect(body.recentReviews[0]).toMatchObject({
+      absolutePath: file,
+      deliveredToWaiter: false,
+      hasOverallComment: true,
+    });
+  });
+
+  it("lists a document that only a watch has made known", async () => {
+    const file = path.join(projectDir, "draft.md");
+    fs.writeFileSync(file, REVIEW_DOC);
+    const app = newApp();
+
+    const watching = request(app)
+      .post("/api/review-events/watch")
+      .send({
+        projectPath: projectDir,
+        path: "draft.md",
+        timeoutSeconds: 2,
+        batchWindowSeconds: 0,
+      })
+      .then((response) => response);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const body = await readDashboard(app);
+    const rows = body.documents.filter((row) => row.absolutePath === file);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].waiterCount).toBe(1);
+
+    await request(app)
+      .post("/api/review-events")
+      .send({ projectPath: projectDir, path: "draft.md" });
+    await watching;
+  });
+
+  it("answers an unknown /api route with a JSON 404", async () => {
+    const response = await request(newApp()).get("/api/nope");
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: "Unknown API route" });
+  });
+
+  async function waitForWaiterCount(
+    app: ReturnType<typeof newApp>,
+    absolutePath: string,
+    expected: number,
+  ) {
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      const body = await readDashboard(app);
+      const row = body.documents.find((r) => r.absolutePath === absolutePath);
+      if ((row?.waiterCount ?? 0) === expected) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error(
+      `waiterCount for ${absolutePath} never reached ${expected}`,
+    );
+  }
+});
+
 describe("fileVersionIfPresent", () => {
   let dir: string;
 
