@@ -18,10 +18,6 @@ export interface DocumentActivity {
   lastReviewedAt: string | null;
 }
 
-interface DocumentEntry extends DocumentActivity {
-  lastActivityMs: number;
-}
-
 /**
  * Which documents this server has been asked about, and when. Bounded, in
  * memory, never persisted; fed only by request handlers the server already
@@ -31,7 +27,7 @@ interface DocumentEntry extends DocumentActivity {
 export class DocumentRegistry {
   readonly startedAt: string;
   private readonly now: () => number;
-  private readonly entries = new Map<string, DocumentEntry>();
+  private readonly entries = new Map<string, DocumentActivity>();
 
   constructor(options?: { now?: () => number }) {
     this.now = options?.now ?? Date.now;
@@ -54,52 +50,35 @@ export class DocumentRegistry {
     this.slog("noteReviewCompleted", absolutePath);
   }
 
+  /** Newest activity first; the map is kept in ascending activity order. */
   list(): DocumentActivity[] {
-    return [...this.entries.values()]
-      .sort((a, b) => b.lastActivityMs - a.lastActivityMs)
-      .map(({ lastActivityMs: _lastActivityMs, ...activity }) => activity);
+    return [...this.entries.values()].reverse();
   }
 
   size(): number {
     return this.entries.size;
   }
 
-  private touch(absolutePath: string): DocumentEntry {
-    const nowMs = this.now();
-    const nowIso = new Date(nowMs).toISOString();
-    const existing = this.entries.get(absolutePath);
-    if (existing) {
-      existing.lastActivityMs = nowMs;
-      existing.lastActivityAt = nowIso;
-      return existing;
-    }
-
-    const entry: DocumentEntry = {
+  /** Re-inserts so map order stays ascending by activity, then evicts LRU. */
+  private touch(absolutePath: string): DocumentActivity {
+    const lastActivityAt = new Date(this.now()).toISOString();
+    const entry = this.entries.get(absolutePath) ?? {
       absolutePath,
-      lastActivityMs: nowMs,
-      lastActivityAt: nowIso,
+      lastActivityAt,
       lastOpenedAt: null,
       lastLoadedAt: null,
       lastReviewedAt: null,
     };
-    this.entries.set(absolutePath, entry);
-    this.evictExcess();
-    return entry;
-  }
+    entry.lastActivityAt = lastActivityAt;
 
-  private evictExcess(): void {
+    this.entries.delete(absolutePath);
+    this.entries.set(absolutePath, entry);
+
     while (this.entries.size > MAX_TRACKED_DOCUMENTS) {
-      let oldestPath: string | null = null;
-      let oldestMs = Number.POSITIVE_INFINITY;
-      for (const entry of this.entries.values()) {
-        if (entry.lastActivityMs < oldestMs) {
-          oldestMs = entry.lastActivityMs;
-          oldestPath = entry.absolutePath;
-        }
-      }
-      if (oldestPath === null) return;
-      this.entries.delete(oldestPath);
+      const [oldest] = this.entries.keys();
+      this.entries.delete(oldest);
     }
+    return entry;
   }
 
   private slog(method: string, absolutePath: string): void {
