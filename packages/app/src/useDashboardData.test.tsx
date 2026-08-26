@@ -261,6 +261,19 @@ describe("useDashboardData", () => {
     expect(capturedSignal?.aborted).toBe(true);
   });
 
+  it("does not stack a second request on top of one still in flight", async () => {
+    const hanging = vi.fn(() => new Promise<Response>(() => {}));
+    await renderHook({
+      fetchImpl: hanging as unknown as typeof fetch,
+      pollIntervalMs: POLL_MS,
+      storage: window.localStorage,
+    });
+
+    await advance(POLL_MS * 3);
+
+    expect(hanging).toHaveBeenCalledTimes(1);
+  });
+
   it("starts a fresh poll when the fetcher changes while one is in flight", async () => {
     const hanging = vi.fn(() => new Promise<Response>(() => {}));
     await renderHook({

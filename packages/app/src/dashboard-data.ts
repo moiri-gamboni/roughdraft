@@ -118,8 +118,11 @@ export function normalizeAbsolutePath(path: string): string {
 
   for (const segment of trimmed.split("/")) {
     if (segment === "" || segment === ".") continue;
-    if (segment === ".." && segments.length > 0 && segments.at(-1) !== "..") {
-      segments.pop();
+    if (segment === "..") {
+      // `/..` is `/`, matching the server's `path.resolve`; a relative path has
+      // no root to stop at, so its leading `..` segments are kept.
+      if (segments.length > 0 && segments.at(-1) !== "..") segments.pop();
+      else if (!absolute) segments.push(segment);
       continue;
     }
     segments.push(segment);

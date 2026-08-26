@@ -145,6 +145,10 @@ describe("normalizeAbsolutePath", () => {
     );
   });
 
+  it("stops at the root, the way path.resolve does on the server", () => {
+    expect(normalizeAbsolutePath("/work/../../x.md")).toBe("/x.md");
+  });
+
   it("leaves a relative path relative", () => {
     expect(normalizeAbsolutePath("  notes/./plan.md ")).toBe("notes/plan.md");
   });
