@@ -30,12 +30,7 @@ interface CacheEntry {
  * once per poll.
  */
 export class ReviewSummaryCache {
-  private readonly maxEntries: number;
   private readonly entries = new Map<string, CacheEntry>();
-
-  constructor(options?: { maxEntries?: number }) {
-    this.maxEntries = options?.maxEntries ?? MAX_TRACKED_DOCUMENTS;
-  }
 
   read(absolutePath: string): DocumentFileState {
     let stat: fs.Stats;
@@ -96,7 +91,7 @@ export class ReviewSummaryCache {
   private store(absolutePath: string, key: string, state: DocumentFileState) {
     this.entries.delete(absolutePath);
     this.entries.set(absolutePath, { key, state });
-    while (this.entries.size > this.maxEntries) {
+    while (this.entries.size > MAX_TRACKED_DOCUMENTS) {
       const oldest = this.entries.keys().next().value;
       if (oldest === undefined) break;
       this.entries.delete(oldest);

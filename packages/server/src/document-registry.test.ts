@@ -65,31 +65,19 @@ describe("DocumentRegistry", () => {
     expect(registry.startedAt).toBe("2026-08-26T10:00:00.000Z");
   });
 
-  it("sets lastLoadedAt and lastActivityAt on a load", () => {
+  it("sets lastOpenedAt and lastActivityAt when a document is opened", () => {
     const clock = fixedClock(Date.parse("2026-08-26T10:00:00.000Z"));
     const registry = new DocumentRegistry({ now: clock.now });
 
-    registry.noteOpened("/tmp/a.md", "load");
+    registry.noteOpened("/tmp/a.md");
 
     const [entry] = registry.list();
     expect(entry).toMatchObject({
       absolutePath: "/tmp/a.md",
-      lastLoadedAt: "2026-08-26T10:00:00.000Z",
       lastActivityAt: "2026-08-26T10:00:00.000Z",
-      lastOpenedAt: null,
+      lastOpenedAt: "2026-08-26T10:00:00.000Z",
       lastReviewedAt: null,
     });
-  });
-
-  it("sets lastOpenedAt on a request source", () => {
-    const clock = fixedClock(Date.parse("2026-08-26T10:00:00.000Z"));
-    const registry = new DocumentRegistry({ now: clock.now });
-
-    registry.noteOpened("/tmp/a.md", "request");
-
-    const [entry] = registry.list();
-    expect(entry.lastOpenedAt).toBe("2026-08-26T10:00:00.000Z");
-    expect(entry.lastLoadedAt).toBeNull();
   });
 
   it("sets lastReviewedAt on a review", () => {
@@ -106,11 +94,11 @@ describe("DocumentRegistry", () => {
     const clock = fixedClock(Date.parse("2026-08-26T10:00:00.000Z"));
     const registry = new DocumentRegistry({ now: clock.now });
 
-    registry.noteOpened("/tmp/a.md", "request");
+    registry.noteOpened("/tmp/a.md");
     clock.advance(60_000);
     registry.noteReviewCompleted("/tmp/a.md");
 
-    expect(registry.size()).toBe(1);
+    expect(registry.list().length).toBe(1);
     const [entry] = registry.list();
     expect(entry.lastOpenedAt).toBe("2026-08-26T10:00:00.000Z");
     expect(entry.lastReviewedAt).toBe("2026-08-26T10:01:00.000Z");
@@ -121,11 +109,11 @@ describe("DocumentRegistry", () => {
     const clock = fixedClock(Date.parse("2026-08-26T10:00:00.000Z"));
     const registry = new DocumentRegistry({ now: clock.now });
 
-    registry.noteOpened("/tmp/a.md", "request");
+    registry.noteOpened("/tmp/a.md");
     clock.advance(1_000);
-    registry.noteOpened("/tmp/b.md", "request");
+    registry.noteOpened("/tmp/b.md");
     clock.advance(1_000);
-    registry.noteOpened("/tmp/c.md", "request");
+    registry.noteOpened("/tmp/c.md");
     clock.advance(1_000);
     registry.noteReviewCompleted("/tmp/a.md");
 
@@ -141,16 +129,16 @@ describe("DocumentRegistry", () => {
     const registry = new DocumentRegistry({ now: clock.now });
 
     for (let index = 0; index < MAX_TRACKED_DOCUMENTS; index += 1) {
-      registry.noteOpened(`/tmp/${index}.md`, "request");
+      registry.noteOpened(`/tmp/${index}.md`);
       clock.advance(1_000);
     }
     // Touch /tmp/0.md so it is no longer the oldest.
     registry.noteReviewCompleted("/tmp/0.md");
     clock.advance(1_000);
 
-    registry.noteOpened("/tmp/new.md", "request");
+    registry.noteOpened("/tmp/new.md");
 
-    expect(registry.size()).toBe(MAX_TRACKED_DOCUMENTS);
+    expect(registry.list().length).toBe(MAX_TRACKED_DOCUMENTS);
     const paths = registry.list().map((entry) => entry.absolutePath);
     // /tmp/1.md was the least-recently-active and is evicted; /tmp/0.md survives.
     expect(paths).not.toContain("/tmp/1.md");
