@@ -19,6 +19,8 @@ export interface ReviewCompletedEvent extends ReviewCompletedEventInput {
   type: "review.completed";
   sequence: number;
   createdAt: string;
+  /** Whether a live waiter matched this event at emit time. */
+  delivered: boolean;
 }
 
 export interface WaitForReviewEventsOptions {
@@ -26,6 +28,7 @@ export interface WaitForReviewEventsOptions {
   afterSequence?: number;
   timeoutMs?: number;
   batchWindowMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface WaitForReviewEventsResult {
@@ -39,13 +42,15 @@ interface Waiter {
   resolve: (result: WaitForReviewEventsResult) => void;
   timeout: NodeJS.Timeout | null;
   batchTimeout: NodeJS.Timeout | null;
+  detachSignal: (() => void) | null;
 }
 
 const DEFAULT_BATCH_WINDOW_MS = 250;
 const MAX_RETAINED_EVENTS = 100;
+const SLOG_SOURCE = "packages/server/src/review-events.ts";
 
 type NormalizedWaitOptions = Required<
-  Omit<WaitForReviewEventsOptions, "documentPath" | "timeoutMs">
+  Omit<WaitForReviewEventsOptions, "documentPath" | "timeoutMs" | "signal">
 > & {
   documentPath?: string;
   timeoutMs?: number;
@@ -65,28 +70,32 @@ export class ReviewEventQueue {
       type: "review.completed",
       sequence: this.nextSequence,
       createdAt: new Date().toISOString(),
+      delivered: false,
     };
     this.nextSequence += 1;
+
+    const matched = [...this.waiters].filter((waiter) =>
+      matchesWaiter(event, waiter.options),
+    );
+    event.delivered = matched.length > 0;
+
     this.events.push(event);
     this.events = this.events.slice(-MAX_RETAINED_EVENTS);
 
-    appendSlog("review-events.emit", {
+    appendSlog(SLOG_SOURCE, "review-events.emit", {
       documentPath: event.documentPath,
       sequence: event.sequence,
       waiters: this.waiters.size,
+      delivered: event.delivered,
       hasOverallComment: typeof event.overallComment === "string",
       overallCommentLength: event.overallComment?.length ?? 0,
     });
 
-    let delivered = false;
-    for (const waiter of [...this.waiters]) {
-      if (matchesWaiter(event, waiter.options)) {
-        delivered = true;
-        this.scheduleResolve(waiter);
-      }
+    for (const waiter of matched) {
+      this.scheduleResolve(waiter);
     }
 
-    return { delivered, event };
+    return { delivered: event.delivered, event };
   }
 
   wait(
@@ -101,11 +110,16 @@ export class ReviewEventQueue {
       );
     }
 
+    if (options.signal?.aborted) {
+      return Promise.resolve(resultForEvents([], true, this.nextSequence));
+    }
+
     return new Promise((resolve) => {
       const waiter: Waiter = {
         options: normalized,
         resolve,
         batchTimeout: null,
+        detachSignal: null,
         timeout:
           normalized.timeoutMs !== undefined
             ? setTimeout(() => {
@@ -114,8 +128,21 @@ export class ReviewEventQueue {
             : null,
       };
 
+      if (options.signal) {
+        const signal = options.signal;
+        const onAbort = () => {
+          appendSlog(SLOG_SOURCE, "review-events.aborted", {
+            documentPath: normalized.documentPath ?? null,
+          });
+          this.resolveWaiter(waiter, true);
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        waiter.detachSignal = () =>
+          signal.removeEventListener("abort", onAbort);
+      }
+
       this.waiters.add(waiter);
-      appendSlog("review-events.wait", {
+      appendSlog(SLOG_SOURCE, "review-events.wait", {
         documentPath: normalized.documentPath ?? null,
         afterSequence: normalized.afterSequence,
         timeoutMs: normalized.timeoutMs,
@@ -136,6 +163,22 @@ export class ReviewEventQueue {
     return [...this.waiters].filter(
       (waiter) => waiter.options.documentPath === normalizedPath,
     ).length;
+  }
+
+  /** The retained events, newest first, up to `limit`. */
+  recentEvents(limit: number): ReviewCompletedEvent[] {
+    return [...this.events].reverse().slice(0, Math.max(0, limit));
+  }
+
+  /** Distinct document paths of live waiters; waiters with none are skipped. */
+  waitingDocumentPaths(): string[] {
+    const paths = new Set<string>();
+    for (const waiter of this.waiters) {
+      if (waiter.options.documentPath !== undefined) {
+        paths.add(waiter.options.documentPath);
+      }
+    }
+    return [...paths];
   }
 
   private matchingEvents(
@@ -167,6 +210,7 @@ export class ReviewEventQueue {
     if (waiter.batchTimeout) {
       clearTimeout(waiter.batchTimeout);
     }
+    waiter.detachSignal?.();
 
     const events = timedOut ? [] : this.matchingEvents(waiter.options);
     waiter.resolve(resultForEvents(events, timedOut, this.nextSequence));
@@ -219,7 +263,11 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function appendSlog(event: string, data: Record<string, unknown>): void {
+export function appendSlog(
+  source: string,
+  event: string,
+  data: Record<string, unknown>,
+): void {
   const file = process.env.THOUGHTFUL_SLOG_FILE;
   if (!file) return;
 
@@ -229,7 +277,7 @@ function appendSlog(event: string, data: Record<string, unknown>): void {
     `${JSON.stringify({
       ts: new Date().toISOString(),
       runId: process.env.THOUGHTFUL_SLOG_RUN_ID ?? "manual",
-      source: "packages/server/src/review-events.ts",
+      source,
       event,
       data,
     })}\n`,
