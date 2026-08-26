@@ -167,7 +167,7 @@ export function buildLocationForLinkedMarkdownDocument({
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
-function buildLocationForPath(path?: string | null) {
+export function buildLocationForPath(path?: string | null) {
   const nextPath = path?.trim() || null;
   const url = new URL(window.location.href);
 
