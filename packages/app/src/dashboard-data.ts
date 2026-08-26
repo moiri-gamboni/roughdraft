@@ -21,7 +21,6 @@ export interface DashboardDocument {
   absolutePath: string;
   lastActivityAt: string;
   lastOpenedAt: string | null;
-  lastLoadedAt: string | null;
   lastReviewedAt: string | null;
   exists: boolean;
   modifiedAt: string | null;
