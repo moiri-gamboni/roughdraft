@@ -1,5 +1,7 @@
 # Homepage Workflow Storyboard Test Plan
 
+> **Superseded (2026-08-26):** `/` is now the dashboard; the storyboard, its `homepage.test.tsx` cases and `e2e/homepage-storyboard.spec.ts` were removed. The dashboard's coverage lives in `packages/app/test/dashboard.test.tsx` and `packages/app/e2e/dashboard.spec.ts`.
+
 ## Harness requirements
 
 No new test harness needs to be built.
