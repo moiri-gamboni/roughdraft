@@ -111,4 +111,21 @@ describe("ReviewSummaryCache", () => {
     expect(state.summary).toBeNull();
     expect(readSpy).not.toHaveBeenCalled();
   });
+
+  /**
+   * `read` is called once per row inside the synchronous `/api/dashboard`
+   * handler, so a throw there fails the whole endpoint, not one row — and the
+   * app reads that 500 as "older server build". A path nested under a regular
+   * file (ENOTDIR) passes `registryPathFromRequest`, so it is reachable.
+   */
+  it("reports a path nested under a regular file without throwing", () => {
+    const file = path.join(dir, "notes.md");
+    fs.writeFileSync(file, "# Notes\n");
+    const nested = path.join(file, "sub.md");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cache = new ReviewSummaryCache();
+
+    expect(() => cache.read(nested)).not.toThrow();
+    expect(cache.read(nested).summary).toBeNull();
+  });
 });

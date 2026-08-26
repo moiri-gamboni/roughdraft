@@ -11,6 +11,7 @@ import {
   readSnapshot,
   type SnapshotSummary,
 } from "./checkpoint-store";
+import { MAX_TRACKED_DOCUMENTS } from "./document-registry";
 import {
   createApp,
   fileVersionIfPresent,
@@ -1928,6 +1929,49 @@ suggestions:
     const rows = body.documents.filter((row) => row.absolutePath === file);
     expect(rows).toHaveLength(1);
     expect(rows[0].waiterCount).toBe(1);
+
+    await request(app)
+      .post("/api/review-events")
+      .send({ projectPath: projectDir, path: "draft.md" });
+    await watching;
+  });
+
+  /**
+   * The S4 guarantee: a blocked agent's row renders whatever the registry
+   * evicted. The watch route registers the document, so the union branch only
+   * fires once MAX_TRACKED_DOCUMENTS later documents have pushed it out.
+   */
+  it("keeps a blocked agent's document listed after the registry evicts it", async () => {
+    const file = path.join(projectDir, "draft.md");
+    fs.writeFileSync(file, REVIEW_DOC);
+    const app = newApp();
+
+    const watching = request(app)
+      .post("/api/review-events/watch")
+      .send({
+        projectPath: projectDir,
+        path: "draft.md",
+        timeoutSeconds: 5,
+        batchWindowSeconds: 0,
+      })
+      .then((response) => response);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    for (let index = 0; index < MAX_TRACKED_DOCUMENTS; index += 1) {
+      await request(app)
+        .post("/api/open-request")
+        .send({
+          path: path.join(projectDir, `filler-${index}.md`),
+          url: "http://localhost:7373/",
+        });
+    }
+
+    const body = await readDashboard(app);
+    const row = body.documents.find((entry) => entry.absolutePath === file);
+    expect(row).toBeDefined();
+    expect(row?.waiterCount).toBe(1);
+    expect(row?.lastLoadedAt).toBeNull();
+    expect(row?.lastReviewedAt).toBeNull();
 
     await request(app)
       .post("/api/review-events")

@@ -41,12 +41,13 @@ export class ReviewSummaryCache {
     let stat: fs.Stats;
     try {
       stat = fs.statSync(absolutePath);
-    } catch (error) {
-      if (isNotFound(error)) {
-        this.entries.delete(absolutePath);
-        return { exists: false, modifiedAt: null, summary: null };
-      }
-      throw error;
+    } catch {
+      // Any stat failure — ENOENT, or ENOTDIR from a path nested under a
+      // regular file — reads to the caller as "no document here". `read` runs
+      // once per row inside the synchronous dashboard handler, so throwing
+      // would fail the whole endpoint rather than dim one row.
+      this.entries.delete(absolutePath);
+      return { exists: false, modifiedAt: null, summary: null };
     }
 
     const key = `${stat.mtimeMs}:${stat.size}`;
