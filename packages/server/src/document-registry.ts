@@ -122,10 +122,15 @@ export function registryPathFromRequest(raw: unknown): string | null {
   if (!raw.toLowerCase().endsWith(".md")) return null;
   if (!path.isAbsolute(raw)) return null;
   if (raw !== path.resolve(raw)) return null;
-  for (const char of raw) {
-    const code = char.codePointAt(0) ?? 0;
-    if (code < 0x20 || code === 0x7f) return null;
-  }
+  if (hasControlCharacter(raw)) return null;
   if (refusesHistorySegment(raw)) return null;
   return raw;
+}
+
+function hasControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
 }
