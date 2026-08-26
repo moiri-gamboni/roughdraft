@@ -1,7 +1,4 @@
-export function formatRelativeAge(
-  at: string | number,
-  nowMs: number,
-): string {
+export function formatRelativeAge(at: string | number, nowMs: number): string {
   const elapsedMs = nowMs - new Date(at).getTime();
   if (!Number.isFinite(elapsedMs)) return "";
 

@@ -515,9 +515,7 @@ function formatRowFacts(row: DashboardRow, nowMs: number): string {
     facts.push(`reviewed ${formatRelativeAge(document.lastReviewedAt, nowMs)}`);
   }
   if (row.draft && draftBadgeLabel(row)) {
-    facts.push(
-      `draft saved ${formatRelativeAge(row.draft.updatedAt, nowMs)}`,
-    );
+    facts.push(`draft saved ${formatRelativeAge(row.draft.updatedAt, nowMs)}`);
   }
 
   return facts.join(" · ");
