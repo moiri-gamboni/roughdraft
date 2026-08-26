@@ -4,6 +4,7 @@ import {
   DRAFT_KEY_PREFIX,
   DRAFT_SCHEMA,
   draftKeyFromUrl,
+  listDraftRecords,
   readDraft,
   updateBase,
   writeDraft,
@@ -364,5 +365,105 @@ describe("secrets", () => {
     });
 
     expect(stored.join("\n")).not.toContain("SUPERSECRET");
+  });
+});
+
+describe("listDraftRecords", () => {
+  function putRecord(
+    storage: Storage,
+    key: string,
+    record: {
+      content: string;
+      baseContent: string | null;
+      updatedAt: number;
+      schema?: number;
+    },
+  ) {
+    storage.setItem(
+      key,
+      JSON.stringify({
+        schema: record.schema ?? DRAFT_SCHEMA,
+        content: record.content,
+        baseContent: record.baseContent,
+        updatedAt: record.updatedAt,
+      }),
+    );
+  }
+
+  it("lists file and origin records newest first", () => {
+    const storage = new MemoryStorage();
+    putRecord(storage, `${DRAFT_KEY_PREFIX}file:/work/notes/plan.md`, {
+      content: "draft",
+      baseContent: "disk",
+      updatedAt: 100,
+    });
+    putRecord(storage, `${DRAFT_KEY_PREFIX}origin:/work/origin.md`, {
+      content: "draft",
+      baseContent: "disk",
+      updatedAt: 300,
+    });
+
+    const listing = listDraftRecords(storage);
+
+    expect(listing).toEqual([
+      {
+        key: `${DRAFT_KEY_PREFIX}origin:/work/origin.md`,
+        mode: "remote",
+        path: "/work/origin.md",
+        updatedAt: 300,
+        disposition: "unsaved",
+      },
+      {
+        key: `${DRAFT_KEY_PREFIX}file:/work/notes/plan.md`,
+        mode: "local",
+        path: "/work/notes/plan.md",
+        updatedAt: 100,
+        disposition: "unsaved",
+      },
+    ]);
+  });
+
+  it("skips session pointers and unparseable values", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(`${DRAFT_KEY_PREFIX}session:abc123`, "/work/origin.md");
+    storage.setItem(`${DRAFT_KEY_PREFIX}file:/work/garbage.md`, "not json");
+    putRecord(storage, `${DRAFT_KEY_PREFIX}file:/work/real.md`, {
+      content: "draft",
+      baseContent: "disk",
+      updatedAt: 10,
+    });
+
+    const listing = listDraftRecords(storage);
+
+    expect(listing.map((entry) => entry.path)).toEqual(["/work/real.md"]);
+  });
+
+  it("reads disposition none only when content equals a known base", () => {
+    const storage = new MemoryStorage();
+    putRecord(storage, `${DRAFT_KEY_PREFIX}file:/work/reverted.md`, {
+      content: "same",
+      baseContent: "same",
+      updatedAt: 30,
+    });
+    putRecord(storage, `${DRAFT_KEY_PREFIX}file:/work/edited.md`, {
+      content: "new",
+      baseContent: "old",
+      updatedAt: 20,
+    });
+    // A v1 record loses its base on read, so it must read as unsaved.
+    putRecord(storage, `${DRAFT_KEY_PREFIX}file:/work/nobase.md`, {
+      content: "same",
+      baseContent: "same",
+      updatedAt: 10,
+      schema: 1,
+    });
+
+    const byPath = new Map(
+      listDraftRecords(storage).map((entry) => [entry.path, entry.disposition]),
+    );
+
+    expect(byPath.get("/work/reverted.md")).toBe("none");
+    expect(byPath.get("/work/edited.md")).toBe("unsaved");
+    expect(byPath.get("/work/nobase.md")).toBe("unsaved");
   });
 });

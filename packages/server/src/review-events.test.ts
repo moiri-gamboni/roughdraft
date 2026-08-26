@@ -183,4 +183,84 @@ describe("ReviewEventQueue", () => {
     expect(result.events[0]?.sequence).toBe(6);
     expect(result.events.at(-1)?.sequence).toBe(105);
   });
+
+  it("returns the newest events first from recentEvents after pruning", () => {
+    const queue = new ReviewEventQueue();
+
+    for (let index = 0; index < 105; index += 1) {
+      queue.emit(eventInput(`/tmp/project/${index}.md`));
+    }
+
+    const recent = queue.recentEvents(3);
+
+    expect(recent.map((event) => event.sequence)).toEqual([105, 104, 103]);
+  });
+
+  it("resolves timedOut and removes the waiter when the signal aborts", async () => {
+    const queue = new ReviewEventQueue();
+    const abort = new AbortController();
+    const waiting = queue.wait({
+      documentPath: "/tmp/project/draft.md",
+      batchWindowMs: 0,
+      signal: abort.signal,
+    });
+
+    expect(queue.waiterCount()).toBe(1);
+    abort.abort();
+
+    await expect(waiting).resolves.toMatchObject({
+      timedOut: true,
+      events: [],
+    });
+    expect(queue.waiterCount()).toBe(0);
+  });
+
+  it("lists each waiting document once and empties after resolution", async () => {
+    vi.useFakeTimers();
+    const queue = new ReviewEventQueue();
+    const first = queue.wait({
+      documentPath: "/tmp/project/draft.md",
+      batchWindowMs: 0,
+    });
+    queue.wait({ documentPath: "/tmp/project/draft.md", batchWindowMs: 0 });
+    queue.wait({ documentPath: "/tmp/project/other.md", batchWindowMs: 0 });
+    // A waiter with no documentPath is skipped.
+    queue.wait({ batchWindowMs: 0 });
+
+    expect(queue.waitingDocumentPaths().sort()).toEqual([
+      "/tmp/project/draft.md",
+      "/tmp/project/other.md",
+    ]);
+
+    queue.emit(eventInput("/tmp/project/draft.md"));
+    await vi.advanceTimersByTimeAsync(0);
+    await first;
+
+    expect(queue.waitingDocumentPaths()).toEqual(["/tmp/project/other.md"]);
+    vi.useRealTimers();
+  });
+
+  it("stamps delivered on the retained event", async () => {
+    vi.useFakeTimers();
+    const queue = new ReviewEventQueue();
+    queue.wait({
+      documentPath: "/tmp/project/draft.md",
+      batchWindowMs: 0,
+    });
+
+    const delivered = queue.emit(eventInput("/tmp/project/draft.md"));
+    const undelivered = queue.emit(eventInput("/tmp/project/nobody.md"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const retained = queue.recentEvents(10);
+    const deliveredEvent = retained.find(
+      (event) => event.sequence === delivered.event.sequence,
+    );
+    const undeliveredEvent = retained.find(
+      (event) => event.sequence === undelivered.event.sequence,
+    );
+    expect(deliveredEvent?.delivered).toBe(true);
+    expect(undeliveredEvent?.delivered).toBe(false);
+    vi.useRealTimers();
+  });
 });

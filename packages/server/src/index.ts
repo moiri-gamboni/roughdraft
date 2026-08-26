@@ -23,12 +23,17 @@ import {
   refusesHistorySegment,
 } from "./checkpoint-store.js";
 import {
+  DocumentRegistry,
+  registryPathFromRequest,
+} from "./document-registry.js";
+import {
   hasNonLoopbackHost,
   ROUGHDRAFT_DEFAULT_PORT,
   ROUGHDRAFT_PUBLIC_HOST,
   resolveBindHosts,
 } from "./network.js";
 import { ReviewEventQueue } from "./review-events.js";
+import { ReviewSummaryCache } from "./review-summary-cache.js";
 import { resolveUpdateStatus } from "./update-status.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -502,6 +507,8 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
   const app = express();
   const openRequestClients = new Set<OpenRequestClient>();
   const reviewEvents = new ReviewEventQueue();
+  const documentRegistry = new DocumentRegistry();
+  const reviewSummaries = new ReviewSummaryCache();
   const remoteSessions = new Map<string, RemoteSession>();
 
   function isAuthorizedRemoteDocumentRequest(req: Request): boolean {
@@ -663,6 +670,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     const target = markdownPathFromRequest(req, res);
     if (!target) return;
 
+    documentRegistry.noteOpened(target.absolutePath);
     res.json(markdownPageFromFile(target.relativePath, target.absolutePath));
   });
 
@@ -830,6 +838,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       summary: index.summary,
       overallComment,
     });
+    documentRegistry.noteReviewCompleted(target.absolutePath);
 
     res.status(201).json(result);
   });
@@ -837,6 +846,8 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
   app.post("/api/review-events/watch", async (req, res) => {
     const target = markdownPathFromRequest(req, res);
     if (!target) return;
+
+    documentRegistry.noteOpened(target.absolutePath);
 
     const fromNow = req.body?.fromNow !== false;
     const timeoutSeconds =
@@ -850,15 +861,27 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     const afterSequence =
       typeof req.body?.afterSequence === "number" ? req.body.afterSequence : 0;
 
+    // Express 5 fires `req.on("close")` ~1 ms into every POST with a JSON body
+    // (the body is already consumed), so the liveness hook lives on the
+    // response. A closed response with nothing written yet is a client that
+    // hung up: abort the wait so the queue stops holding a dead waiter.
+    const abort = new AbortController();
+    res.on("close", () => {
+      if (!res.writableEnded) abort.abort();
+    });
+
     const result = await reviewEvents.wait({
       documentPath: target.absolutePath,
       afterSequence: fromNow ? reviewEvents.latestSequence() : afterSequence,
       timeoutMs:
         timeoutSeconds !== undefined ? timeoutSeconds * 1000 : undefined,
       batchWindowMs: batchWindowSeconds * 1000,
+      signal: abort.signal,
     });
 
-    res.json(result);
+    // `writableEnded` is false on a hang-up, so it would write to a dead
+    // socket; `closed` is the abort-safe guard.
+    if (!res.closed) res.json(result);
   });
 
   app.get("/api/review-events/status", (req, res) => {
@@ -874,6 +897,55 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       relativePath: target.relativePath,
       watching: watcherCount > 0,
       watcherCount,
+    });
+  });
+
+  app.get("/api/dashboard", (_req, res) => {
+    const now = new Date().toISOString();
+
+    const registryEntries = documentRegistry.list();
+    const knownPaths = new Set(
+      registryEntries.map((entry) => entry.absolutePath),
+    );
+    // A blocked agent's document must always render, even if the registry
+    // evicted it: union the live waiters in with null timestamps.
+    const rows = [...registryEntries];
+    for (const waitingPath of reviewEvents.waitingDocumentPaths()) {
+      if (!knownPaths.has(waitingPath)) {
+        rows.push({
+          absolutePath: waitingPath,
+          lastActivityAt: now,
+          lastOpenedAt: null,
+          lastReviewedAt: null,
+        });
+      }
+    }
+
+    const documents = rows
+      .sort(
+        (a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt),
+      )
+      .map((row) => ({
+        ...row,
+        ...reviewSummaries.read(row.absolutePath),
+        waiterCount: reviewEvents.waiterCountForDocument(row.absolutePath),
+      }));
+
+    const recentReviews = reviewEvents.recentEvents(10).map((event) => ({
+      sequence: event.sequence,
+      createdAt: event.createdAt,
+      absolutePath: event.documentPath,
+      summary: event.summary,
+      hasOverallComment:
+        typeof event.overallComment === "string" &&
+        event.overallComment.length > 0,
+      deliveredToWaiter: event.delivered,
+    }));
+
+    res.json({
+      server: { port, startedAt: documentRegistry.startedAt, now },
+      documents,
+      recentReviews,
     });
   });
 
@@ -966,6 +1038,8 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       typeof req.query.path === "string" && req.query.path.trim().length > 0
         ? req.query.path.trim()
         : null;
+    const registryPath = registryPathFromRequest(requestedPath);
+    if (registryPath) documentRegistry.noteOpened(registryPath);
     const client: OpenRequestClient = {
       id: nextOpenRequestClientId,
       path: requestedPath,
@@ -1007,6 +1081,9 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       res.status(400).json({ error: "path and url are required" });
       return;
     }
+
+    const registryPath = registryPathFromRequest(targetPath);
+    if (registryPath) documentRegistry.noteOpened(registryPath);
 
     const matchingClient = Array.from(openRequestClients)
       .reverse()
@@ -1381,6 +1458,13 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
 
   // --- Static files & SPA fallback ---
 
+  // Unknown /api routes would otherwise fall through to the SPA fallback and
+  // answer 200 HTML, which confuses the next client written against a
+  // not-yet-deployed route.
+  app.use("/api", (_req, res) => {
+    res.status(404).json({ error: "Unknown API route" });
+  });
+
   app.use(express.static(staticDirPath));
 
   app.get("/{*splat}", (_req, res) => {
@@ -1437,10 +1521,12 @@ export async function createServer(
     throw new Error(
       [
         `Roughdraft refuses to bind ${bindHosts.join(", ")} without a token.`,
-        "Non-loopback bindings expose the remote-document endpoints, which can",
-        "rewrite files on every connected CLI machine. Set ROUGHDRAFT_TOKEN to",
-        "a strong secret and pass the same value to your CLI before retrying,",
-        "or remove ROUGHDRAFT_BIND_HOST to keep loopback-only.",
+        "A non-loopback binding exposes the remote-document endpoints (which can",
+        "rewrite files on every connected CLI machine) and leaves the",
+        "unauthenticated local-file routes and the dashboard readable by anyone",
+        "who can reach the host. Set ROUGHDRAFT_TOKEN to a strong secret and pass",
+        "the same value to your CLI before retrying, or remove ROUGHDRAFT_BIND_HOST",
+        "to keep loopback-only.",
       ].join(" "),
     );
   }

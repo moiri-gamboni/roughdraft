@@ -10,10 +10,10 @@ mkdir -p .context/ui-state-screenshots/$(date +%Y%m%d-%H%M%S)
 Use filenames that sort by product area, viewport, and state:
 
 ```text
-01-home-desktop.png
-01-home-mobile.png
-02-home-install-dialog.png
-03-home-workflow-stage-1.png
+01-dashboard-desktop.png
+01-dashboard-mobile.png
+02-dashboard-waiting-row.png
+03-dashboard-empty.png
 04-preview-rich-review-rail.png
 ```
 ## Starting The App
@@ -96,20 +96,18 @@ suggestions:
 | Area | State | How to reach it | Useful selectors | Notes |
 | --- | --- | --- | --- | --- |
 | App shell | Initial loading | Load any route and capture before backend initialization completes, usually with a route/mock delay | none | Transient; easiest in a mocked route or component harness. |
-| Homepage | Desktop | `/` at desktop viewport | `homepage-workflow-storyboard` | Capture first viewport and a lower scroll position where the storyboard is active. |
-| Homepage | Mobile | `/` at mobile viewport | `homepage-workflow-storyboard`, `homepage-workflow-scene-list` | Sticky visual is hidden until the workflow heading has scrolled past. |
-| Homepage | Install dialog | Click the install CTA | Base UI dialog content | Include the terminal command and close affordance. |
-| Homepage | Workflow stage 1 | Scroll storyboard to first scene | `homepage-workflow-terminal`, `homepage-workflow-scene` | User request visible; agent work and popup are hidden. |
-| Homepage | Workflow stage 2 | Scroll to second scene | `homepage-workflow-agent-work` | Agent work becomes visible. |
-| Homepage | Workflow stage 3 | Scroll to third scene | `homepage-workflow-terminal-command`, `homepage-workflow-popup` | Roughdraft command and document popup are visible. |
-| Homepage | Workflow stage 4 | Scroll to fourth scene | `homepage-workflow-review-rail`, `homepage-workflow-comment-highlight` | User feedback appears in the document/review rail. |
-| Homepage | Workflow stage 5 | Scroll to fifth scene | `homepage-workflow-handoff-button` | Done handoff button is visible. |
-| Homepage | Workflow stage 6 | Scroll to final scene | `homepage-workflow-agent-resume` | Agent resume line and incorporated plan are visible; done button is hidden. |
-| Homepage | Update notice | Start app with backend status returning `updateStatus` | update notice component | Best captured with API mocking unless an update is actually available. |
-| RFM guide | Default page | `/roughdraft-flavored-markdown` | `rfm-source-editor` | Capture the source editor plus rendered output. |
-| RFM guide | Plan review example | Click `rfm-format-example-plan-review` | `rfm-format-example-plan-review` | Default example if already selected. |
-| RFM guide | Spec review example | Click `rfm-format-example-spec-review` | `rfm-format-example-spec-review` | Confirms comments/suggestions render in the embedded demo. |
-| RFM guide | Writing edit example | Click `rfm-format-example-writing-edit` | `rfm-format-example-writing-edit` | Useful for prose-focused review states. |
+| Dashboard | Populated, desktop | Open two files through the CLI, then `/` at desktop viewport | `dashboard`, `dashboard-section-documents`, `dashboard-row`, `dashboard-row-open`, `dashboard-row-copy-path` | Header reads `Roughdraft · port N · running since …` above the sections. Rows carry `data-document-path`; select one as `[data-testid="dashboard-row"][data-document-path="…"]`. |
+| Dashboard | Populated, mobile | As above at mobile viewport | `dashboard`, `dashboard-row` | Row chips and the facts line wrap; capture a row with several chips. |
+| Dashboard | Agent waiting | Park a watch: `POST /api/review-events/watch` with `projectPath` and `path`, then load `/` | `dashboard-section-waiting`, `dashboard-row`, `dashboard-waiting-badge` | Section title `Waiting for your review`; the row's border is amber. The chip clears within one 5-second poll of the waiter disconnecting. |
+| Dashboard | Recent reviews | Finish a review with an overall comment, then load `/` | `dashboard-section-reviews`, `dashboard-review-item` | An `overall comment` chip when one was left, and `no agent was waiting for this` when the review reached no waiter. The comment text is never rendered. |
+| Dashboard | Empty | Restart the server, then load `/` without opening anything | `dashboard-empty`, `dashboard-open-path-input` | Names the server start time and the `roughdraft open <file.md>` hint. Only reachable after a successful poll returning zero rows. |
+| Dashboard | File missing on disk | Open a file, delete it, wait one poll | `dashboard-row`, `dashboard-missing-badge` | The row stays; disk facts drop out of the facts line. |
+| Dashboard | Unsaved draft | Abort the save PUT, type in a document, then load `/` in the same browser | `dashboard-row`, `dashboard-draft-badge`, `dashboard-row-discard-draft` | Chip reads `unsaved draft`, or `draft only` on a row the server has no record of. Discard is behind `window.confirm`. |
+| Dashboard | Older server build | Serve the current bundle from a server predating `GET /api/dashboard` | `dashboard-unsupported` | Copy names `roughdraft stop`. Needs a stale server or a mocked non-JSON/non-OK response. |
+| Dashboard | Server unreachable | Stop the server, then load `/` | `dashboard-unreachable`, `dashboard-unreachable-retry` | Shown only when no poll has ever succeeded. |
+| Dashboard | Stale poll | Stop the server after one successful poll | `dashboard-stale-notice` | The last payload stays on screen under the notice. |
+| Dashboard | Path field rejected | Type `notes.md` or `/x.txt` into the open-by-path field and submit | `dashboard-open-path-input`, `dashboard-open-path-submit`, `dashboard-open-path-error` | Validation is inline and pre-navigation; an accepted path is normalised before it becomes a `?path=` URL. |
+| Document | Update notice | Start app with backend status returning `updateStatus` | update notice component | Renders over the document workspace only; the dashboard deliberately omits it. Best captured with API mocking unless an update is actually available. |
 | Preview | Rich text default | `/preview?editor=rich-text` | `page-card-rich-text`, `rich-text-editor` | Uses in-memory preview backend and includes a sample anchored comment. |
 | Preview | Code editor default | `/preview?editor=code` | `page-card-code`, `markdown-code-editor` | Capture line wrapping, code editor chrome, and rail behavior. |
 | Document | Rich/code toggle | Use `document-editor-view-toggle` | `document-editor-view-toggle` | URL changes to `?editor=code` or `?editor=rich-text`. |
@@ -164,8 +162,8 @@ suggestions:
 | Comment editor | Reply editing | Use a reply action | `comment-rail-child-editor` | Useful for nested thread spacing. |
 | Code mode | Review rail present | Open review fixture with `?editor=code` | `page-card-code`, `markdown-code-editor` | Confirms code editor and rail can coexist. |
 | Code mode | Review rail absent | Open fenced fixture with `?editor=code` | `page-card-code`, `markdown-code-editor` | Confirms fenced CriticMarkup alone does not create review rail. |
-| Error/home fallback | Non-Markdown path | Open URL with `?path=/tmp/file.txt` | homepage error message | Copy: `Roughdraft now opens one .md file at a time.` |
-| Error/home fallback | Missing/unloadable path | Open URL with invalid markdown path through local backend | homepage error message | Captures load-error homepage variant. |
+| Dashboard | Load error, non-Markdown path | Open URL with `?path=/tmp/file.txt` | `dashboard-load-error`, `dashboard` | Banner above the sections, carrying `Roughdraft now opens one .md file at a time.` and the requested path. The rows below it are the recovery. |
+| Dashboard | Load error, missing path | Open URL with an unloadable markdown path through the local backend | `dashboard-load-error`, `dashboard-missing-badge` | Banner reads `Could not open that markdown file.`; the tab's own subscribe puts a row for that path below it with the missing chip. |
 ## Playwright Capture Skeleton
 ```ts
 import { chromium, devices } from "playwright";
@@ -176,16 +174,16 @@ const outDir = process.env.ROUGHDRAFT_SCREENSHOT_DIR ?? ".context/ui-state-scree
 const browser = await chromium.launch();
 const desktop = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 await desktop.goto(`${baseUrl}/`);
-await desktop.screenshot({ path: `${outDir}/01-home-desktop.png`, fullPage: true });
+await desktop.screenshot({ path: `${outDir}/01-dashboard-desktop.png`, fullPage: true });
 
 const mobile = await browser.newPage({ ...devices["iPhone 13"] });
 await mobile.goto(`${baseUrl}/`);
-await mobile.screenshot({ path: `${outDir}/01-home-mobile.png`, fullPage: true });
+await mobile.screenshot({ path: `${outDir}/01-dashboard-mobile.png`, fullPage: true });
 
 await browser.close();
 ```
 
-For interaction-heavy states, prefer selectors over coordinates. The current code has stable `data-testid` hooks for the homepage storyboard, editor view toggle, mode trigger, conflict banner/actions, history dialog/list/viewer/diff, review rail, rich editor, code editor, selection menu, link popover, and context menu.
+For interaction-heavy states, prefer selectors over coordinates. The current code has stable `data-testid` hooks for the dashboard sections/rows/notices, editor view toggle, mode trigger, conflict banner/actions, history dialog/list/viewer/diff, review rail, rich editor, code editor, selection menu, link popover, and context menu.
 ## States That Need A Harness Or Mocking
 These are real product states, but they are awkward to capture deterministically through only public routes:
 
@@ -204,6 +202,8 @@ These are real product states, but they are awkward to capture deterministically
 - Remote connected/disconnected banners
   
 - Update notice
+  
+- Dashboard older-server-build and unreachable notices, which need a stale server or a mocked `GET /api/dashboard`
   
 
 The most reliable long-term solution is a dedicated screenshot harness route or Playwright component harness that renders `DocumentWorkspace` with controlled backend, disk, remote, watcher, and save states. Keep the production-route screenshots for broad layout coverage and use the harness for rare operational states.

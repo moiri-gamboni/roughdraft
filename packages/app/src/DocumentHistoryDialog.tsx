@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "./components/ui/dialog";
 import { ScrollArea } from "./components/ui/scroll-area";
+import { formatRelativeAge } from "./lib/relative-time";
 import { cn } from "./lib/utils";
 import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
 import { type DiffLineKind, diffSnapshot } from "./snapshot-diff";
@@ -76,19 +77,6 @@ function triggerLabel(trigger: SnapshotSummary["trigger"]): string {
 export function formatSnapshotBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   return `${(bytes / 1024).toFixed(1)} KB`;
-}
-
-export function formatSnapshotAge(createdAt: string, now: number): string {
-  const elapsedMs = now - new Date(createdAt).getTime();
-  if (!Number.isFinite(elapsedMs)) return "";
-
-  const minutes = Math.floor(elapsedMs / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function formatSnapshotTimestamp(createdAt: string): string {
@@ -394,7 +382,7 @@ export function DocumentHistoryDialog({
                           {triggerLabel(snapshot.trigger)}
                         </span>
                         <span className="text-[0.72rem] font-medium text-stone-700 dark:text-slate-200">
-                          {formatSnapshotAge(snapshot.createdAt, now)}
+                          {formatRelativeAge(snapshot.createdAt, now)}
                         </span>
                       </span>
                       <span className="text-[0.66rem] leading-4 text-stone-500 dark:text-slate-400">

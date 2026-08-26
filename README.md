@@ -72,6 +72,8 @@ If the local server is already running, you can also open a file directly by URL
 http://localhost:7373/?path=/absolute/path/to/my-essay/draft.md
 ```
 
+Without a path, `http://localhost:7373/` lists what this server has been asked to open since it started: any document an agent is currently blocked on waiting for your review, the documents opened recently with their comment and suggestion counts, and the reviews you last finished. It is the place to look when an agent says it is waiting and you do not know which file it means. The list lives in the server's memory only, so restarting the server empties it.
+
 That makes an agent-friendly workflow possible:
 
 1. Your AI writes or updates markdown files on disk.
