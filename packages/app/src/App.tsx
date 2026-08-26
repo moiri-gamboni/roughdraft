@@ -1730,7 +1730,9 @@ export function App() {
 
   useEffect(() => {
     const sourceUrl = new URL("/api/open-requests", window.location.origin);
-    if (requestedPathState.rawPath) {
+    // A load-error tab must not claim the failing path on the server, or its
+    // subscription registers a document row for a file that never opened.
+    if (requestedPathState.rawPath && !loadError) {
       sourceUrl.searchParams.set("path", requestedPathState.rawPath);
     }
 
@@ -1742,10 +1744,18 @@ export function App() {
         };
         if (typeof payload.url !== "string" || !payload.url.trim()) return;
 
-        const nextUrl = new URL(payload.url, window.location.origin);
+        const requested = new URL(payload.url, window.location.origin);
+        // Only same-origin navigations, and never a scripted scheme: the CLI
+        // sends a `localhost` URL that is wrong for a tailnet viewer anyway, so
+        // rebuild the target on this origin from the path it asked for.
+        if (requested.protocol !== "http:" && requested.protocol !== "https:") {
+          return;
+        }
+
+        const target = `${window.location.origin}${requested.pathname}${requested.search}${requested.hash}`;
         window.focus();
-        if (nextUrl.href !== window.location.href) {
-          window.location.assign(nextUrl.href);
+        if (target !== window.location.href) {
+          window.location.assign(target);
         }
       } catch (error) {
         console.error("Failed to handle Roughdraft open request:", error);
@@ -1758,7 +1768,7 @@ export function App() {
       source.removeEventListener("open-request", handleOpenRequest);
       source.close();
     };
-  }, [requestedPathState.rawPath]);
+  }, [requestedPathState.rawPath, loadError]);
 
   useEffect(() => {
     let cancelled = false;
