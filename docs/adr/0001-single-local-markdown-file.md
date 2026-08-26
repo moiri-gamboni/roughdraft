@@ -45,3 +45,7 @@ Two consequences follow from the sidecar being keyed by file name. A document re
 ### Fork-permanent
 
 This feature is not proposed upstream. It exists because this fork's documents are reviewed by agents that overwrite files, and it carries an on-disk format, a hook in another repository, and the confidentiality cost above — none of which upstream has asked for. It is maintained here and rebased along with the fork's other changes.
+
+## Clarification (2026-08-26): The Dashboard Is A View Of Requests, Not An Index
+
+The Consequences above say a global index needs a separate decision, and the dashboard now at `/` is that decision's reference: it is not one. It lists the documents this server was asked about since it started, capped at 50 and held only in memory, so it will name a file that no longer exists on disk and will never name a file nobody asked it to open. The unit of work is still one Markdown file; the dashboard is a record of requests that happen to have been about files, and anything that needed to enumerate documents Roughdraft was never asked about would still need its own decision. The registry's boundaries are set out in [ADR 0004](./0004-cli-server-state-model.md).

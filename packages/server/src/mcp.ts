@@ -37,7 +37,7 @@ const tools: ToolDefinition[] = [
   {
     name: "roughdraft_get_open_documents",
     description:
-      "Return Roughdraft documents known to the MCP server. This first version is stateless and may return an empty list.",
+      "Return Roughdraft documents known to the MCP server. Not yet wired to the server's document registry, so it returns an empty list.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

@@ -1,5 +1,7 @@
 # Homepage Workflow Storyboard Implementation Plan
 
+> **Superseded (2026-08-26):** `/` is now the dashboard; the storyboard and the rest of the marketing homepage were removed. See [ADR 0004](../adr/0004-cli-server-state-model.md), clarification "In-Memory Document Registry".
+
 > **For Claude:** REQUIRED SUB-SKILL: Use trycycle-executing to implement this plan task-by-task.
 
 **Goal:** Expand the homepage workflow explanation into a conversion-focused six-scene storyboard, positioned above the "It's just Markdown" / Roughdraft format demo section.
