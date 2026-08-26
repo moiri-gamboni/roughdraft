@@ -283,9 +283,12 @@ function Row({
   nowMs: number;
   onDiscardDraft: (key: string) => void;
 }) {
-  const draft = row.draft;
-  const counts = row.document ? formatCounts(row.document.summary) : null;
   const draftLabel = draftBadgeLabel(row);
+  // Chip, "draft saved" fact and Discard travel together: a reverted draft
+  // (content back at its base) renders none of them and self-clears on the
+  // document's next open.
+  const draft = draftLabel ? row.draft : null;
+  const counts = row.document ? formatCounts(row.document.summary) : null;
 
   return (
     <article
@@ -511,7 +514,7 @@ function formatRowFacts(row: DashboardRow, nowMs: number): string {
   if (document?.lastReviewedAt) {
     facts.push(`reviewed ${formatRelativeAge(document.lastReviewedAt, nowMs)}`);
   }
-  if (row.draft) {
+  if (row.draft && draftBadgeLabel(row)) {
     facts.push(
       `draft saved ${formatRelativeAge(row.draft.updatedAt, nowMs)}`,
     );
