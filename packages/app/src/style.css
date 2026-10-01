@@ -420,6 +420,28 @@
     @apply bg-transparent p-0 text-inherit;
   }
 
+  .tiptap .mermaid-block {
+    margin: 1.35em 0;
+  }
+
+  .tiptap .mermaid-block > pre {
+    margin: 0.75em 0 0;
+  }
+
+  .tiptap
+    .mermaid-block:not(.mermaid-block-source-visible):not(.mermaid-block-error)
+    > pre {
+    display: none;
+  }
+
+  .tiptap .mermaid-diagram {
+    @apply flex cursor-pointer justify-center overflow-x-auto;
+  }
+
+  .tiptap .mermaid-error {
+    @apply m-0 text-sm text-red-700 dark:text-red-400;
+  }
+
   .tiptap blockquote {
     @apply border-l-4 border-slate-300 dark:border-slate-600 pl-4 text-slate-600 dark:text-slate-400;
     margin: 1.3em 0;

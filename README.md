@@ -28,6 +28,8 @@ Roughdraft opens a single markdown file directly for CriticMarkup comments and s
   
 - **Comments & suggested changes** — Use CriticMarkup for inline feedback, revisions, and review conversations
   
+- **Mermaid diagrams** — ` ```mermaid ` code blocks render as diagrams; click one to edit its source
+  
 - **Markdown files on disk** — Everything stays as regular markdown files you can also edit in VS Code, Vim, Cursor, or anywhere else
   
 - **No cloud, no account, no telemetry** — Runs entirely on your machine

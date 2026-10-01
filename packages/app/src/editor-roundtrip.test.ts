@@ -314,6 +314,82 @@ describe("fuzz-found round-trip bugs", () => {
   });
 });
 
+describe("code block review round-trip fidelity", () => {
+  // The `*` and `_` would come back backslash-escaped if the block were
+  // converted as ordinary Markdown text.
+  const code = "function f() {\n    return a * b_c;\n}";
+
+  it("preserves newlines and indentation when saving an anchored code comment", () => {
+    const markdown =
+      '```js\nfunction f() {\n    {==return==}{>>note<<}{#c1} a * b_c;\n}\n```\n\n---\ncomments:\n  c1:\n    by: user\n    at: "2026-01-01T00:00:00.000Z"\n';
+    const { doc, comments, frontmatter, endmatter } =
+      criticMarkdownToEditorState(markdown);
+    const editor = new Editor({
+      extensions: createEditorExtensions(),
+      content: doc,
+    });
+    try {
+      expect(editor.state.doc.firstChild?.textContent).toBe(code);
+      const anchors: string[] = [];
+      editor.state.doc.descendants((node) => {
+        if (node.marks.some((mark) => mark.type.name === "commentRef")) {
+          anchors.push(node.text ?? "");
+        }
+      });
+      expect(anchors).toEqual(["return"]);
+      const saved = editorStateToCriticMarkdown(editor.getJSON(), comments, {
+        frontmatter,
+        endmatter,
+      });
+      expect(saved.split("\n```", 1)[0]).toBe(markdown.split("\n```", 1)[0]);
+      expect(
+        criticMarkdownToEditorState(saved).doc.content?.[0].content,
+      ).toEqual(doc.content?.[0].content);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("preserves newlines and indentation when saving a pending code suggestion", () => {
+    const { doc, comments, frontmatter, endmatter } =
+      criticMarkdownToEditorState(`\`\`\`js\n${code}\n\`\`\`\n`);
+    const editor = new Editor({
+      extensions: createEditorExtensions(),
+      content: doc,
+    });
+    try {
+      const from = 1 + code.indexOf("return");
+      editor.commands.setTextSelection({ from, to: from + "return".length });
+      editor.commands.setCriticChange(
+        createCriticChange("deletion", {
+          changeId: "s1",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }),
+      );
+      const markedTexts = (content: typeof editor.state.doc) => {
+        const texts: string[] = [];
+        content.descendants((node) => {
+          if (node.marks.some((mark) => mark.type.name === "criticChange")) {
+            texts.push(node.text ?? "");
+          }
+        });
+        return texts;
+      };
+      expect(markedTexts(editor.state.doc)).toEqual(["return"]);
+      expect(editor.state.doc.firstChild?.textContent).toBe(code);
+      const saved = editorStateToCriticMarkdown(editor.getJSON(), comments, {
+        frontmatter,
+        endmatter,
+      });
+      expect(saved.split("\n```", 1)[0]).toBe(
+        '```js\nfunction f() {\n    {--return--}{id="s1" by="user" at="2026-01-01T00:00:00.000Z"} a * b_c;\n}',
+      );
+    } finally {
+      editor.destroy();
+    }
+  });
+});
+
 describe("through a live editor", () => {
   /**
    * generateJSON does not add the trailing empty paragraph that the editor

@@ -19,6 +19,10 @@ import { NodeSelection, Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
 import { rawMarkdownBlockAttribute } from "./markdown";
+import {
+  createCodeBlockNodeView,
+  mermaidSourceVisibility,
+} from "./mermaid-block";
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
@@ -878,6 +882,14 @@ const MarkdownCode = Code.extend({
 
 const MarkdownCodeBlock = CodeBlock.extend({
   marks: "commentRef criticChange",
+
+  addNodeView() {
+    return createCodeBlockNodeView;
+  },
+
+  addProseMirrorPlugins() {
+    return [...(this.parent?.() ?? []), mermaidSourceVisibility];
+  },
 });
 
 /**
