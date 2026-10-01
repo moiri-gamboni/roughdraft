@@ -1101,7 +1101,11 @@ function addCriticCodeBlockRule(service: TurndownService) {
         )
       );
     },
-    replacement(_content, node) {
+    // `content` is already the block's body with the review rules applied:
+    // Turndown keeps whitespace inside <pre> and leaves text under <code>
+    // unescaped. Converting the <code> markup again on its own lost both,
+    // flattening the block onto one line.
+    replacement(content, node) {
       const codeElement = (node as HTMLElement)
         .firstElementChild as HTMLElement | null;
 
@@ -1111,9 +1115,8 @@ function addCriticCodeBlockRule(service: TurndownService) {
         [...codeElement.classList]
           .find((className) => className.startsWith("language-"))
           ?.slice("language-".length) ?? "";
-      const content = service.turndown(codeElement.innerHTML).trimEnd();
 
-      return `\n\n\`\`\`${language}\n${content}\n\`\`\`\n\n`;
+      return `\n\n\`\`\`${language}\n${content.trimEnd()}\n\`\`\`\n\n`;
     },
   });
 }

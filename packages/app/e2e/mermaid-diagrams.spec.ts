@@ -95,7 +95,7 @@ test.describe("mermaid diagrams", () => {
     ).not.toContain("Syntax error in text");
   });
 
-  test("keeps the source visible when a comment is anchored in it", async ({
+  test("keeps a commented source visible and its lines intact on save", async ({
     page,
   }) => {
     const original = [
@@ -122,6 +122,14 @@ test.describe("mermaid diagrams", () => {
     await expect(
       page.getByTestId("mermaid-source").getByTestId("comment-decoration"),
     ).toHaveText("A --> B");
+
+    // Any edit re-serializes the whole document, commented fence included.
+    await richTextEditor(page).getByText("Before the chart.").click();
+    await page.keyboard.press("End");
+    await page.keyboard.type("!");
+    await expect
+      .poll(() => readProjectFile(projectDir, "commented.md"))
+      .toBe(original.replace("Before the chart.", "Before the chart.!"));
   });
 
   test("reaches the hidden source with the arrow keys", async ({ page }) => {
